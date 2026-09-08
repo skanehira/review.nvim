@@ -52,13 +52,14 @@ plugin/review.lua            # :Review コマンド登録 (薄い)
 リポジトリは scaffold 前。以下のコマンドはセットアップ issue の完了後に実測で確定させる (実装者はこの節のコマンドが打てない場合、まず Makefile と scripts/ を読んで確定する)。
 
 ```bash
-make test          # 単体テスト (headless nvim + plenary、lua/**/*_spec.lua)
+make test          # 単体テスト (headless nvim + plenary、lua/review/**/*_spec.lua)
 make test-file FILE=lua/review/core/diff_spec.lua
-make e2e           # headless nvim シナリオ E2E (実 git repo fixture に対する通し検証)
-make lint          # luacheck (対象: lua/ plugin/)
-make format        # stylua
+make lint          # luacheck (対象: lua/ plugin/、.luacheckrc 準拠)
+make format        # stylua (.stylua.toml)
 make format-check
-make check         # format-check + lint + test + e2e
+make plugin-check  # headless 起動で :Review 定義・:help review 到達・stderr 空を確認
+make check         # format-check + lint + test + plugin-check
+make e2e           # headless nvim シナリオ E2E — 最初のシナリオとともに diff-review/persistence UI の issue で作成するまで非実装
 ```
 
 - **外部依存**: テスト実行に plenary のみ。`PLENARY_PATH` 環境変数でパスを渡す。テスト依存のセットアップ手順 (dev-impl の worktree からもそのまま使える手順): `git clone --depth 1 https://github.com/nvim-lua/plenary.nvim ~/.local/share/nvim/review-nvim-deps/plenary` → `PLENARY_PATH=... make check`。gitignored な機密ファイルは無い (`.worktreeinclude` 不要)
@@ -136,11 +137,11 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 
 ## 横断規約
 
-- **結果型**: 手続きは例外を投げず結果型 `{ok, data, error, code}` を返す (git 実行失敗、ref 解決不能、gh 不在など)。`pcall` は `vim.json.decode` とアダプタ境界のみ
+- **結果型**: 手続きは例外を投げず結果型 `{ok, data, error, code}` を返す (git 実行失敗、ref 解決不能、gh 不在など)。結果テーブルには型標識 `__class = "review.Result"` を付与する (spec の全体比較で異物混入を検出するため。消費側は 4 キー以外は読まないこと)。`pcall` は `vim.json.decode` とアダプタ境界、および `plugin/review.lua` のコマンド登録 API バージョン探测 (nvim 0.10 と 0.13 で completion 引数の仕様が異なる。根拠は「既知の制約」の対応行) のみ
 - **非同期**: 単発実行は `vim.system`。コールバックはアダプタ境界で `vim.in_fast_event()` を判定して `vim.schedule` でイベントループへ回す。**UI 操作はスローイベント限定**
 - **永続化**: 書き込みは即時・アトミック (同一ディレクトリの tmp に書いて `os.rename`)。読み込み失敗 (JSON 破損) は `.corrupt` に退避してから空セッション扱いとし、通知する (レビュー不能にしない)
 - **エラー表示**: `vim.notify` (エラー = WARN、情報 = INFO)。レビュー操作の途中失敗は元の状態を保持したまま理由 1 行を出す
-- **命名**: namespace は `review` (`lua/review/`、`plugin/review.lua`)。highlight グループは `ReviewCommentLine` (コメント range の下線)、`ReviewDiffAdd` / `ReviewDiffDelete` / `ReviewDiffHunk` (diff 種別の色づけ)、`ReviewSidebarFile` / `ReviewSidebarStatus` (`review-list` バッファ = sidebar とセッション一覧で共通。横断規約「UI」参照)。テストはソースと同ディレクトリに `*_spec.lua`
+- **命名**: namespace は `review` (`lua/review/`、`plugin/review.lua`)。highlight グループは `ReviewCommentLine` (コメント range の下線)、`ReviewDiffAdd` / `ReviewDiffDelete` / `ReviewDiffHunk` (diff 種別の色づけ)、`ReviewSidebarFile` / `ReviewSidebarStatus` (`review-list` バッファ = sidebar とセッション一覧で共通。横断規約「UI」参照)。テストはソースと同ディレクトリに `*_spec.lua` (例外: `plugin/` 配下のファイルの spec は `lua/review/` 直下に置く。plugin 直下に置くと rtp 起動時に spec が自動 source されるため)
 - **UI**: float は `border="rounded"`。入力に telescope 等は使わず `vim.ui.input` / 標準バッファに載せる。scratch 系バッファは filetype を意図的に集約する: 変更ファイル一覧 (sidebar) と `:Review list` のセッション一覧は共通の `review-list`、diff は `diff`。**buffer-local キーマップと extmark namespace はバッファ作成元 (buffer に持たせる `review_meta` テーブル) で判定して付ける** (FileType autocmd での分岐は使わない — filetype 集約と両立させるため)
 
 ## ドメインモデル
@@ -165,6 +166,8 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - `git diff` 出力行から new 側ファイル行番号への変換は hunk ヘッダ `@@ -a,b +c,d @@` の `c` 起点の累計で決まる。**変換ロジックはパーサ (core/) の 1 箇所のみに置く** (パーサ外で行番号を独自計算して保存すると漂移バグの温床になる)
 - `diff` filetype の構文強調と extmark は同じテキスト範囲で競合する可能性がある。コメントの下線等は独立 namespace と自前 highlight グループで表現する
 - worktree・fetch のパス・権限挙動の実機検証は macOS / Linux に限られる (Windows は v1 の検証範囲外。パス連結は `vim.fs.joinpath` で吸収する)
+- `nvim_create_user_command` の customlist 補完 API がバージョンで変わった: 0.10 系は `complete="customlist"` + `completion=fn`、0.13 系は `complete=fn` (`completion` は invalid key で呼び出し自体が失敗)。plugin/review.lua は pcall フォールバックで両対応している
+- `vim.system` の spawn 失敗の取り扱いがバージョン差あり: bin 不存在はスケジュール内 error 扱いで on_exit が呼ばれず、cwd 不正は同期 error を throw する (0.13 nightly 実測)。git/cli.lua は実行前に `vim.fn.executable(bin)` で事前判定し、`system` 呼び出しを pcall で吸収して結果型に変換する (横断規約「手続きは例外を投げない」をアダプタ境界で守る)
 
 ## 未解決の論点
 
