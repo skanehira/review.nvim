@@ -1,0 +1,56 @@
+*review.txt*	GitHub Files changed 風のブランチ / PR 差分レビュー
+
+Author: skanehira
+License: MIT
+
+==============================================================================
+INTRODUCTION					*review* *review-nvim*
+
+review.nvim は GitHub の Files changed のようにブランチ間 (git ref 間) 差分を
+Neovim 内でレビューし、コメントを蓄積して AI エージェント向けプロンプトとして
+出力するプラグイン。永続化したコメントは Neovim 再起動後 `:Review` 1 操作で
+復元できる。
+
+==============================================================================
+USAGE						*review-usage*
+
+すべての操作は単一コマンドとそのサブコマンドで行う:
+
+	:Review					開いているセッションを復元
+	:Review start {base} [{head}]		ブランチレビュー開始
+	:Review pr {number|url}			PR レビュー開始 (gh 連携)
+	:Review list				保存済みセッション一覧
+	:Review close				現セッションを保存して閉じる
+	:Review delete {id}			保存済みセッションを削除
+	:Review prompt [file]			プロンプトをクリップボードへ
+
+Lua API (~require("review")~): setup / start / start_pr / resume / close /
+delete / prompt_all / prompt_for_file。
+
+==============================================================================
+SETUP						*review-setup*
+
+>
+	require("review").setup({
+		git_bin = "git",           -- git 実行ファイル
+		gh_bin = "gh",             -- gh 実行ファイル (PR 用)
+		diff_context = nil,        -- diff context 行数 (nil = git 既定 3)
+		auto_notify_resume = true, -- 起動時に open セッションを通知
+		keymaps = {},              -- buffer-local キーマップ override
+		highlight = {},            -- グループ別 highlight override
+	})
+<
+
+キーマップは diff バッファ (c: コメント作成 / e: 編集 / d: 削除 / y: yank /
+o: 実ファイル / q: close / <F1>: help)、変更ファイル一覧 (o, x, q, <CR>)、
+セッション一覧 (<CR>, q) を buffer-local で提供する。設定キーと既定値は
+>docs/design/DESIGN.md 「API 一覧」> を参照。
+
+==============================================================================
+CONTENTS					*review-contents*
+
+  INTRODUCTION		|review|
+  USAGE			|review-usage|
+  SETUP			|review-setup|
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
