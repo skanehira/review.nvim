@@ -164,6 +164,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - extmark の `virt_text` は `wrap` 表示と干渉する。diff バッファは `wrap=off` を強制する
 - 巨大な差分 (1 ファイル 2000 行超) は描画と extmark が重い。標準の `foldexpr` で hunk / ファイルを畳めるようにするが自動折たたみはしない (v1 スコープ外。「やらないこと」参照)
 - `git diff` 出力行から new 側ファイル行番号への変換は hunk ヘッダ `@@ -a,b +c,d @@` の `c` 起点の累計で決まる。**変換ロジックはパーサ (core/) の 1 箇所のみに置く** (パーサ外で行番号を独自計算して保存すると漂移バグの温床になる)
+- `git diff` のファイルパス抽出は `--- ` / `+++ ` 行だけに依存できない: 空ファイルの新規・削除やモード変更のみではこれら 2 行自体が出力されず (git 2.55 実測)、空ファイル新規では hunk ヘッダ `@@` も無い。抽出順は `rename to` → `+++` 新パス → `---` 旧パス → `diff --git` 行の新側 でパーサ内のみに行う。hunk の行数が 1 のときヘッダは `,1` を省略 (`@@ -1 +1,5 @@` / `@@ -1,2 +1 @@`)、0 のときは明示 (`-0,0` / `+1,0`)。行数 1 省略を 0 と誤読すと hunk 境界と行番号がずれる
 - `diff` filetype の構文強調と extmark は同じテキスト範囲で競合する可能性がある。コメントの下線等は独立 namespace と自前 highlight グループで表現する
 - worktree・fetch のパス・権限挙動の実機検証は macOS / Linux に限られる (Windows は v1 の検証範囲外。パス連結は `vim.fs.joinpath` で吸収する)
 - `nvim_create_user_command` の customlist 補完 API がバージョンで変わった: 0.10 系は `complete="customlist"` + `completion=fn`、0.13 系は `complete=fn` (`completion` は invalid key で呼び出し自体が失敗)。plugin/review.lua は pcall フォールバックで両対応している
