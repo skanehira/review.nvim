@@ -15,7 +15,7 @@
 2. tmp へ全量 JSON を write → `os.rename` で差し替え (同一 fs 内でアトミック)
 3. `updated_at` を更新。書き込み失敗 (権限・ディスク) は `E_STORE` 通知。UI 操作自体はロールバックせずメモリ上の状態を維持する (次 write で再挑戦)
 
-**読込 `store.load(repo, id)` / `store.list(repo)`**: `version` 不一致または JSON パース失敗は元内容を `.corrupt` サフィックスで退避してから「存在しない」扱いにし WARN。退避後は同名ファイルが消えているので、以降の save は新規ファイル作成として働く (退避データを上書きで汚染しない。`.corrupt` の削除は手動)
+**読込 `store.load(repo, id)` / `store.list(repo)`**: `version` 不一致または JSON パース失敗は元内容を `.corrupt` サフィックスで退避してから「存在しない」扱いにし WARN。退避後は同名ファイルが消えているので、以降の save は新規ファイル作成として働く (退避データを上書きで汚染しない。`.corrupt` の削除は手動)。実在するが読み取れないファイル (権限付与ミス等) は退避せず WARN のみ出して「存在しない」扱いとする: 退避元の読み取りが不能なのだから退避先の `.corrupt` も同じ理由で読めず隔離の意味がないためで、DESIGN.md「横断規約」永続化の「読み込み失敗は…通知する」は WARN で満たす (ファイルは原地に残るため、権限復帰後の次回 save/rename がそのまま上書きする)
 
 **起動時 (`VimEnter`、`auto_notify_resume=true` のとき)**:
 
@@ -55,6 +55,6 @@
 
 ## テスト方針
 
-- 単体 (store): tmpdir を注入して save→load 往復、アトミック差替え (rename 失敗の再現)、破損→corrupt 退避、version 不一致、slug/hash 決定性
+- 単体 (store): tmpdir を注入して save→load 往復、アトミック差替え (rename 失敗の再現)、破損→corrupt 退避、version 不一致、読取不能→退避せず WARN (chmod での権限喪失注入)、slug/hash 決定性
 - 単体 (restore の anchor 検証): 合成 diff に対して (a)(b)(c) の 3 経路と、±20 境界 (21 行ずれたら outdated)
 - E2E (golden path、MUST 2 の実証): fixture repo でコメント作成 → **headless nvim プロセスを kill せずに普通に終了** → 新プロセスで `VimEnter` の notify → `:Review` 復元 → 本文と位置が同一であることを assert (e2e.sh の 1 本目シナリオに組み込む)
