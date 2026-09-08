@@ -1,7 +1,7 @@
--- review.nvim facade: setup と :Review コマンド入口。
--- サブコマンドの実装 (start / pr / list / close / delete / prompt / resume) は
--- 以降の issue で cmd_<name> として本モジュールに追加される
--- (docs/design/features/ 参照)。本基盤段階では未登録 = unknown として WARN になる。
+-- review.nvim facade: setup と :Review コマンド入口 (+ Lua API)。
+-- pr / prompt は #6 / ai-prompt issue で cmd_<name> として追加される
+-- (未登録 = unknown として WARN)。ハンドラは発火時の require とし、
+-- 起動コストと循環を避ける。
 local config = require 'review.config'
 local result = require 'review.core.result'
 
@@ -13,10 +13,83 @@ M.subcommands = { 'start', 'pr', 'list', 'close', 'delete', 'prompt' }
 local USAGE = 'usage: :Review [start <base> [head] | pr <number|url> | list | '
   .. 'close | delete <id> | prompt [file]]'
 
+local function usage(msg)
+  vim.notify('review.nvim: ' .. msg, vim.log.levels.WARN)
+  return result.err('review.nvim: ' .. msg, nil)
+end
+
 -- 不正値 (git_bin が実行不能等) は setup では弾かず初回実行時に結果型で返す
 -- (foundation.md「setup は通す」)。
 function M.setup(opts)
   config.setup(opts)
+  -- 起動時の継続通知 (persistence-restore.md「起動時」)。auto_notify_resume=true
+  -- のときだけ VimEnter フックを张る。再 setup で_augroup を立て直すので重複しない。
+  local group = vim.api.nvim_create_augroup('review_nvim', { clear = true })
+  if config.get().auto_notify_resume then
+    vim.api.nvim_create_autocmd('VimEnter', {
+      group = group,
+      desc = 'review.nvim: open セッションの継続通知 (窓は開かない)',
+      callback = function()
+        require('review.handlers.restore').notify_open_sessions()
+      end,
+    })
+  end
+end
+
+function M.cmd_start(args)
+  if args[2] == nil or args[2] == '' then
+    return usage ':Review start <base> [head] の形式で指定してください'
+  end
+  return require('review.handlers.session').start { base = args[2], head = args[3] }
+end
+
+function M.cmd_resume(_args)
+  require('review.handlers.restore').resume_or_select()
+  return result.ok()
+end
+
+function M.cmd_list(_args)
+  require('review.handlers.sessions_list').open()
+  return result.ok()
+end
+
+function M.cmd_close(_args)
+  local res = require('review.handlers.session').close()
+  if not res.ok then
+    vim.notify(res.error, vim.log.levels.WARN)
+  end
+  return res
+end
+
+function M.cmd_delete(args)
+  if args[2] == nil or args[2] == '' then
+    return usage ':Review delete <id> の形式で指定してください'
+  end
+  return require('review.handlers.session').delete(args[2])
+end
+
+-- Lua API (DESIGN.md「API 一覧」) — 結果型 passthrough。start_pr / prompt_* は #6。
+function M.start(opts)
+  return require('review.handlers.session').start(opts)
+end
+
+--- resume({id}) は該当セッションを即復元 (DESIGN.md「API 一覧」)。id 無しは
+--- :Review 無印と同じ復元 / 選択 UI。:Review コマンド側に id 経路は無い (API 一覧
+--- のコマンド表どおり無印 = 選択 UI のみ)。
+function M.resume(opts)
+  if type(opts) == 'table' and type(opts.id) == 'string' and opts.id ~= '' then
+    return require('review.handlers.restore').resume_by_id(opts.id)
+  end
+  require('review.handlers.restore').resume_or_select()
+  return result.ok()
+end
+
+function M.close()
+  return require('review.handlers.session').close()
+end
+
+function M.delete(opts)
+  return require('review.handlers.session').delete(type(opts) == 'table' and opts.id or opts)
 end
 
 --- :Review の引数列を受け取り、cmd_<サブコマンド> へ委譲する。

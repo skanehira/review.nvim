@@ -47,6 +47,18 @@ function M.tags(opts, cb)
   end)
 end
 
+--- cwd からの repo top-level 絶対パスを解決する (起動時 scan / セッション repo)。
+--- cb(result) result.data = repo top。repo 外は E_REF。
+function M.top_level(opts, cb)
+  run({ 'rev-parse', '--show-toplevel' }, opts, function(res)
+    if not res.ok then
+      cb(res)
+      return
+    end
+    cb(result.ok((res.data.stdout:gsub('[\r\n]+$', ''))))
+  end)
+end
+
 --- cb(result) result.data = ref のコミット sha (末尾改行除去済み)。解決不能は E_REF。
 function M.rev_parse(opts, cb)
   run({ 'rev-parse', '--verify', opts.ref }, opts, function(res)

@@ -178,6 +178,52 @@ describe('git/ref rev_parse', function()
   end)
 end)
 
+describe('git/ref top_level (repo top 解決)', function()
+  restore_after_each()
+
+  it(
+    'rev-parse --show-toplevel を実行し、stdout を末尾改行除去で data に返す',
+    function()
+      local captured = {}
+      cli._set_system(stub_system(captured))
+      stub_ok_executable()
+
+      local received
+      ref.top_level({ cwd = '/tmp/sub' }, function(res)
+        received = res
+      end)
+      assert.same({ 'git', 'rev-parse', '--show-toplevel' }, captured.cmd)
+      captured.on_exit { code = 0, stdout = '/tmp/repo\n', stderr = '' }
+
+      assert.same({ __class = 'review.Result', ok = true, data = '/tmp/repo' }, received)
+    end
+  )
+
+  it('repo 外 (exit 128) は code=E_REF の err 結果を返す', function()
+    local captured = {}
+    cli._set_system(stub_system(captured))
+    stub_ok_executable()
+
+    local received
+    ref.top_level({}, function(res)
+      received = res
+    end)
+    captured.on_exit {
+      code = 128,
+      stdout = '',
+      stderr = 'fatal: not a git repository\n',
+    }
+
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      data = { stdout = '', code = 128 },
+      error = 'fatal: not a git repository',
+      code = 'E_REF',
+    }, received)
+  end)
+end)
+
 describe('git/ref 実 git', function()
   restore_after_each()
 
@@ -232,6 +278,26 @@ describe('git/ref 実 git', function()
       data = { 'feature', 'main' },
     }, received)
   end)
+
+  it(
+    'top_level は実 repo の sub ディレクトリ cwd から top-level 絶対パスを返す',
+    function()
+      local dir = build_repo()
+      local sub = vim.fs.joinpath(dir, 'sub')
+      vim.fn.mkdir(sub, 'p')
+
+      local received = await_result(function(cb)
+        ref.top_level({ cwd = sub }, cb)
+      end)
+
+      -- macOS の /var -> /private/var 系 symlink を実パスに寄せて比較する。
+      local expected = vim
+        .system({ 'git', 'rev-parse', '--show-toplevel' }, { cwd = dir, text = true })
+        :wait(10000).stdout
+        :gsub('%s+$', '')
+      assert.same({ __class = 'review.Result', ok = true, data = expected }, received)
+    end
+  )
 
   it('tags と rev_parse が実 git で名前一緒・sha 解決できる', function()
     local dir, git = build_repo()

@@ -172,4 +172,25 @@ function M.list(repo)
   return result.ok(out)
 end
 
+-- 保存済みセッション ファイルの削除 (:Review delete)。存在しない id は
+-- 目標状態 (不存在) そのものなので ok (persistence-restore.md「実装の配置」
+-- delete(repo, id))。.corrupt は隔離済み別ファイルなので触らない。
+function M.delete(repo, id)
+  local file = paths.session_file(repo, id)
+  local removed, err = os.remove(file)
+  if removed == nil then
+    -- ENOENT は成功として扱う (errno 文字列の判定は環境非依存な接頭辞で行う)
+    if not tostring(err):match 'No such file' then
+      return result.err(
+        ('セッションファイルの削除に失敗しました: %s (%s)'):format(
+          file,
+          tostring(err)
+        ),
+        result.codes.E_STORE
+      )
+    end
+  end
+  return result.ok()
+end
+
 return M
