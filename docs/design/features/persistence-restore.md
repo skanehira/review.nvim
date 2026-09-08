@@ -36,12 +36,12 @@
 
 | 処理 | 層 | 実装先ファイル |
 | --- | --- | --- |
-| セッション JSON の読書・アトミック書込・退避 | store | `lua/review/store/session.lua` (+ `_spec`) |
+| セッション JSON の読書・アトミック書込・退避・削除 (`delete(repo, id)`) | store | `lua/review/store/session.lua` (+ `_spec`) |
 | slug / repo-hash 生成 | store | `lua/review/store/paths.lua` (+ `_spec`) |
 | open セッション scan (notify と worktree掃除兼用) | store | `lua/review/store/scan.lua` (+ `_spec`) |
+| anchor 検証の純粋ロジック (行補正 / outdated 判定。handlers 間の循環 require を避けるため core に置く。検証は restore_spec) | core | `lua/review/core/anchor.lua` |
 | 復元フロー (diff 再取得と anchor 検証の調停) | handlers | `lua/review/handlers/restore.lua` |
 | `:Review list` / `:Review delete` のフロー (delete は close 掃除の再利用) | handlers | `lua/review/handlers/sessions_list.lua`, `lua/review/handlers/session.lua` (delete 拡張) |
-| セッションファイル削除 | store | `lua/review/store/session.lua` (`delete(repo, id)`) |
 | VimEnter フック登録 | facade | `lua/review/init.lua` (setup 内) |
 
 ## エッジケースの決定

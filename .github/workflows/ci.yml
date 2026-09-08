@@ -27,6 +27,18 @@ jobs:
       - name: Headless plugin load check (:Review defined, :help review, stderr empty)
         run: make plugin-check
 
+  e2e:
+    name: e2e (golden path)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+      - name: E2E (headless nvim golden path)
+        run: make e2e
+
   lint:
     name: luacheck (warnings 0)
     runs-on: ubuntu-latest

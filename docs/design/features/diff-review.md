@@ -46,7 +46,7 @@
 
 セッション開始時、右ペインには一覧の先頭ファイルの diff を開く。
 
-**開始と既存セッションの継承**: 保存済みセッション (open / closed を問わない) と同一 refs 組の `:Review start` / `:Review pr` は**継承**とする — 確認後に既存セッションを load (comments と viewed を引き継ぎ、anchor 検証を通す) して UI を開く。既存を消す上書き開始はできず、まっさらにしたい場合は先に `:Review delete` (persistence-restore「1 組 1 セッション」)。別の refs 組のセッションが active な状態で開始する場合は、確認後に現セッションを save → close してから新規開始する (INV-1)。
+**開始と既存セッションの継承**: 保存済みセッション (open / closed を問わない) と同一 refs 組の `:Review start` / `:Review pr` は**継承**とする — 確認後に既存セッションを load (comments と viewed を引き継ぎ、anchor 検証を通す) して UI を開く。既存を消す上書き開始はできず、まっさらにしたい場合は先に `:Review delete` (persistence-restore「1 組 1 セッション」)。別の refs 組のセッションが active な状態で開始する場合は、確認後に現セッションを save → close してから新規開始する (INV-1)。別 refs 組が active でも開始対象の同一 refs 組に保存済みセッションがある場合は継承が勝つ — close と継承は 1 回の確認に統合し (閉じて継承するかどうか)、やっぱり上書き開始の択は無い。
 
 ## 実装の配置
 
@@ -60,6 +60,7 @@
 | diff バッファ描画・extmark・fold | ui | `lua/review/ui/diffbuffer.lua` |
 | sidebar 一覧 | ui | `lua/review/ui/list.lua` |
 | マルチライン float 入力 | ui | `lua/review/ui/input.lua` |
+| `o` の実ファイル参照 (worktree なし = `git show` read-only。worktree 分岐は #6。sidebar / diff とも `handlers/session.open_file_current` 経由) | ui | `lua/review/ui/fileview.lua` (+ `_spec`) |
 | help float | ui | `lua/review/ui/help.lua` |
 | highlight 定義 | ui | `lua/review/ui/highlight.lua` |
 

@@ -411,3 +411,44 @@ describe('list', function()
     end
   )
 end)
+
+describe('delete', function()
+  local state = isolate_store()
+
+  it(
+    '存在するセッションファイルを削除する (:Review delete の JSON 削除経路)',
+    function()
+      session.save(sample())
+      local file = session_file_of(state.dir, 'main--feature')
+      assert.equals(1, vim.fn.filereadable(file))
+
+      assert.same({ __class = 'review.Result', ok = true }, session.delete(REPO, 'main--feature'))
+      assert.equals(0, vim.fn.filereadable(file))
+    end
+  )
+
+  it(
+    '存在しない id の delete は ok (削除後の不在は目標状態そのもの)',
+    function()
+      assert.same({ __class = 'review.Result', ok = true }, session.delete(REPO, 'nope'))
+    end
+  )
+
+  it(
+    '削除は対象のみに作用する (.corrupt は残る / 他 repo ファイルは無傷)',
+    function()
+      session.save(sample())
+      local corrupt = session_file_of(state.dir, 'main--feature') .. '.corrupt'
+      vim.fn.writefile({ 'junk' }, corrupt)
+      session.save(sample { repo = '/other' })
+
+      session.delete(REPO, 'main--feature')
+
+      assert.equals(0, vim.fn.filereadable(session_file_of(state.dir, 'main--feature')))
+      assert.equals(1, vim.fn.filereadable(corrupt))
+      local other =
+        join(state.dir, 'review.nvim', 'sessions', paths.repo_hash '/other', 'main--feature.json')
+      assert.equals(1, vim.fn.filereadable(other))
+    end
+  )
+end)

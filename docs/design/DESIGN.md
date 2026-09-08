@@ -59,7 +59,7 @@ make format        # stylua (.stylua.toml)
 make format-check
 make plugin-check  # headless 起動で :Review 定義・:help review 到達・stderr 空を確認
 make check         # format-check + lint + test + plugin-check
-make e2e           # headless nvim シナリオ E2E — 最初のシナリオとともに diff-review/persistence UI の issue で作成するまで非実装
+make e2e           # headless nvim シナリオ E2E (scripts/e2e.sh の golden path: start / コメント作成 / 切替 / 復元)
 ```
 
 - **外部依存**: テスト実行に plenary のみ。`PLENARY_PATH` 環境変数でパスを渡す。テスト依存のセットアップ手順 (dev-impl の worktree からもそのまま使える手順): `git clone --depth 1 https://github.com/nvim-lua/plenary.nvim ~/.local/share/nvim/review-nvim-deps/plenary` → `PLENARY_PATH=... make check`。gitignored な機密ファイルは無い (`.worktreeinclude` 不要)
@@ -168,9 +168,14 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - `diff` filetype の構文強調と extmark は同じテキスト範囲で競合する可能性がある。コメントの下線等は独立 namespace と自前 highlight グループで表現する
 - worktree・fetch のパス・権限挙動の実機検証は macOS / Linux に限られる (Windows は v1 の検証範囲外。パス連結は `vim.fs.joinpath` で吸収する)
 - `nvim_create_user_command` の customlist 補完 API がバージョンで変わった: 0.10 系は `complete="customlist"` + `completion=fn`、0.13 系は `complete=fn` (`completion` は invalid key で呼び出し自体が失敗)。plugin/review.lua は pcall フォールバックで両対応している
+- 既定の `vim.ui.input` は opts を `vim.fn.input` へそのまま渡す。したがって opts に Lua 関数を混ぜる形状 (`completion='customlist'` + `complete=fn`、または `completion='customlist'` 単体) は `input()` 側で E467 となり、既定実装は pcall でこれを吸収して `on_confirm(nil)` に変換するため**黙って何も起きないように見える** (0.13 nightly 実測)。opts へ渡せる補完は `input()` が受理する文字形式 `completion='customlist,{Vim script 関数名}'` のみ。head 選択ではグローバル関数 (`:function!`) を遅延定義し `luaeval` 経由で Lua 候補関数へ橋渡しする (`handlers/session.lua`。E2E phase3 が mock なしの実経路を pin)
 - `vim.system` の spawn 失敗の取り扱いがバージョン差あり: bin 不存在はスケジュール内 error 扱いで on_exit が呼ばれず、cwd 不正は同期 error を throw する (0.13 nightly 実測)。git/cli.lua は実行前に `vim.fn.executable(bin)` で事前判定し、`system` 呼び出しを pcall で吸収して結果型に変換する (横断規約「手続きは例外を投げない」をアダプタ境界で守る)
 - Neovim 標準 API に sha1 は無い (`vim.fn` にあるのは `sha256` のみ)。repo-hash の契約は sha1 先頭 16 桁であり、sha256 等に算法を差し換えると repo-hash ディレクトリ名が変わり既存セッションファイルが到達不能になる (見た目は動く)。sha1 は Neovim 組み込みの LuaJIT `bit` モジュールで `store/paths.lua` が実装している
 - LuaJIT の `string.format('%x')` は負の int32 を 64bit 符号拡張の 16 桁で出力する (8 桁想定で書くと動くように見えてハッシュ値が壊れる)。32bit 演算結果を 16 進出力する直前は 0..2^32-1 の非負値へ正規化する (`store/paths.lua` の `u32`)
+- headless テスト / E2E でのキー入力は `:normal` が唯一の安定経路: `nvim_input` / `feedkeys` の typeahead は `vim.wait` 中で消費されず (発火 observed 0 件)、`startinsert` も insert mode を維持しない (nvim 0.13 nightly 実測)。`:normal` 文字列内で error が出ると hit-enter prompt でハングするため、driver は pcall + `cquit` で正規化する
+- `:normal` の視覚選択は分割投入が単位: `Vj` 移動と `c` 発火を 1 文字列にまとめると v-mapping が発火せず変更演算子が走る (選択行が消される)。正しくは `:normal Vj` → `:normal c` と分割する (実ユーザの逐次入力では発火することを実測で確認済み)。バインド済 `<CR>` も raw CR 文字で発火する
+- 起動 `-c` コマンドの途中で `vim.wait` すると以降の起動シーケンスが進まず `VimEnter` が発火しない。起動後イベントに依存するスクリプト (E2E phase2 等) は `defer_fn` でイベントループ開始後へ逃がす
+- Neovim に `BufWipedout` autocmd は無い (wipe でも `BufUnload` が走る)。バッファ付随の module state 掃除は `BufUnload` で受ける。`nvim_buf_set_extmark` の `end_col` に `-1` は不正 (`nvim_buf_add_highlight` 専用の記法。API は行末バイト数を明示する)
 
 ## 未解決の論点
 
