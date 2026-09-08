@@ -168,6 +168,8 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - worktree・fetch のパス・権限挙動の実機検証は macOS / Linux に限られる (Windows は v1 の検証範囲外。パス連結は `vim.fs.joinpath` で吸収する)
 - `nvim_create_user_command` の customlist 補完 API がバージョンで変わった: 0.10 系は `complete="customlist"` + `completion=fn`、0.13 系は `complete=fn` (`completion` は invalid key で呼び出し自体が失敗)。plugin/review.lua は pcall フォールバックで両対応している
 - `vim.system` の spawn 失敗の取り扱いがバージョン差あり: bin 不存在はスケジュール内 error 扱いで on_exit が呼ばれず、cwd 不正は同期 error を throw する (0.13 nightly 実測)。git/cli.lua は実行前に `vim.fn.executable(bin)` で事前判定し、`system` 呼び出しを pcall で吸収して結果型に変換する (横断規約「手続きは例外を投げない」をアダプタ境界で守る)
+- Neovim 標準 API に sha1 は無い (`vim.fn` にあるのは `sha256` のみ)。repo-hash の契約は sha1 先頭 16 桁であり、sha256 等に算法を差し換えると repo-hash ディレクトリ名が変わり既存セッションファイルが到達不能になる (見た目は動く)。sha1 は Neovim 組み込みの LuaJIT `bit` モジュールで `store/paths.lua` が実装している
+- LuaJIT の `string.format('%x')` は負の int32 を 64bit 符号拡張の 16 桁で出力する (8 桁想定で書くと動くように見えてハッシュ値が壊れる)。32bit 演算結果を 16 進出力する直前は 0..2^32-1 の非負値へ正規化する (`store/paths.lua` の `u32`)
 
 ## 未解決の論点
 
