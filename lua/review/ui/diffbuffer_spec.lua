@@ -359,14 +359,14 @@ end)
 describe('diffbuffer キーマップ', function()
   use_render_env()
 
-  it('diff キー (c/e/d/o/q/<F1>) が buffer-local に silent nowait で付く', function()
+  it('diff キー (c/e/d/y/o/q/<F1>) が buffer-local に silent nowait で付く', function()
     local buf = render()
     local maps = vim.api.nvim_buf_get_keymap(buf, 'n')
     local lhs = {}
     for _, m in ipairs(maps) do
       lhs[m.lhs] = true
     end
-    for _, key in ipairs { 'c', 'e', 'd', 'o', 'q', '<F1>' } do
+    for _, key in ipairs { 'c', 'e', 'd', 'y', 'o', 'q', '<F1>' } do
       assert.is_true(lhs[key] == true, 'missing mapping: ' .. key)
     end
     local vmaps = vim.api.nvim_buf_get_keymap(buf, 'v')
@@ -399,7 +399,7 @@ describe('diffbuffer キーマップ', function()
           ('%s.%s が関数として解決できない (key=%s)'):format(mod_path, func_name, key)
         )
       end
-      for _, key in ipairs { 'c', 'e', 'd', 'o', 'q', '<F1>' } do
+      for _, key in ipairs { 'c', 'e', 'd', 'y', 'o', 'q', '<F1>' } do
         check('n', key)
       end
       check('v', 'c')

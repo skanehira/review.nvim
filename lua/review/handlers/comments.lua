@@ -1,9 +1,9 @@
--- コメント操作フロー (docs/design/features/diff-review.md「操作」c / e / d)。
--- 位置の選択 (new 側行番号) は diffbuffer の行写像経由のみ — 行番号の独自計算を
--- しない (DESIGN.md「既知の制約」)。作成・編集・削除の直後に必ず session を
--- 永続化する (INV-4。失敗時の留保は handlers/session の persist が担当)。
--- y (prompt yank) は ai-prompt の issue で追加。
+-- コメント操作フロー (docs/design/features/diff-review.md「操作」c / e / d、
+-- ai-prompt.md「出力経路」y)。位置の選択 (new 側行番号) は diffbuffer の行写像経由のみ
+-- — 行番号の独自計算をしない (DESIGN.md「既知の制約」)。作成・編集・削除の直後に必ず
+-- session を永続化する (INV-4。失敗時の留保は handlers/session の persist が担当)。
 local comment_model = require 'review.core.comment'
+local prompt_handler = require 'review.handlers.prompt'
 local session_handler = require 'review.handlers.session'
 local ui_diffbuffer = require 'review.ui.diffbuffer'
 local ui_input = require 'review.ui.input'
@@ -156,6 +156,17 @@ function M.edit_current()
       do_edit(choice)
     end
   end)
+end
+
+--- `y`: カーソル行 range に含まれるコメントのプロンプト (見出しなし) を
+--- "0 (+クリップボード) へコピー。outdated は既定除外、全件 outdated は拒否 INFO
+--- (ai-prompt.md「出力経路」y — 構築とコピーは handlers/prompt)。
+function M.yank_current()
+  local session, found = comments_at_cursor()
+  if session == nil then
+    return
+  end
+  prompt_handler.for_line(session, found)
 end
 
 --- `d`: カーソル行 (range 内) のコメントを無確認で即削除。複数該当時は保持順の

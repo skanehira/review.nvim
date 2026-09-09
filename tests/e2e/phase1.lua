@@ -108,6 +108,55 @@ local function run()
   end
   print 'E2E-O1 fileview=readonly'
 
+  -- --- prompt yank (ai-prompt.md テスト方針 golden path) -------------------
+  -- b.lua の diff で視覚選択による range コメントを作り (既知の制約: :normal の
+  -- 視覚選択は Vj -> c の分割投入が単位)、y で "0、:Review prompt で全文を照合する。
+  -- 期待値は docs/design/features/ai-prompt.md の書式から手で書いた正本 (生成 code を
+  -- 呼ばない = 循環検証回避)。b.lua 行写像: row3=+行(new1) row4=+行(new2)。
+  local b_buf = vim.fn.bufnr 'review://diff/main--feature/b.lua'
+  if b_buf == -1 then
+    fail 'prompt 検証用の b.lua diff が無い'
+  end
+  local b_win = vim.fn.win_findbuf(b_buf)[1]
+  if b_win == nil then
+    fail 'b.lua diff の window が見つからない'
+  end
+  vim.api.nvim_set_current_win(b_win)
+  vim.api.nvim_win_set_cursor(b_win, { 3, 0 })
+  vim.cmd 'normal Vj'
+  vim.cmd 'normal c'
+  wait_for(function()
+    return vim.api.nvim_win_get_config(0).relative ~= ''
+  end, 'range コメント float open')
+  vim.cmd 'normal iprefer early return'
+  vim.cmd('normal ' .. cy)
+
+  -- y: range 内の行 (row4 = new 2) で見出しなし本文を "0 にコピー
+  vim.api.nvim_win_set_cursor(b_win, { 4, 0 })
+  vim.cmd 'normal y'
+  local got_y = vim.fn.getreg '0'
+  if got_y ~= '@b.lua#L1-L2\nprefer early return' then
+    fail('y の "0 が不一致: ' .. vim.inspect(got_y))
+  end
+  print 'E2E-Y1 yank=@path-range+body'
+
+  -- :Review prompt: 見出し + 全コメント (id 昇順 = c1 a.lua#L3, c2 b.lua#L1-L2)
+  vim.cmd 'Review prompt'
+  local expected_prompt = table.concat({
+    'Review the changes in main..feature. Please address the comments below.',
+    '',
+    '@a.lua#L3',
+    'use a map here',
+    '',
+    '@b.lua#L1-L2',
+    'prefer early return',
+  }, '\n')
+  local got_prompt = vim.fn.getreg '0'
+  if got_prompt ~= expected_prompt then
+    fail(':Review prompt の "0 が全文不一致: ' .. vim.inspect(got_prompt))
+  end
+  print 'E2E-P1 prompt=exact'
+
   -- 正常終了 (VimLeave を通す。コメントは CRUD 直後に保存済み)
   vim.cmd 'qa'
 end

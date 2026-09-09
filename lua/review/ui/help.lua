@@ -1,7 +1,7 @@
 -- <F1> help float (diff-review.md「操作」)。表示内容は config.keymaps の現在値から
 -- 生成する (DESIGN.md「API 一覧」の正本表を setup で変えたユーザーに実キーを見せる)。
--- yank_prompt など本 issue で未実装のキーはキーバインド表に出さない
--- (help に載って押せないキーがある状態を作らない)。q / <Esc> で閉じる。
+-- config.keymaps のキーは実装済みのものすべて載せる (載っていないキーは
+-- help に載って押せないキーを作るため追加禁止)。q / <Esc> で閉じる。
 local config = require 'review.config'
 
 local M = {}
@@ -15,6 +15,7 @@ local SECTIONS = {
       { 'add_comment', '作成コメント (visual-line で範囲指定)' },
       { 'edit_comment', 'カーソル行のコメントを編集' },
       { 'delete_comment', 'カーソル行のコメントを即削除' },
+      { 'yank_prompt', 'カーソル行のコメントのプロンプトを yank' },
       { 'open_file', 'その行の実ファイルを開く' },
       { 'close', 'セッションを閉じる' },
       { 'help', 'このヘルプ' },

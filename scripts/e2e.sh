@@ -4,10 +4,13 @@
 #
 # golden path: fixture repo (main / feature, 複数ファイル・複数 hunk) で
 # headless nvim を起動 -> :Review start -> c キーでコメント -> sidebar <Enter> ->
-# sidebar o (fileview read-only) -> 正常終了 -> 別プロセスで VimEnter notify ->
-# :Review 復元 -> 本文・行位置・viewed が元の状態と一致することを assert。
+# sidebar o (fileview read-only) -> 視覚選択で range コメント -> y で "0 に
+# @path#L.. + 本文 -> :Review prompt で見出し + 全件全文一致 (issue #7) ->
+# 正常終了 -> 別プロセスで VimEnter notify -> :Review 復元 ->
+# 本文・行位置・viewed が元の状態と一致することを assert。
 # phase3: :Review start <base> 1 引数 -> 実 vim.ui.input (customlist 補完) で
 # head を選んでセッション開始する経路を pin (mock を通さない接続検証)。
+# E2E は clipboard provider 無しで走る (クリップボード非依存、"0 レジスタ比較のみ)。
 #
 # 契約: 毎回 mktemp の一意ディレクトリに fixture repo と XDG_DATA_HOME を作り、
 # 終了時に掃除する (直列/並列どちらでも競合しない)。失敗は exit 1。
@@ -73,11 +76,29 @@ S1=$(grep -oE 'E2E-S1 body=.* line=[0-9]+' "$OUT1" || true)
 [ -n "$S1" ] || { echo "e2e: phase1 の E2E-S1 行が無い (assert 不合格)" >&2; exit 1; }
 grep -q 'E2E-S1 body=use a map here' "$OUT1" || { echo 'e2e: phase1 本文不一致' >&2; exit 1; }
 grep -q 'E2E-O1 fileview=readonly' "$OUT1" || { echo 'e2e: phase1 sidebar o で fileview が開かない' >&2; exit 1; }
+# prompt yank (issue #7): y で "0 = @path#L.. + 本文、:Review prompt = 全文一致
+grep -q 'E2E-Y1 yank=@path-range+body' "$OUT1" || {
+  echo 'e2e: phase1 y で "0 に range コメントのプロンプトが入らない' >&2
+  exit 1
+}
+grep -q 'E2E-P1 prompt=exact' "$OUT1" || {
+  echo 'e2e: :Review prompt の "0 が見出し + 2 件全量 (id 昇順) と全文一致しない' >&2
+  exit 1
+}
+# provider 無し退路 (ai-prompt.md): "0 コピーは成功し WARN が出ている (= 退路を観測)
+grep -q 'クリップボード provider がありません' "$LOG" || {
+  echo 'e2e: clipboard provider 無し退路の WARN がログに無い' >&2
+  exit 1
+}
 
 # 保存されたセッション JSON が実ディスクに存在し本文を含む (MUST 2/INV-4)
 SESSION_JSON=$(find "$DATA" -path '*review.nvim/sessions/*/main--feature.json' | head -1)
 [ -n "$SESSION_JSON" ] || { echo 'e2e: セッション JSON が存在しない' >&2; exit 1; }
 grep -q '"body":"use a map here"' "$SESSION_JSON" || { echo 'e2e: 保存 JSON に本文が無い' >&2; exit 1; }
+grep -q '"body":"prefer early return"' "$SESSION_JSON" || {
+  echo 'e2e: range コメント (視覚選択 -> c) が保存 JSON に無い' >&2
+  exit 1
+}
 
 # --- phase 2: 新プロセスで VimEnter notify -> :Review 復元 -----------
 OUT2=$(mktemp "$WORK/phase2.out.XXXXXX")
