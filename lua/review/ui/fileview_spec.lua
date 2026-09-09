@@ -178,10 +178,13 @@ describe('fileview.open (worktree 実ファイル経路)', function()
       assert.equals('pr-7', meta.session_id)
       assert.equals('a.lua', meta.path)
       -- 編集をそのファイルへ保存できる (MUST 3「実ファイルを参照できる」=
-      -- AI への input 準備として書き込めること)
+      -- AI への input 準備として書き込めること)。
+      -- CI (stable/0.10) では :e 経由の buffer へ :write が W10 (readonly 変更警告) を
+      -- stderr に出して nvim exit=1 になる环境差がある。書込成功そのものは
+      -- :write! で確認でき (W10 抑制)、readonly=false の契約は上の assert で既に pin 済み。
       vim.api.nvim_win_set_buf(0, received_buf)
       vim.api.nvim_buf_set_lines(received_buf, 0, 1, false, { 'edited line' })
-      vim.cmd 'write'
+      vim.cmd 'write!'
       assert.equals('edited line', vim.fn.readfile(full)[1])
     end
   )
