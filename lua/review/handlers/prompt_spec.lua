@@ -103,6 +103,14 @@ local function use_env()
     state.tab = vim.api.nvim_get_current_tabpage()
     session_handler.start { base = 'main', head = 'feature' }
     state.session = session_handler.active()
+    -- worktree 無しブランチセッション (作成判断 skip = head==HEAD かつ porcelain 空) の
+    -- shape に揃える。この fixture の git stub は status --porcelain にも RAW_DIFF を
+    -- 返すため作成判断が「必要」に転び、自前 worktree 記録が入ってパス規則が絶対 path
+    -- 分岐へ化ける (#6 の worktree 作成判断入り込み後のあおり)。
+    -- この spec 群の意図は整形・コピー経路・provider 検出 (ai-prompt.md「パスの規則」の
+    -- repo 相対分岐) で、絶対 path 分岐は ctx マッピング describe と core/prompt_spec
+    -- が pin 済み。相対 @path の検証経路を壊さないため worktree を明示的に空にする。
+    state.session.worktree = vim.NIL
     state.diff_buf = vim.fn.bufnr(DIFF_A_NAME)
     state.diff_win = vim.fn.win_findbuf(state.diff_buf)[1]
     vim.api.nvim_set_current_win(state.diff_win)

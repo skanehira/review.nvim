@@ -94,13 +94,16 @@ describe('review.command 委譲', function()
     }, res)
   end)
 
+  -- unknown 経路を通過するのは subcommands 表に無い語だけ (登録済みは handler へ
+  -- 委譲され cmd_* の結果が返る)。prompt も実装済みで handler 経路のため、
+  -- 「未登録語 = unknown」は実際に未登録の語で検証する。
   it(
-    '未実装サブコマンド (prompt は ai-prompt issue) は unknown として扱う',
+    '未登録サブコマンド (subcommands 表に無い語) は unknown として扱う',
     function()
-      local res = review.command { 'prompt', 'a.lua' }
+      local res = review.command { 'zzz', 'a.lua' }
 
       assert.same({
-        msg = 'review.nvim: unknown subcommand: prompt. ' .. USAGE,
+        msg = 'review.nvim: unknown subcommand: zzz. ' .. USAGE,
         level = vim.log.levels.WARN,
       }, notifications[1])
       assert.equals(false, res.ok)
@@ -563,6 +566,10 @@ describe(
       'prompt_all({copy=false}) は実セッションの全コメントを整形して返す (facade->core 結線)',
       function()
         session_handler.start { base = 'main', head = 'feature' }
+        -- handlers/prompt_spec と同じ理由: git stub の porcelain 非空で worktree 作成判断が
+        -- 必要に転ぶと @path が絶対 path 分岐へ入り、facade->core の整形 pin が観測できない。
+        -- worktree 無し (作成判断 skip) の shape に揃える。
+        session_handler.active().worktree = vim.NIL
         table.insert(session_handler.active().comments, {
           id = 'c1',
           file = 'a.lua',
