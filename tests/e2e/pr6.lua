@@ -2,7 +2,7 @@
 -- のセッションを :Review delete で dir + ref + JSON まで一掃することを assert。
 local answers = { 'y' }
 local idx = 0
-vim.ui.input = function(opts, cb)
+vim.ui.input = function(_, cb)
   idx = idx + 1
   cb(answers[idx] or 'y')
 end

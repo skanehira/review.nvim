@@ -202,16 +202,19 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       assert.equals(1, #state.notifications)
+      -- '+/*' は provider 無し環境で初期 setreg ごと保持されない (CI stable/0.10 実測、
+      -- 内部選択保持はビルド/版依存の挙動)。観測できる "0 だけ「触っていない」ことを pin する。
       assert.equals(SENTINEL, vim.fn.getreg '0')
-      assert.equals(SENTINEL, vim.fn.getreg '+')
     end
   )
 
   -- has_provider の検出元 3 系統 (:help clipboard-provider の定義経路 2 つ +
   -- 将来ビルド向け clipboard.provider()) と全条件不成立の対照を、同一構造
   -- (provider を配置 -> all() -> 期待を assert) のパラメータとして 1 本に揃える。
-  -- 検出元を 1 つでも has_provider から消すと、その系統のケースが「無し経路」に
-  -- 落ち、+/* が SENTINEL のまま / WARN が出て失敗する (系統ごとの pin)。
+  -- 検出元を 1 つでも has_provider から消すと、その系統が「無し経路」に落ち
+  -- (WARN があるのに +/* が書けない = 有り経路の assert 側では WARN 0 / 通知数で、無し
+  -- 経路側では provider が誤検出されると WARN が消える) 失敗する。+/* 内容の sentinel は
+  -- 無し環境で初期 setreg が保持されないため検証に使わない (CI stable/0.10 実測)。
   local provider_cases = {
     {
       name = 'g:clipboard table',
@@ -279,9 +282,10 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
         )
         assert.equals(expected, vim.fn.getreg '0', case.name .. ': "0 にコピー')
         if case.no_provider then
-          -- 無し経路: +/* を触っていない (書き込み試行の残骸がゼロ) + WARN 1 件
-          assert.equals(SENTINEL, vim.fn.getreg '+', case.name .. ': + を触らない')
-          assert.equals(SENTINEL, vim.fn.getreg '*', case.name .. ': * を触らない')
+          -- 無し経路: WARN 1 件 + "0 のみ (provider 無しでは +/* の内容はビルド/版依存で
+          -- 検証対象にできないため、arrange 漏れの検出は「WARN が必ず出る」側に置く —
+          -- provider が有りと誤検出されれば WARN 0 件になりこの assert が落ちる)。
+          assert.equals(expected, vim.fn.getreg '0', case.name .. ': "0 にコピー')
           assert.same({
             msg = 'review.nvim: クリップボード provider がありません。"0 レジスタにのみコピーしました',
             level = vim.log.levels.WARN,
