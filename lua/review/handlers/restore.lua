@@ -1,10 +1,13 @@
 -- 復元フロー (diff 再取得と anchor 検証の調停)
 -- (docs/design/features/persistence-restore.md「復元手順」「anchor 検証」「起動時」)。
 -- anchor 検証の純粋ロジックは core/anchor (session 層との循環回避)。
--- worktree 解決分岐は #6 — worktree=nil の分岐のみで動作する。
+-- worktree 解決は session.resolve_worktree (既存 dir 再利用 / 作成・再作成、
+-- pr-worktree.md「worktree 作成判断」)。
+local config = require 'review.config'
 local git_diff = require 'review.git.diff'
 local git_ref = require 'review.git.ref'
 local result = require 'review.core.result'
+local health = require 'review.handlers.health'
 local scan = require 'review.store.scan'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
@@ -49,8 +52,11 @@ function M.resume_session(session)
       ),
     }, function(answer)
       if answer == 'y' then
-        session_handler.force_close()
-        fetch_and_resume(session)
+        -- close の worktree 掃除 (--force 確認含む) が完了してから再開 (INV-1)。
+        -- force_close 側でキャンセルされた場合はコールバックが走らない = 再開しない。
+        session_handler.force_close(function()
+          fetch_and_resume(session)
+        end)
       end
     end)
     return
@@ -125,8 +131,23 @@ function M.resume_by_id(id)
   return result.ok()
 end
 
+--- VimEnter 起動シーケンス: worktree 残骸 scan (pr-worktree.md「異常終了からの回復」)
+--- -> open セッション通知。掃除は auto_notify_resume と無関係に走る (MUST 3 の担保)。
+function M.startup_scan()
+  git_ref.top_level({ cwd = vim.fn.getcwd() }, function(res)
+    if not res.ok then
+      return -- repo 外は何もしない (scan の対象外)
+    end
+    health.sweep(res.data, function()
+      if config.get().auto_notify_resume then
+        M.notify_open_sessions()
+      end
+    end)
+  end)
+end
+
 --- VimEnter 起動時 scan: open セッションの continue notify (窓は開かない)。
---- auto_notify_resume=false のときは setup 側でフックを張らないため無動作。
+--- auto_notify_resume=false のときは startup_scan 側で呼ばれない。
 function M.notify_open_sessions()
   git_ref.top_level({ cwd = vim.fn.getcwd() }, function(res)
     if not res.ok then

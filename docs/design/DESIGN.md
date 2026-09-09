@@ -39,7 +39,7 @@ plugin/review.lua            # :Review コマンド登録 (薄い)
 | --- | --- | --- |
 | UI 形態 | 2 ペインの通常分割: 左 sidebar (変更ファイル一覧) + 右 unified diff バッファ (`review://` scratch buffer) | レビューは長時間の連続作業で float は不適切。コメントの行紐付けと range 選択は単一ペインの unified 形式が最も単純 (GitHub / difit と同じ相互作用) |
 | 差分取得 | `git diff <base> <head>` の出力を Lua でパースして自前レンダリング。`:diffthis` は使わない | extmark によるコメント紐付けと new 側ファイル行番号への変換が unified 1 バッファだと自明。`diffthis` は左右どちらのバッファへのコメントか曖昧になる |
-| worktree 作成条件 | 例外条件 (下記) を除き常に作成。**作らないのは mode が branch で、`git rev-parse <head>` のコミットが HEAD と一致し、かつ `git status --porcelain` が空のときのみ** (同一ブランチ名でも未コミット変更があれば作成。mode=pr は常時作成し、後述の fetch と worktree を用意する)。配置は `stdpath("data")/review.nvim/worktrees/<slug>` (リポジトリ外) | MUST 3 の PR に加えブランチレビューでも `@path` が指す「実際に読めるファイル」= head のコミット内容を保証する。リポジトリのツリーにゴミを作らない。PR 用に作る機構をブランチでも再利用して 1 機構にする |
+| worktree 作成条件 | 例外条件 (下記) を除き常に作成。**作らないのは mode が branch で、`git rev-parse <head>` のコミットが HEAD と一致し、かつ `git status --porcelain` が空のときのみ** (同一ブランチ名でも未コミット変更があれば作成。mode=pr は常時作成し、後述の fetch と worktree を用意する)。配置は `stdpath("data")/review.nvim/worktrees/<repo-hash>/<slug>` (リポジトリ外。slug は repo 単位にしか一意でないため repo-hash 下で分離) | MUST 3 の PR に加えブランチレビューでも `@path` が指す「実際に読めるファイル」= head のコミット内容を保証する。リポジトリのツリーにゴミを作らない。PR 用に作る機構をブランチでも再利用して 1 機構にする |
 | 永続化 | JSON 1 ファイル / セッション。`stdpath("data")/review.nvim/sessions/<repo-hash>/<slug>.json`。コメント CRUD ごとに即時アトミック書込 (tmp + rename) | MUST 2。Vim の session/view 機構は diff scratch バッファと噛み合わず、独自書式のほうが復元時の検証 (後述の anchor) ができる |
 | 復元検証 | コメントに new 側行番号 + anchor (対象行テキスト + 前後 1 行) を保存。再開時に差分が揺れていた場合、±20 行以内に同一テキストを検索、無ければ `outdated` フラグを付けて表示はする | 黙って捨てず、黙って誤った場所につけない。行番号だけ保存だと rebase 後に全滅する |
 | 起動時復元 | VimEnter で当該 repo の open セッションを検出して notify。`:Review` (無印) が即復元 (複数あれば vim.ui.select) | 「起動後すぐに復元できる」= 1 操作。勝手にウィンドウを開く surprise は避け、検知と通知までを自動で行う |
@@ -161,6 +161,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - worktree 内に未コミット変更があると `git worktree remove` は失敗する (ユーザーの変更を黙って捨てられない)。close 時に検知して `--force` の可否をユーザーへ確認する
 - kill 等で異常終了した経路では VimLeave の掃除が走らない。起動時に「記録上 open のセッションの worktree の実在」をスキャンし、残骸は通知の上で `git worktree prune` + ディレクトリを掃除する (MUST 2/3 の異常終了側の担保)
 - fork PR の head は通常の branch ref として fetch されない。`git fetch <remote> refs/pull/<n>/head` で自前 ref を作る (ref 名に PR 番号を含めて衝突を防ぐ)
+- 自前 ref の掃除には落とし穴がある (git 2.x 実測): fetch の宛先を短縮名 `review-nvim/pr-<n>` にすると **refs/heads/ 底下に保存**され、`git update-ref -d` は短縮名を "bad name" で拒否するため削除は保存フルネーム `refs/heads/review-nvim/pr-<n>` が必要 (`git show-ref --verify` も短縮名を解決しないので存在確認は `rev-parse --verify -q` を使う)。短縮名で消そうとすると動くように見えて孤児 ref が積む
 - extmark の `virt_text` は `wrap` 表示と干渉する。diff バッファは `wrap=off` を強制する
 - 巨大な差分 (1 ファイル 2000 行超) は描画と extmark が重い。標準の `foldexpr` で hunk / ファイルを畳めるようにするが自動折たたみはしない (v1 スコープ外。「やらないこと」参照)
 - `git diff` 出力行から new 側ファイル行番号への変換は hunk ヘッダ `@@ -a,b +c,d @@` の `c` 起点の累計で決まる。**変換ロジックはパーサ (core/) の 1 箇所のみに置く** (パーサ外で行番号を独自計算して保存すると漂移バグの温床になる)
@@ -170,6 +171,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - `nvim_create_user_command` の customlist 補完 API がバージョンで変わった: 0.10 系は `complete="customlist"` + `completion=fn`、0.13 系は `complete=fn` (`completion` は invalid key で呼び出し自体が失敗)。plugin/review.lua は pcall フォールバックで両対応している
 - 既定の `vim.ui.input` は opts を `vim.fn.input` へそのまま渡す。したがって opts に Lua 関数を混ぜる形状 (`completion='customlist'` + `complete=fn`、または `completion='customlist'` 単体) は `input()` 側で E467 となり、既定実装は pcall でこれを吸収して `on_confirm(nil)` に変換するため**黙って何も起きないように見える** (0.13 nightly 実測)。opts へ渡せる補完は `input()` が受理する文字形式 `completion='customlist,{Vim script 関数名}'` のみ。head 選択ではグローバル関数 (`:function!`) を遅延定義し `luaeval` 経由で Lua 候補関数へ橋渡しする (`handlers/session.lua`。E2E phase3 が mock なしの実経路を pin)
 - `vim.system` の spawn 失敗の取り扱いがバージョン差あり: bin 不存在はスケジュール内 error 扱いで on_exit が呼ばれず、cwd 不正は同期 error を throw する (0.13 nightly 実測)。git/cli.lua は実行前に `vim.fn.executable(bin)` で事前判定し、`system` 呼び出しを pcall で吸収して結果型に変換する (横断規約「手続きは例外を投げない」をアダプタ境界で守る)
+- `git/cli` の既定の注入スタブ (`install_git` 系) は `on_exit` を**同期**で呼ぶため、spec では git 実行の「投入前 / 完了後」の順序が区別できない: worktree remove の完了を待ってから後処理 (delete の JSON+ref 削除など) をする契約は、同期スタブでは順序を実装と無関係に green になる (#6 delete-active の順序バグがこれで素抜けた)。完了順序を pin する spec は remove 等の on_exit を捕捉して手動で発火する遅延スタブを使うこと (`handlers/session_spec.lua` の `install_git_deferred_remove`)
 - Neovim 標準 API に sha1 は無い (`vim.fn` にあるのは `sha256` のみ)。repo-hash の契約は sha1 先頭 16 桁であり、sha256 等に算法を差し換えると repo-hash ディレクトリ名が変わり既存セッションファイルが到達不能になる (見た目は動く)。sha1 は Neovim 組み込みの LuaJIT `bit` モジュールで `store/paths.lua` が実装している
 - LuaJIT の `string.format('%x')` は負の int32 を 64bit 符号拡張の 16 桁で出力する (8 桁想定で書くと動くように見えてハッシュ値が壊れる)。32bit 演算結果を 16 進出力する直前は 0..2^32-1 の非負値へ正規化する (`store/paths.lua` の `u32`)
 - headless テスト / E2E でのキー入力は `:normal` が唯一の安定経路: `nvim_input` / `feedkeys` の typeahead は `vim.wait` 中で消費されず (発火 observed 0 件)、`startinsert` も insert mode を維持しない (nvim 0.13 nightly 実測)。`:normal` 文字列内で error が出ると hit-enter prompt でハングするため、driver は pcall + `cquit` で正規化する

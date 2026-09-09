@@ -534,3 +534,98 @@ describe('sessions_list の開閉', function()
     assert.same(1, #state.notifications)
   end)
 end)
+
+-- #6: 復元時の worktree 作成判断 (pr-worktree.md「異常終了からの回復」/
+-- persistence-restore.md「復元手順」worktree 解決)。
+local function pr_session(overrides)
+  local sess = {
+    version = 1,
+    id = 'pr-7',
+    repo = REPO_TOP,
+    mode = 'pr',
+    base = 'main',
+    head = 'review-nvim/pr-7',
+    pr = { number = 7, url = 'https://github.com/acme/demo/pull/7' },
+    worktree = vim.NIL,
+    status = 'closed',
+    files = {},
+    comments = {},
+    created_at = 1,
+    updated_at = 1,
+  }
+  for k, v in pairs(overrides or {}) do
+    sess[k] = v
+  end
+  assert.equals(true, store.save(sess).ok)
+  return sess
+end
+
+describe('restore の worktree 解决 (mode=pr は resume でも常時作成/再利用)', function()
+  use_env()
+
+  it(
+    '記録なし PR セッションの復元は `git worktree add --detach` で作って記録',
+    function()
+      pr_session()
+
+      restore.resume_session(store.load(REPO_TOP, 'pr-7').data)
+
+      assert.equals('pr-7', session_handler.active().id)
+      local wt = require('review.store.paths').worktree_path(REPO_TOP, 'pr-7')
+      assert.same({ path = wt, created_by_us = true }, store.load(REPO_TOP, 'pr-7').data.worktree)
+    end
+  )
+
+  it(
+    'scan で worktree=null 化された session (doD 3: dir 消滅 → 復元時に作って再生成)',
+    function()
+      -- 異常終了 -> scan 回収後の状態: 記録 null + status=open
+      pr_session { status = 'open' }
+      local health = require 'review.handlers.health'
+      health.sweep(REPO_TOP, function() end)
+      assert.equals(vim.NIL, store.load(REPO_TOP, 'pr-7').data.worktree)
+
+      restore.resume_session(store.load(REPO_TOP, 'pr-7').data)
+
+      local wt = require('review.store.paths').worktree_path(REPO_TOP, 'pr-7')
+      assert.same({ path = wt, created_by_us = true }, store.load(REPO_TOP, 'pr-7').data.worktree)
+      -- pattern stub の list (worktree 行なし) でも add は走る (add stub ok)
+      assert.equals('pr-7', session_handler.active().id)
+    end
+  )
+
+  it(
+    '記録 + dir 実在 + git list に登録 => resume で add せず再利用 (pr-worktree.md 異常終了回復)',
+    function()
+      local wt = require('review.store.paths').worktree_path(REPO_TOP, 'pr-7')
+      vim.fn.mkdir(wt, 'p')
+      pr_session { status = 'open', worktree = { path = wt, created_by_us = true } }
+
+      local calls = {}
+      cli._set_system(function(cmd, _opts, on_exit)
+        table.insert(calls, cmd)
+        if cmd[2] == 'rev-parse' then
+          on_exit { code = 0, stdout = REPO_TOP .. '\n', stderr = '' }
+        elseif cmd[2] == 'diff' then
+          on_exit { code = 0, stdout = RAW_1HUNK, stderr = '' }
+        elseif cmd[2] == 'worktree' and cmd[3] == 'list' then
+          on_exit {
+            code = 0,
+            stdout = 'worktree ' .. REPO_TOP .. '\nworktree ' .. wt .. '\n',
+            stderr = '',
+          }
+        else
+          on_exit { code = 0, stdout = '', stderr = '' }
+        end
+      end)
+
+      restore.resume_session(store.load(REPO_TOP, 'pr-7').data)
+
+      assert.equals('pr-7', session_handler.active().id)
+      assert.same({ path = wt, created_by_us = true }, store.load(REPO_TOP, 'pr-7').data.worktree)
+      for _, cmd in ipairs(calls) do
+        assert.equals(false, cmd[3] == 'add', 'add が出た: ' .. table.concat(cmd, ' '))
+      end
+    end
+  )
+end)

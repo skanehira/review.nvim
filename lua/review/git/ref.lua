@@ -70,4 +70,54 @@ function M.rev_parse(opts, cb)
   end)
 end
 
+-- PR 用の自前一時 ref 名。fork PR の head は通常の branch ref として fetch
+-- されないため refs/pull/<n>/head から採る (DESIGN.md「既知の制約」fork PR 行)。
+-- 名前に PR 番号を含め衝突を防ぎ、決定的なので次回 fetch で上更新できる。
+function M.pr_ref(number)
+  return ('review-nvim/pr-%s'):format(tostring(number))
+end
+
+--- cb(result) result.data = 作った ref 名。
+--- `git fetch <remote> refs/pull/<n>/head:review-nvim/pr-<n>`
+--- (pr-worktree.md「PR 解決」手順 2。remote 選択は handler、失敗は E_REF)。
+function M.fetch_pull(opts, cb)
+  local ref_name = M.pr_ref(opts.number)
+  run(
+    { 'fetch', opts.remote, ('refs/pull/%s/head:%s'):format(tostring(opts.number), ref_name) },
+    opts,
+    function(res)
+      if not res.ok then
+        cb(res)
+        return
+      end
+      cb(result.ok(ref_name))
+    end
+  )
+end
+
+-- fetch の右辺が短縮名 `review-nvim/pr-<n>` のとき git が実保存するフルネーム
+-- (refs/heads/ 底下。`git update-ref -d` は短縮名を "bad name" で拒否するため
+-- 掃除はこの形が要る — 2.x 実測、DESIGN.md「既知の制約」)。
+function M.pr_ref_storage(number)
+  return 'refs/heads/' .. M.pr_ref(number)
+end
+
+--- cb(result)。`git update-ref -d <ref>` (:Review delete の自前 ref 掃除)。
+--- ref には保存フルネーム (pr_ref_storage) を渡すこと。
+function M.delete_ref(opts, cb)
+  run({ 'update-ref', '-d', opts.ref }, opts, cb)
+end
+
+--- cb(result) result.data = remote 名の配列 (fork fetch の remote 選択入力。
+--- 同一 repo に headRefName の branch が無いときの fetch 先候補)。
+function M.remotes(opts, cb)
+  run({ 'remote' }, opts, function(res)
+    if not res.ok then
+      cb(res)
+      return
+    end
+    cb(result.ok(split_lines(res.data.stdout)))
+  end)
+end
+
 return M

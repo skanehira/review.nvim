@@ -1,5 +1,5 @@
 -- review.nvim facade: setup と :Review コマンド入口 (+ Lua API)。
--- pr / prompt は #6 / ai-prompt issue で cmd_<name> として追加される
+-- prompt は ai-prompt issue で cmd_prompt として追加される
 -- (未登録 = unknown として WARN)。ハンドラは発火時の require とし、
 -- 起動コストと循環を避ける。
 local config = require 'review.config'
@@ -22,18 +22,18 @@ end
 -- (foundation.md「setup は通す」)。
 function M.setup(opts)
   config.setup(opts)
-  -- 起動時の継続通知 (persistence-restore.md「起動時」)。auto_notify_resume=true
-  -- のときだけ VimEnter フックを张る。再 setup で_augroup を立て直すので重複しない。
+  -- 起動時の worktree scan + 継続通知 (persistence-restore.md「起動時」/
+  -- pr-worktree.md「異常終了からの回復」)。掃除は auto_notify_resume に依らず
+  -- 走るためフックは無条件。通知可否は startup_scan 側で見る。
+  -- 再 setup で_augroup を立て直すので重複しない。
   local group = vim.api.nvim_create_augroup('review_nvim', { clear = true })
-  if config.get().auto_notify_resume then
-    vim.api.nvim_create_autocmd('VimEnter', {
-      group = group,
-      desc = 'review.nvim: open セッションの継続通知 (窓は開かない)',
-      callback = function()
-        require('review.handlers.restore').notify_open_sessions()
-      end,
-    })
-  end
+  vim.api.nvim_create_autocmd('VimEnter', {
+    group = group,
+    desc = 'review.nvim: worktree 残骸 scan + open セッションの継続通知 (窓は開かない)',
+    callback = function()
+      require('review.handlers.restore').startup_scan()
+    end,
+  })
 end
 
 function M.cmd_start(args)
@@ -41,6 +41,13 @@ function M.cmd_start(args)
     return usage ':Review start <base> [head] の形式で指定してください'
   end
   return require('review.handlers.session').start { base = args[2], head = args[3] }
+end
+
+function M.cmd_pr(args)
+  if args[2] == nil or args[2] == '' then
+    return usage ':Review pr <number|url> の形式で指定してください'
+  end
+  return require('review.handlers.pr').start(args[2])
 end
 
 function M.cmd_resume(_args)
@@ -68,9 +75,16 @@ function M.cmd_delete(args)
   return require('review.handlers.session').delete(args[2])
 end
 
--- Lua API (DESIGN.md「API 一覧」) — 結果型 passthrough。start_pr / prompt_* は #6。
+-- Lua API (DESIGN.md「API 一覧」) — 結果型 passthrough。prompt_* は ai-prompt issue。
 function M.start(opts)
   return require('review.handlers.session').start(opts)
+end
+
+--- start_pr({number}) :Review pr と同じ入口。number は 番号 or URL (string|number)。
+--- 戻り値はディスパッチ受理 (gh / git 成否は非同期 notify / UI)。
+function M.start_pr(opts)
+  local target = type(opts) == 'table' and opts.number or opts
+  return require('review.handlers.pr').start(target)
 end
 
 --- resume({id}) は該当セッションを即復元 (DESIGN.md「API 一覧」)。id 無しは

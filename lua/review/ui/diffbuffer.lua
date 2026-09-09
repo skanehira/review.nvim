@@ -250,6 +250,16 @@ function M.new_line_at(bufnr, row)
   return st and st.row_to_new[row] or nil
 end
 
+--- hunk 本文の `-` 行 (new 側に該当行が無い) か。ヘッダ行は false
+--- (pr-worktree.md「実ファイル参照」の削除行 = WARN 判定に使う)。
+function M.row_is_deleted(bufnr, row)
+  local st = rendered[bufnr]
+  if st == nil then
+    return false
+  end
+  return st.body_rows[row] == true and st.row_to_new[row] == nil
+end
+
 --- 可視 new 側行のファイルテキスト (anchor 生成用)。非可視なら nil。
 function M.new_side_text(bufnr, new_line)
   local row = M.row_at(bufnr, new_line)
