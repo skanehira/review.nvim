@@ -11,7 +11,7 @@
 
 **PR 解決** `:Review pr <number|url>`:
 
-1. url からは PR 番号を抽出 (`/pull/<n>` 末尾)。番号解決は `gh pr view <n> --json number,title,baseRefName,headRefName,headRepositoryOwner,url` を実行。gh 不在・未 auth・PR 非存在は `E_GH` / `E_PR` を通知
+1. url からは PR 番号を抽出 (`/pull/<n>` 末尾)。番号解決は `gh pr view <n|url> --json number,title,baseRefName,headRefName,headRepositoryOwner,url,state` を実行。gh 不在・未 auth・PR 非存在は `E_GH` / `E_PR` を通知 (`state` は closed/merged PR の開始時 INFO 注記に使う。#6 実装で追加)
 2. head ref の用意: 同一リポジトリの branch なら `<headRefName>` をそのまま使い、それ以外 (fork) は `git fetch <remote> refs/pull/<n>/head:review-nvim/pr-<n>` を実行 (ref 名は決定的なので次回以降 fetch で上更新可)。remote 選択は default remote に無ければ origin で試す
 3. base/head (ブランチ名 / fetch した一時 ref) で diff を取得し、worktree 作成判断に従って作成 → 以降 diff-review と同じ UI を開く (PR タイトルは開始時に INFO 通知するだけ。セッションには永続化しない)
 
@@ -20,7 +20,7 @@
 | 条件 | worktree |
 | --- | --- |
 | mode=branch かつ `git rev-parse <head>` のコミットが現在の HEAD と一致し、かつ `git status --porcelain` が空 | 作らない (現在の作業ツリーが head の実ファイルそのもの) |
-| それ以外 (head ≠ HEAD のコミット、未コミット変更あり、mode=pr) | `git worktree add --detach <path> <head>` (path = `stdpath("data")/review.nvim/worktrees/<slug>`)。**`--detach` を使うので branch checkout と競合しない** |
+| それ以外 (head ≠ HEAD のコミット、未コミット変更あり、mode=pr) | `git worktree add --detach <path> <head>` (path = `stdpath("data")/review.nvim/worktrees/<repo-hash>/<slug>`)。**`--detach` を使うので branch checkout と競合しない**。slug は repo 単位にしか一意でないため `<repo-hash>` 下で分離する (#6 実装で確定。別 repo の同一 slug が同 path で衝突するのを防ぐ) |
 | PR かつ head が fork 由来 (同一 repo に headRefName の branch が無い) | 上記に先立ち `git fetch <remote> refs/pull/<n>/head` で `review-nvim/pr-<n>` ref を作り、それを `<head>` として worktree を作成 |
 
 作成失敗 (パス衝突) は既存同名ディレクトリを `git worktree prune` で回収試行 → 改善しなければ `E_WORKTREE` 通知で開始を中断。**衝突した残骸が自分の作成分 (`created_by_us=true` の記録あり) でない限り自動削除しない** (INV-3)。
@@ -43,7 +43,7 @@
 **異常終了からの回復 (起動 scan、persistence-restore の scan を利用)**:
 
 - 記録上 open のセッションについて worktree path の実在を確認。実在して repo の `git worktree list` に載っていればそのまま復元で再利用する (crash 後でも worktree は使える)。記録にあるのにディレクトリが消えていれば worktree=null にして save し、復元時の作成判断 (persistence-restore「復元手順」) で作り直す
-- `created_by_us=true` の worktree のうち、セッション側が closed なのにディレクトリが残っている残骸を「掃除してよい残骸」として通知し、`git worktree prune` + ディレクトリ削除で回収する
+- `created_by_us=true` の worktree のうち、セッション側が closed なのにディレクトリが残っている残骸を「掃除してよい残骸」として通知し、`git worktree prune` + ディレクトリ削除で回収する。**closed の掃除ではセッションファイルを書き戻さない** (dir 消滅後の記録は以後 scan に出ないため放置で無害。書き戻しは `:Review delete` の JSON 削除と競合してファイルを復活させ得る — #6 E2E で検出)
 
 ## 実装の配置
 

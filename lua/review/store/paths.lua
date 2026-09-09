@@ -136,6 +136,19 @@ function M.sessions_dir()
   return vim.fs.joinpath(data_dir, 'review.nvim', 'sessions')
 end
 
+-- worktree 配置の親。sessions と兄弟にし、repo-hash 下へ slug を置く
+-- (pr-worktree.md「worktree 作成判断」の <slug> を repo 単位に分離し、
+-- 別 repo の同一 slug がパス衝突で互いを阻害しないようにする)。
+function M.worktrees_root()
+  local data_dir = data_dir_override or vim.fn.stdpath 'data'
+  return vim.fs.joinpath(data_dir, 'review.nvim', 'worktrees')
+end
+
+-- 1 セッションの worktree path: <worktrees>/<repo-hash>/<slug>。
+function M.worktree_path(repo_path, slug)
+  return vim.fs.joinpath(M.worktrees_root(), M.repo_hash(repo_path), slug)
+end
+
 -- 1 repo のセッション置き場: <sessions>/<sha1(repo) 先頭 16 桁>。
 function M.repo_dir(repo_path)
   return vim.fs.joinpath(M.sessions_dir(), M.repo_hash(repo_path))

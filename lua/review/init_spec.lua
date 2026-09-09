@@ -95,12 +95,12 @@ describe('review.command 委譲', function()
   end)
 
   it(
-    '未登録サブコマンドも unknown として扱う (基盤では start 等も未実装)',
+    '未実装サブコマンド (prompt は ai-prompt issue) は unknown として扱う',
     function()
-      local res = review.command { 'pr', '42' }
+      local res = review.command { 'prompt', 'a.lua' }
 
       assert.same({
-        msg = 'review.nvim: unknown subcommand: pr. ' .. USAGE,
+        msg = 'review.nvim: unknown subcommand: prompt. ' .. USAGE,
         level = vim.log.levels.WARN,
       }, notifications[1])
       assert.equals(false, res.ok)
@@ -156,6 +156,22 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
       level = vim.log.levels.WARN,
     }, notifications[1])
   end)
+
+  it(':Review pr の 0 引目は usage 通知 (ハンドラを発火しない)', function()
+    local res = review.command { 'pr' }
+    assert.equals(false, res.ok)
+    assert.same({
+      msg = 'review.nvim: :Review pr <number|url> の形式で指定してください',
+      level = vim.log.levels.WARN,
+    }, notifications[1])
+  end)
+
+  it(
+    'complete は pr / prompt を prefix 一致で返す (サブコマンド表と結線の一致)',
+    function()
+      assert.same({ 'pr', 'prompt' }, review.complete('pr', '', 0))
+    end
+  )
 
   it(':Review delete の 0 引目は usage 通知', function()
     local res = review.command { 'delete' }

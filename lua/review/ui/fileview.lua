@@ -1,11 +1,42 @@
 -- ui/fileview: `o` の実ファイル参照 (diff-review / pr-worktree「実ファイル参照」)。
--- 本 issue の分岐は worktree なし = `git show <head>:<path>` の read-only scratch のみ。
--- worktree ありの編集可バッファ分岐は #6 の拡張。
+-- worktree あり = `<worktree>/<path>` の実ファイルを :e のように開く (編集可。
+-- 編集内容はレビューの diff には反映されない — pr-worktree.md)。
+-- worktree なし = `git show <head>:<path>` の read-only scratch。
 local cli = require 'review.git.cli'
 local config = require 'review.config'
 local result = require 'review.core.result'
 
 local M = {}
+
+-- worktree 実ファイル経路: git を呼ばず <worktree>/<path> を開く (pr-worktree.md)。
+-- 存在しないパス (head に無いファイル) は倒し込みせず err で返す (WARN はcaller)。
+local function open_worktree(opts, cb)
+  local full = vim.fs.joinpath(opts.worktree, opts.path)
+  if vim.uv.fs_stat(full) == nil then
+    if cb ~= nil then
+      cb(
+        result.err(
+          ('review.nvim: worktree 内のファイルが見つかりません: %s'):format(full),
+          result.codes.E_WORKTREE
+        )
+      )
+    end
+    return
+  end
+  -- :e と同じ挙動 (既存バッファがあれば vim 側で再利用) を新規 split に載せる。
+  vim.cmd(('vsplit | edit %s'):format(vim.fn.fnameescape(full)))
+  local buf = vim.api.nvim_get_current_buf()
+  vim.b[buf].review_meta = {
+    kind = 'fileview',
+    session_id = opts.id,
+    path = opts.path,
+    head = opts.head,
+    worktree = opts.worktree,
+  }
+  if cb ~= nil then
+    cb(nil, buf)
+  end
+end
 
 -- 同名バッファを再利用する (head 差分の再取得時に window を増やさない)。
 local function buffer_for(opts)
@@ -21,10 +52,14 @@ local function buffer_for(opts)
   return buf, false
 end
 
---- opts = { repo, head, id, path }。git show <head>:<path> を read-only な
---- scratch バッファに右 split で開く。失敗は cb(err)->false 相当で WARN を返し、
---- cb(nil, ok) は開いた bufnr を返す。
+--- opts = { repo, head, id, path, worktree? }。worktree 指定ならその実ファイルを
+--- 編集可で、無ければ git show <head>:<path> を read-only scratch で開く。
+--- 失敗は cb(err)->false 相当で WARN を返し、cb(nil, ok) は開いた bufnr を返す。
 function M.open(opts, cb)
+  if opts.worktree ~= nil and opts.worktree ~= vim.NIL then
+    open_worktree(opts, cb)
+    return
+  end
   local cfg = config.get()
   cli.run(cfg.git_bin, { 'show', opts.head .. ':' .. opts.path }, {
     cwd = opts.repo,

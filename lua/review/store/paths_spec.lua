@@ -157,3 +157,36 @@ describe('セッションパス配置', function()
     )
   end)
 end)
+
+describe('worktree パス配置 (pr-worktree.md「worktree 作成判断」)', function()
+  after_each(function()
+    paths._set_data_dir(nil)
+  end)
+
+  it(
+    'worktree_path は <data>/review.nvim/worktrees/<repo-hash>/<slug> (リポジトリ外)',
+    function()
+      paths._set_data_dir '/data'
+      assert.equals(
+        '/data/review.nvim/worktrees/f90cc21f45278cc2/main--feature',
+        paths.worktree_path('/repo-x', 'main--feature')
+      )
+      assert.equals(
+        '/data/review.nvim/worktrees/f90cc21f45278cc2/pr-7',
+        paths.worktree_path('/repo-x', 'pr-7')
+      )
+    end
+  )
+
+  it(
+    'worktrees_root は sessions と兄弟の <data>/review.nvim/worktrees (repo-hash 下で分離)',
+    function()
+      paths._set_data_dir '/data'
+      assert.equals('/data/review.nvim/worktrees', paths.worktrees_root())
+      assert.equals(
+        '/data/review.nvim/worktrees/dfcd58d3c11bac7d/pr-1',
+        paths.worktree_path('/repo-y', 'pr-1')
+      )
+    end
+  )
+end)

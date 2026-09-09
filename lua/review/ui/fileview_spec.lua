@@ -36,6 +36,10 @@ local function use_env()
     cli._set_system(nil)
     cli._set_executable(nil)
     config.reset()
+    if state.dir ~= nil then
+      vim.fn.delete(state.dir, 'rf')
+      state.dir = nil
+    end
   end)
 end
 
@@ -117,6 +121,93 @@ describe('fileview.open (git show read-only 経路)', function()
       assert.equals(first_buf, second_buf)
       assert.same({ 'v2' }, vim.api.nvim_buf_get_lines(second_buf, 0, -1, false))
       assert.equals(2, wins_after)
+    end
+  )
+end)
+
+describe('fileview.open (worktree 実ファイル経路)', function()
+  use_env()
+
+  -- worktree 指定時は git を一切呼ばない (pr-worktree.md「実ファイル参照」:
+  -- worktree あり = `<worktree>/<file>` を :e のように開く。diff は committed のまま)。
+  local function no_git_stub()
+    state.calls = {}
+    cli._set_system(function(cmd)
+      table.insert(state.calls, cmd)
+      error('worktree 経路で git が呼ばれた: ' .. table.concat(cmd, ' '), 0)
+    end)
+  end
+
+  it(
+    'worktree 指定では <worktree>/<path> の実ファイルを編集可の通常バッファとして vsplit 開きする (git 呼び出し 0 件)',
+    function()
+      no_git_stub()
+      local wt = vim.fn.tempname()
+      vim.fn.mkdir(wt, 'p')
+      state.dir = wt -- use_env の after_each で掃除させる
+      local full = vim.fs.joinpath(wt, 'a.lua')
+      local f = io.open(full, 'w')
+      f:write 'head content\nsecond\n'
+      f:close()
+
+      local received_err, received_buf
+      fileview.open({
+        repo = '/repo',
+        head = 'review-nvim/pr-7',
+        id = 'pr-7',
+        path = 'a.lua',
+        worktree = wt,
+      }, function(e, b)
+        received_err, received_buf = e, b
+      end)
+
+      assert.is_nil(received_err)
+      assert.equals(0, #state.calls)
+      assert.not_equals(nil, received_buf)
+      -- macOS /var -> /private/var: :e は実パスへ正規化するので期待値も実パスで比較する
+      assert.equals(vim.uv.fs_realpath(full), vim.api.nvim_buf_get_name(received_buf))
+      assert.same(
+        { 'head content', 'second' },
+        vim.api.nvim_buf_get_lines(received_buf, 0, -1, false)
+      )
+      assert.equals('lua', vim.bo[received_buf].filetype)
+      assert.equals(false, vim.bo[received_buf].readonly)
+      assert.equals(true, vim.bo[received_buf].modifiable)
+      local meta = vim.b[received_buf].review_meta
+      assert.equals('fileview', meta.kind)
+      assert.equals('pr-7', meta.session_id)
+      assert.equals('a.lua', meta.path)
+      -- 編集をそのファイルへ保存できる (MUST 3「実ファイルを参照できる」=
+      -- AI への input 準備として書き込めること)
+      vim.api.nvim_win_set_buf(0, received_buf)
+      vim.api.nvim_buf_set_lines(received_buf, 0, 1, false, { 'edited line' })
+      vim.cmd 'write'
+      assert.equals('edited line', vim.fn.readfile(full)[1])
+    end
+  )
+
+  it(
+    'worktree 内のファイルが実在しない (削除されている) は cb に E_WORKTREE err。git show へ黙って倒さない',
+    function()
+      no_git_stub()
+      local wt = vim.fn.tempname()
+      vim.fn.mkdir(wt, 'p')
+      state.dir = wt
+
+      local received_err
+      fileview.open({
+        repo = '/repo',
+        head = 'review-nvim/pr-7',
+        id = 'pr-7',
+        path = 'gone.lua',
+        worktree = wt,
+      }, function(e)
+        received_err = e
+      end)
+
+      assert.equals('E_WORKTREE', received_err.code)
+      assert.equals(false, received_err.ok)
+      assert.equals(0, #state.calls)
     end
   )
 end)
