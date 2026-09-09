@@ -47,6 +47,41 @@ function M.tags(opts, cb)
   end)
 end
 
+--- :Review start の cmdline 補完専用:**同期**で branches -> tags 順の 1 リスト
+--- を返す (customlist はコールバック補完ができないため。DESIGN.md「既知の制約」
+--- の補完 wait 例外)。1 系統でも成功すればその部分集合を ok で返し、両系統
+--- 失敗のみ err (timeout は run_sync 上限で打ち切り)。
+function M.refs_sync(opts)
+  opts = opts or {}
+  local cfg = config.get()
+  local out = {}
+  local fails = 0
+  local last_err
+  for _, namespace in ipairs { 'refs/heads/', 'refs/tags/' } do
+    local res = cli.run_sync(cfg.git_bin, {
+      'for-each-ref',
+      '--format=%(refname:short)',
+      namespace,
+    }, {
+      cwd = opts.cwd,
+      timeout_ms = opts.timeout_ms,
+      err_code = result.codes.E_REF,
+    })
+    if res.ok then
+      for _, name in ipairs(split_lines(res.data.stdout)) do
+        out[#out + 1] = name
+      end
+    else
+      fails = fails + 1
+      last_err = res.error
+    end
+  end
+  if fails == 2 then
+    return result.err(last_err, result.codes.E_REF)
+  end
+  return result.ok(out)
+end
+
 --- cwd からの repo top-level 絶対パスを解決する (起動時 scan / セッション repo)。
 --- cb(result) result.data = repo top。repo 外は E_REF。
 function M.top_level(opts, cb)

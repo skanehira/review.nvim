@@ -40,6 +40,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 
 ```vim
 :Review start main feature      " main..feature の差分を開く (head 省略時は補完付きで選択)
+                                " base / head は <Tab> で branches -> tags 順に補完
 :Review pr 42                   " PR #42 を worktree でレビュー
 :Review                         " 続きのセッションを復元 (複数あれば選択)
 :Review list                    " 保存済みセッション一覧から開く

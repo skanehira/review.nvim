@@ -135,6 +135,21 @@ fi
 cat "$OUT3" | tee -a "$WORK/e2e-report.txt"
 grep -q 'E2E-S3 head=hotfix' "$OUT3" || { echo 'e2e: head 省略選択経路が開始に到達しない' >&2; exit 1; }
 
+# --- phase 4: :Review start の cmdline ref 補完 (実 git for-each-ref 同期) ---
+# customlist の呼び出し側 (review.complete) を実 repo で検証。popup 描画自体は
+# headless では不安定なため手動確認 (既知の制約のキー投入契約に従う)。
+OUT4=$(mktemp "$WORK/phase4.out.XXXXXX")
+if ! run_nvim "$REPO_ROOT/tests/e2e/phase4.lua" >"$OUT4" 2>&1; then
+  cat "$OUT4" >&2
+  echo "e2e: phase 4 nvim 終了コード非ゼロ" >&2
+  exit 1
+fi
+cat "$OUT4" | tee -a "$WORK/e2e-report.txt"
+grep -q 'E2E-C1 completion=feature,hotfix,main' "$OUT4" || {
+  echo 'e2e: :Review start ref 補完が実 git 候補 (branches 昇順) と一致しない' >&2
+  exit 1
+}
+
 # --- PR mode (issue #6: worktree / gh スタブ + 実 git) --------------------
 # pr-worktree.md「テスト方針」E2E + DoD シナリオ 1〜5。gh は PATH スタブ、
 # origin はローカル bare (refs/pull/7/head を置く = fork PR 模擬)。

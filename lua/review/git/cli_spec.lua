@@ -293,3 +293,123 @@ describe('cli.run real vim.system', function()
     end
   )
 end)
+
+describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', function()
+  restore_injections_after_each()
+
+  -- run_sync は system を 2 引数 (cb なし) で呼び handle:wait(ms) で待つ。
+  -- 注入スタブで handle を模し、wait 返り値 / timeout / kill を検証する。
+  local function sync_stub(captured, wait_result)
+    return function(cmd, opts)
+      captured.cmd = cmd
+      captured.opts = opts
+      return {
+        wait = function(_, timeout)
+          captured.timeout = timeout
+          if type(wait_result) == 'function' then
+            return wait_result()
+          end
+          return wait_result
+        end,
+        kill = function(_, sig)
+          captured.killed = sig
+        end,
+      }
+    end
+  end
+
+  local function ok_exec()
+    cli._set_executable(function()
+      return 1
+    end)
+  end
+
+  it(
+    'wait 成功 exit 0 -> 結果型 ok。args / cwd / text=true / timeout が渡される',
+    function()
+      local captured = {}
+      cli._set_system(sync_stub(captured, { code = 0, stdout = 'main\nfeature\n', stderr = '' }))
+      ok_exec()
+
+      local res = cli.run_sync('git', { 'for-each-ref', 'refs/heads/' }, {
+        cwd = '/repo',
+        timeout_ms = 120,
+        err_code = 'E_REF',
+      })
+
+      assert.same({
+        __class = 'review.Result',
+        ok = true,
+        data = { stdout = 'main\nfeature\n', code = 0 },
+      }, res)
+      assert.same({ 'git', 'for-each-ref', 'refs/heads/' }, captured.cmd)
+      assert.equals('/repo', captured.opts.cwd)
+      assert.equals(true, captured.opts.text)
+      assert.equals(120, captured.timeout)
+      -- err_code / timeout_ms は vim.system へ転送しない
+      assert.is_nil(captured.opts.err_code)
+      assert.is_nil(captured.opts.timeout_ms)
+    end
+  )
+
+  it('非ゼロ終了 -> err_code の err、stderr 末尾 1 行', function()
+    local captured = {}
+    cli._set_system(sync_stub(captured, { code = 128, stdout = '', stderr = 'boom1\nboom2\n' }))
+    ok_exec()
+
+    local res = cli.run_sync('git', { 'for-each-ref' }, { err_code = 'E_REF' })
+
+    assert.equals(false, res.ok)
+    assert.equals('E_REF', res.code)
+    assert.equals('boom2', res.error)
+    assert.equals(128, res.data.code)
+  end)
+
+  it(
+    'wait timeout (返り値 nil) -> プロセスを kill して err (補完 UI をフリーズさせない)',
+    function()
+      local captured = {}
+      cli._set_system(sync_stub(captured, nil))
+      ok_exec()
+
+      local res = cli.run_sync('git', { 'for-each-ref' }, { timeout_ms = 30 })
+
+      assert.equals(false, res.ok)
+      assert.equals(30, captured.timeout)
+      assert.is_true(captured.killed ~= nil)
+      assert.equals(
+        'git が同期実行の待ち時間内に完了しませんでした',
+        res.error
+      )
+    end
+  )
+
+  it('bin 実行不能 (executable ~= 1) -> system を呼ばず err', function()
+    local captured = {}
+    cli._set_system(sync_stub(captured, { code = 0, stdout = '', stderr = '' }))
+    local calls = 0
+    cli._set_executable(function()
+      calls = calls + 1
+      return 0
+    end)
+
+    local res = cli.run_sync('git', { 'x' })
+
+    assert.equals(false, res.ok)
+    assert.equals('E_GIT', res.code)
+    assert.equals(1, calls)
+    assert.is_nil(captured.cmd)
+  end)
+
+  it('system が同期的に throw -> 結果型 err に吸収', function()
+    cli._set_system(function()
+      error 'spawn boom'
+    end)
+    ok_exec()
+
+    local res = cli.run_sync('git', { 'x' }, { err_code = 'E_REF' })
+
+    assert.equals(false, res.ok)
+    assert.equals('E_REF', res.code)
+  end)
+end)

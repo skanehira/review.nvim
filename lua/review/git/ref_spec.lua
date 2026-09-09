@@ -531,3 +531,61 @@ describe('git/ref 実 git', function()
     assert.equals('E_REF', bad.code)
   end)
 end)
+
+describe('ref.refs_sync (cmdline 補完専用の同期一覧)', function()
+  restore_after_each()
+
+  it(
+    '実 repo: for-each-ref 2 系統を branches -> tags の順で 1 リストに返す',
+    function()
+      local dir = build_repo() -- heads: feature, main / tags: v1.0.0
+      local res = ref.refs_sync { cwd = dir }
+      assert.same({
+        __class = 'review.Result',
+        ok = true,
+        data = { 'feature', 'main', 'v1.0.0' },
+      }, res)
+    end
+  )
+
+  it(
+    'heads OK・tags 失敗 (timeout) -> ok で heads 部分集合 (完全一致を諦めない)',
+    function()
+      local captured = { n = 0 }
+      cli._set_system(function(_, _)
+        captured.n = captured.n + 1
+        return {
+          wait = function()
+            if captured.n == 1 then
+              return { code = 0, stdout = 'main\n', stderr = '' }
+            end
+            return nil -- 2 系統目 = tags が待时间切れ
+          end,
+          kill = function() end,
+        }
+      end)
+      cli._set_executable(function()
+        return 1
+      end)
+
+      local res = ref.refs_sync { cwd = '/nowhere', timeout_ms = 10 }
+
+      assert.equals(true, res.ok)
+      assert.same({ 'main' }, res.data)
+      assert.equals(2, captured.n)
+    end
+  )
+
+  it('両系統失敗 (repo 外) -> ok false E_REF (data なし)', function()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, 'p')
+    table.insert(created_dirs, dir)
+
+    local res = ref.refs_sync { cwd = dir }
+
+    assert.equals(false, res.ok)
+    assert.equals('E_REF', res.code)
+    assert.is_true(#res.error > 0)
+    assert.is_nil(res.data)
+  end)
+end)

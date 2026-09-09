@@ -97,4 +97,67 @@ function M.run(bin, args, opts, cb)
   end
 end
 
+--- run と同じ実行・結果型変換を同期的に行う。**cmdline 補完専用**
+--- (customlist は同期関数なので cb を待てない。DESIGN.md「既知の制約」の
+--- 補完 wait 例外行)。opts.timeout_ms (既定 250) を超えたらプロセスを kill して
+--- err に変換し、待ち受けフリーズを防ぐ。
+function M.run_sync(bin, args, opts)
+  opts = opts or {}
+  local err_code = opts.err_code or result.codes.E_GIT
+  local timeout = opts.timeout_ms or 250
+
+  if executable(bin) ~= 1 then
+    return result.err(bin .. ' が見つかりません', err_code)
+  end
+
+  local sys_opts = {}
+  for key, value in pairs(opts) do
+    if key ~= 'err_code' and key ~= 'timeout_ms' then
+      sys_opts[key] = value
+    end
+  end
+  sys_opts.text = true
+
+  local ok_spawn, handle = pcall(system, vim.list_extend({ bin }, args or {}), sys_opts)
+  if not ok_spawn or handle == nil then
+    return result.err(bin .. ' の起動に失敗しました', err_code)
+  end
+
+  local ok_wait, out = pcall(function()
+    return handle:wait(timeout)
+  end)
+  if not ok_wait or out == nil then
+    -- 待てないなら落とす (完了通知を待つと補完 UI が固まる)。kill 失敗は無視。
+    pcall(function()
+      handle:kill(9)
+    end)
+    return result.err(
+      bin .. ' が同期実行の待ち時間内に完了しませんでした',
+      err_code
+    )
+  end
+
+  local code = out.code or 0
+  local data = { stdout = out.stdout or '', code = code }
+  if out.err ~= nil then
+    return {
+      __class = result.class,
+      ok = false,
+      data = data,
+      error = bin .. ' の起動に失敗しました',
+      code = err_code,
+    }
+  elseif code == 0 then
+    return result.ok(data)
+  end
+  return {
+    __class = result.class,
+    ok = false,
+    data = data,
+    error = stderr_last_line(out.stderr)
+      or (bin .. ' が終了コード ' .. code .. ' で失敗しました'),
+    code = err_code,
+  }
+end
+
 return M

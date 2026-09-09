@@ -107,14 +107,14 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | 書式 | 概要 | 機能設計 |
 | --- | --- | --- |
 | `:Review` | open セッションの復元 (複数あれば選択) | persistence-restore |
-| `:Review start <base> [head]` | ブランチレビュー開始 (head 省略時は選択 UI。`completion=customlist`) | diff-review |
+| `:Review start <base> [head]` | ブランチレビュー開始 (`{base}` / `{head}` は cmdline `<Tab>` で branches → tags 順に補完。head 省略時の選択 UI も同候補源。`completion=customlist`) | diff-review |
 | `:Review pr <number\|url>` | PR レビュー開始 (gh 連携 + worktree) | pr-worktree |
 | `:Review list` | 保存済みセッションの一覧表示 | persistence-restore |
 | `:Review close` | 現セッションの save + worktree クリーンアップ | pr-worktree (セッション終了節) |
 | `:Review delete <id>` | 保存済みセッションの削除 (comments も失う。active なら先に close 相当の掃除をしてから削除、確認付き) | pr-worktree (セッション終了節) |
 | `:Review prompt [file]` | プロンプトをクリップボードへ (省略 = 全コメント、file 指定 = そのファイル分) | ai-prompt |
 
-**Lua API**: `require("review").setup(opts)` / `.start({base, head})` / `.start_pr({number})` / `.resume({id})` / `.close()` / `.delete({id})` / `.prompt_all(opts)` / `.prompt_for_file(path, opts)`。戻り値の結果型 `{ok, data, error, code}` は**同期的に判定できる失敗** (引数不正、active 不在、config 不正) のみを表し、git/gh を伴う操作は「ディスパッチを受け付けた」ことの `ok` として返る。実行の成否 (差分取得の結果) は非同期に UI 開閉か vim.notify でフィードバックする (UI をブロックしないため `:wait()` は使わない)。**active セッションを必要とする API (close / prompt_* / レビュー操作) が active 0 件で呼ばれた場合は `E_NOT_ACTIVE` を同期で返す** (`:Review` 無印・`:Review list`・`:Review delete` は active 不要)。
+**Lua API**: `require("review").setup(opts)` / `.start({base, head})` / `.start_pr({number})` / `.resume({id})` / `.close()` / `.delete({id})` / `.prompt_all(opts)` / `.prompt_for_file(path, opts)`。戻り値の結果型 `{ok, data, error, code}` は**同期的に判定できる失敗** (引数不正、active 不在、config 不正) のみを表し、git/gh を伴う操作は「ディスパッチを受け付けた」ことの `ok` として返る。実行の成否 (差分取得の結果) は非同期に UI 開閉か vim.notify でフィードバックする (UI をブロックしないため `:wait()` は使わない。例外は cmdline ref 補完のみ — 「既知の制約」参照)。**active セッションを必要とする API (close / prompt_* / レビュー操作) が active 0 件で呼ばれた場合は `E_NOT_ACTIVE` を同期で返す** (`:Review` 無印・`:Review list`・`:Review delete` は active 不要)。
 
 **config (setup で受け付ける既定値)**: `git_bin="git"`、`gh_bin="gh"`、`diff_context=nil` (git 既定の 3)、`auto_notify_resume=true`、`keymaps={...}` (下記のデフォルト表)、`highlight={}` (グループ別 override)。
 
@@ -175,6 +175,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - クリップボード provider の検出 Lua API (`clipboard.provider()`) は nvim 0.13-nightly 実機に存在しない (`require('clipboard')` / `require('vim.ui.clipboard')` ともにモジュール無し)。provider の実体は `g:clipboard` テーブルか legacy autoload `clipboard#copy` のみで、**provider 無しでも `setreg('+', ...)` / `getreg('+')` は内部選択に静かに成功する**ため、書いてから成否を判定できない (見た目は動く)。検出は書き込み前に `g:clipboard` / `exists('*clipboard#copy')` / 将来ビルド向けの `require('clipboard').provider()` の順で行い、無いは "0 のみ + WARN に退避する (`handlers/prompt.lua`)
 - `setreg` の第 1 引数に List (`{'+', '*'}`) はレジスタ文字列として扱われ `Vim:E730: Using a List as a String` になる (0.13-nightly 実測)。複数レジスタへの同値書込は個別呼び出しで行う
 - customlist 補完の関数には補完中の語だけでなく cmdline 全体と `cursorpos` が渡る。1 語目の候補返却に引数位置判定を混ぜると 2 語目以降で誤候補を返す (実測)。位置判定は語数 + 末尾空白で行う (`cursorpos` は語の末尾で発火する custom の性質上、末尾位置の判定には不要)。`input()` の customlist 側は Vim script 関数名文字形式のみ (上の E467 制約) で、2 系統があることを区別する
+- cmdline の customlist 補完は同期 API なのでコールバックを待てない。`:Review start` の ref 補完だけ `vim.system():wait(250ms)` での同期取得 (`git/cli.run_sync`、timeout は kill + 候補 0) を許可する — **他の経路で `:wait()` によるブロッキングは依然禁止** (「API 一覧」の同期/非同期契約)。暴走防止は待機上限 + TTL cache (成功 30s / 失敗 5s で無通知 — hammering と永久不活の両方防止) の 2 段構え。候補は branches → tags (refname 昇順) で base 位置・head 位置・head 選択 UI の 3 経路同一源
 - Neovim 標準 API に sha1 は無い (`vim.fn` にあるのは `sha256` のみ)。repo-hash の契約は sha1 先頭 16 桁であり、sha256 等に算法を差し換えると repo-hash ディレクトリ名が変わり既存セッションファイルが到達不能になる (見た目は動く)。sha1 は Neovim 組み込みの LuaJIT `bit` モジュールで `store/paths.lua` が実装している
 - LuaJIT の `string.format('%x')` は負の int32 を 64bit 符号拡張の 16 桁で出力する (8 桁想定で書くと動くように見えてハッシュ値が壊れる)。32bit 演算結果を 16 進出力する直前は 0..2^32-1 の非負値へ正規化する (`store/paths.lua` の `u32`)
 - headless テスト / E2E でのキー入力は `:normal` が唯一の安定経路: `nvim_input` / `feedkeys` の typeahead は `vim.wait` 中で消費されず (発火 observed 0 件)、`startinsert` も insert mode を維持しない (nvim 0.13 nightly 実測)。`:normal` 文字列内で error が出ると hit-enter prompt でハングするため、driver は pcall + `cquit` で正規化する

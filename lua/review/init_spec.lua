@@ -642,3 +642,141 @@ describe('review.complete', function()
     -- 絞り込み動作自体は上の test で正アサーション済み (リトマス B 対応)
   end)
 end)
+
+describe(':Review start の base/head ref 補完 (cmdline)', function()
+  mock_notify_and_handlers()
+
+  local cli = require 'review.git.cli'
+
+  -- for-each-ref の同期 handle を模す。lists は namespace -> stdout。
+  -- fail=true は両系統の wait timeout (返り値 nil)。
+  local function stub_refs(lists, fail)
+    local captured = { calls = 0 }
+    cli._set_system(function(cmd)
+      captured.calls = captured.calls + 1
+      local ns = cmd[#cmd]
+      return {
+        wait = function()
+          if fail then
+            return nil
+          end
+          return { code = 0, stdout = lists[ns] or '', stderr = '' }
+        end,
+        kill = function() end,
+      }
+    end)
+    cli._set_executable(function()
+      return 1
+    end)
+    return captured
+  end
+
+  local REFS = { ['refs/heads/'] = 'alpha\nfeature\nmain\n', ['refs/tags/'] = 'v1.0\n' }
+
+  before_each(function()
+    review._reset_ref_completion_cache()
+    review._set_now(nil)
+  end)
+  after_each(function()
+    cli._set_system(nil)
+    cli._set_executable(nil)
+    review._set_now(nil)
+  end)
+
+  it('start pos3 lead 空: branches -> tags 順の全候補', function()
+    stub_refs(REFS)
+    assert.same({ 'alpha', 'feature', 'main', 'v1.0' }, review.complete('', 'Review start ', 0))
+  end)
+
+  it('lead prefix 一致に絞る', function()
+    stub_refs(REFS)
+    assert.same({ 'feature' }, review.complete('fe', 'Review start fe', 0))
+  end)
+
+  it('pos4 (head 位置) も同じ候補源 (base を打った後 continue)', function()
+    stub_refs(REFS)
+    assert.same({ 'v1.0' }, review.complete('v', 'Review start main v', 0))
+  end)
+
+  it('2 回目は cache が効き git を再取得しない', function()
+    local captured = stub_refs(REFS)
+    assert.same({ 'alpha', 'feature', 'main', 'v1.0' }, review.complete('', 'Review start ', 0))
+    assert.equals(2, captured.calls)
+    assert.same({ 'alpha' }, review.complete('al', 'Review start al', 0))
+    assert.equals(2, captured.calls)
+  end)
+
+  it('TTL 経過後は再取得する (針は _set_now 注入)', function()
+    local captured = stub_refs(REFS)
+    local t = 1000.0
+    review._set_now(function()
+      return t
+    end)
+    review.complete('', 'Review start ', 0)
+    assert.equals(2, captured.calls)
+    t = t + 31.0
+    review.complete('', 'Review start ', 0)
+    assert.equals(4, captured.calls)
+  end)
+
+  it(
+    '取得失敗は候補 0 件・無通知、失敗 TTL (5s) 中は再取得せず、失効後に再取得',
+    function()
+      local captured = { calls = 0 }
+      local fail = true
+      cli._set_system(function(_)
+        captured.calls = captured.calls + 1
+        return {
+          wait = function()
+            if fail then
+              return nil
+            end
+            return { code = 0, stdout = '', stderr = '' }
+          end,
+          kill = function() end,
+        }
+      end)
+      cli._set_executable(function()
+        return 1
+      end)
+      local t = 1000.0
+      review._set_now(function()
+        return t
+      end)
+
+      assert.same({}, review.complete('', 'Review start ', 0))
+      assert.same({}, notifications)
+      assert.equals(2, captured.calls)
+
+      t = t + 4.0
+      assert.same({}, review.complete('', 'Review start ', 0))
+      assert.equals(2, captured.calls)
+
+      t = t + 2.0
+      -- heads / tags の見分けは namespace で行う (上のスタブを差し替えて成功経路へ)
+      fail = false
+      cli._set_system(function(cmd)
+        captured.calls = captured.calls + 1
+        local ns = cmd[#cmd]
+        return {
+          wait = function()
+            return {
+              code = 0,
+              stdout = (ns == 'refs/heads/') and 'alpha\nfeature\nmain\n' or 'v1.0\n',
+              stderr = '',
+            }
+          end,
+          kill = function() end,
+        }
+      end)
+      assert.same({ 'alpha', 'feature', 'main', 'v1.0' }, review.complete('', 'Review start ', 0))
+      assert.equals(4, captured.calls)
+    end
+  )
+
+  it('サブコマンド位置では refs を引かない (start 候補だけ)', function()
+    local captured = stub_refs(REFS)
+    assert.same({ 'start' }, review.complete('s', 'Review s', 0))
+    assert.equals(0, captured.calls)
+  end)
+end)

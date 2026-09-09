@@ -18,6 +18,9 @@ USAGE						*review-usage*
 
 	:Review					開いているセッションを復元
 	:Review start {base} [{head}]		ブランチレビュー開始
+					{base} / {head} は cmdline で <Tab>
+					により branches -> tags 順に補完
+					される (取得は同期・短時間 cache)
 	:Review pr {number|url}			PR レビュー開始 (gh 連携)
 	:Review list				保存済みセッション一覧
 	:Review close				現セッションを保存して閉じる
