@@ -39,6 +39,21 @@ local SECTIONS = {
       { 'close', '一覧を閉じる (セッション状態は変えない)' },
     },
   },
+  {
+    -- コメント入力 float のキーは config.keymaps 対象外 (固定)。確定/閉じるの
+    -- 操作は discoverability の中心なので help に載せる (窓 title にも常時表示)。
+    title = 'コメント入力 (c/e で開く)',
+    keymap = nil,
+    rows = {
+      { '<CR>', '確定 (Normal)。insert 中の <CR> は改行' },
+      {
+        'q',
+        '閉じる。本文なし=キャンセル / 本文ありは閉じず、続けて q で破棄',
+      },
+      { '<C-y>', '確定 (insert)' },
+      { '<Esc>', 'Normal へ戻るだけ (窓は閉じない)' },
+    },
+  },
 }
 
 function M.open()
@@ -48,7 +63,8 @@ function M.open()
     table.insert(lines, '')
     table.insert(lines, '[' .. section.title .. ']')
     for _, row in ipairs(section.rows) do
-      table.insert(lines, keymaps[section.keymap][row[1]] .. ' ' .. row[2])
+      local key = section.keymap and keymaps[section.keymap][row[1]] or row[1]
+      table.insert(lines, key .. ' ' .. row[2])
     end
   end
 

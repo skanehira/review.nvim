@@ -50,10 +50,26 @@ o: 実ファイル / q: close / <F1>: help)、変更ファイル一覧 (o, x, q,
 >docs/design/DESIGN.md 「API 一覧」> を参照。
 
 ==============================================================================
+COMMENT INPUT					*review-comment-input*
+
+c/e で開くコメント入力 (float) の確定と閉じる操作:
+
+	<CR>		Normal で確定。insert 中はただの改行
+	q		Normal で閉じる。本文がなければキャンセル。
+			本文があるときは閉じず、続けて (2 秒以内に) q を
+			押したときだけ入力を破棄して閉じる
+	<C-y>		insert 中の確定 (エイリアス)
+	<Esc>		Normal へ戻るだけで窓は閉じない
+
+窓の title にも確定/閉じるの操作を表示する。<F1> の help float にも同じ
+一覧がある。
+
+==============================================================================
 CONTENTS					*review-contents*
 
   INTRODUCTION		|review|
   USAGE			|review-usage|
   SETUP			|review-setup|
+  COMMENT INPUT		|review-comment-input|
 
  vim:tw=78:ts=8:noet:ft=help:norl:

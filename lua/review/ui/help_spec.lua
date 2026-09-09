@@ -51,6 +51,18 @@ describe('help.open', function()
     assert.is_true(has_line(lines, '<F1> このヘルプ'))
     assert.is_true(has_line(lines, '<CR> そのファイルの diff へ移動'))
     assert.is_true(has_line(lines, 'x viewed 切替'))
+    -- コメント入力 float の操作 (ui/input.lua の契約と同一文言。確定/閉じるの
+    -- discoverability を help 側でも保証する)
+    assert.is_true(has_line(lines, '[コメント入力 (c/e で開く)]'))
+    assert.is_true(has_line(lines, '<CR> 確定 (Normal)。insert 中の <CR> は改行'))
+    assert.is_true(
+      has_line(
+        lines,
+        'q 閉じる。本文なし=キャンセル / 本文ありは閉じず、続けて q で破棄'
+      )
+    )
+    assert.is_true(has_line(lines, '<C-y> 確定 (insert)'))
+    assert.is_true(has_line(lines, '<Esc> Normal へ戻るだけ (窓は閉じない)'))
     vim.cmd 'normal q'
   end)
 

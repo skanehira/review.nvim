@@ -1,5 +1,8 @@
 -- ui/input: マルチラインコメント入力 float (diff-review.md「操作」c / e)。
--- 仕様駆動は :normal 経由の実キーシーケンスで行う (keymap 注册の assert だけでは
+-- 操作契約: insert の <CR> は改行、Normal の <CR> で確定、q で閉じる
+-- (本文ありのときは閉じず、破棄するには 2 秒以内にもう一度 q)、<C-y> は確定の
+-- エイリアス、<Esc> は Normal へ戻るだけで窓を閉じない。
+-- 仕様駆動は :normal 経由の実キーシーケンスで行う (keymap 登録の assert だけでは
 -- 「確定で callback に body が届く」契約を検証できない)。headless では
 -- nvim_input/feedkeys の typeahead が消費されないため :normal が唯一の投入経路
 -- (DESIGN.md「既知の制約」)。
@@ -19,8 +22,16 @@ local function use_isolated_tabpage()
     vim.cmd 'tabnew'
     state.tab = vim.api.nvim_get_current_tabpage()
     state.confirmed = {}
+    state.notifications = {}
+    state.real_notify = vim.notify
+    vim.notify = function(msg, level)
+      table.insert(state.notifications, { msg = msg, level = level })
+    end
+    input._set_now(nil)
   end)
   after_each(function()
+    vim.notify = state.real_notify
+    input._set_now(nil)
     if vim.api.nvim_tabpage_is_valid(state.tab) then
       vim.api.nvim_set_current_tabpage(state.tab)
       vim.cmd 'tabclose!'
@@ -46,24 +57,34 @@ end
 describe('input.open 確定', function()
   use_isolated_tabpage()
   it(
-    'insert 入力して <C-y> で確定すると on_confirm に本文が届き float が閉じる',
+    'insert 入力 -> <Esc> (Normal へ) -> <CR> で確定すると on_confirm に本文が届き float が閉じる (主経路)',
     function()
       open()
       local wins_with_float = tab_wins()
-      vim.cmd 'normal iuse map here'
-      vim.cmd('normal ' .. CY)
+      -- :normal はキー列を続けて解釈するので insert 終了 (<Esc>) と Normal <CR>
+      -- 確定は 1 シーケンスで投入する (E2E と同じ契約)。
+      vim.cmd('normal ' .. 'iuse a map here' .. ESC .. CR)
 
-      assert.same({ 'use map here' }, state.confirmed)
+      assert.same({ 'use a map here' }, state.confirmed)
       assert.equals(wins_with_float - 1, tab_wins())
     end
   )
 
-  it('<CR> で作った複数行は \\n 連結の 1 body になる', function()
+  it('insert-mode <C-y> は確定のエイリアスとして維持される', function()
     open()
-    vim.cmd('normal iline1' .. CR .. 'line2')
+    vim.cmd 'normal iuse map here'
     vim.cmd('normal ' .. CY)
-    assert.same({ 'line1\nline2' }, state.confirmed)
+    assert.same({ 'use map here' }, state.confirmed)
   end)
+
+  it(
+    'insert の <CR> は改行で、Normal <CR> 確定で \\n 連結の 1 body になる',
+    function()
+      open()
+      vim.cmd('normal ' .. 'iline1' .. CR .. 'line2' .. ESC .. CR)
+      assert.same({ 'line1\nline2' }, state.confirmed)
+    end
+  )
 
   it(
     'value の事前入力が buffer に入り、編集確定では編集後本文が返る',
@@ -85,14 +106,92 @@ describe('input.open 確定', function()
   end)
 end)
 
-describe('input.open キャンセル', function()
+describe('input.open 閉じる / 破棄', function()
   use_isolated_tabpage()
-  it('<Esc> では on_confirm を呼ばずに float を閉じる', function()
+
+  it('<Esc> は窓を閉じない (本文保持のまま Normal へ戻るだけ)', function()
     open()
-    vim.cmd 'normal iunsent'
-    vim.cmd('normal ' .. ESC)
+    vim.cmd('normal ' .. 'iunsent' .. ESC)
+    assert.equals(2, tab_wins())
     assert.same({}, state.confirmed)
+    -- 閉じないので本文は残り、そこから確定できる
+    vim.cmd('normal ' .. CR)
+    assert.same({ 'unsent' }, state.confirmed)
+  end)
+
+  it('本文なしの q は即閉じる (キャンセル・無通知)', function()
+    open()
+    assert.is_true(tab_wins() == 2)
+    vim.cmd 'normal q'
     assert.equals(1, tab_wins())
+    assert.same({}, state.confirmed)
+    assert.same({}, state.notifications)
+  end)
+
+  it(
+    '本文ありの q は閉じず WARN、2 秒以内にもう一度 q で入力を破棄して閉じる (on_confirm なし)',
+    function()
+      open()
+      vim.cmd('normal ' .. 'idraft' .. ESC)
+      state.now = 1000.0
+      input._set_now(function()
+        return state.now
+      end)
+
+      vim.cmd 'normal q'
+      assert.equals(2, tab_wins())
+      assert.same({}, state.confirmed)
+      assert.equals(1, #state.notifications)
+      assert.is_true(state.notifications[1].msg:find('確定', 1, true) ~= nil)
+      assert.is_true(state.notifications[1].level == vim.log.levels.WARN)
+
+      state.now = state.now + 1.5
+      vim.cmd 'normal q'
+      assert.equals(1, tab_wins())
+      assert.same({}, state.confirmed)
+    end
+  )
+
+  it(
+    'q の arming は本文編集で解除される (arming -> 編集 -> q は WARN が積み直すだけで閉じない)',
+    function()
+      open()
+      vim.cmd('normal ' .. 'idraft' .. ESC)
+      state.now = 1000.0
+      input._set_now(function()
+        return state.now
+      end)
+
+      vim.cmd 'normal q'
+      assert.equals(1, #state.notifications)
+      -- 本文を変えて (q 押下時点の本文比較 = disarm 相当) discard window 内に
+      -- q しても「2 度押し」にならず WARN が積み直されるだけで閉じないこと。
+      -- 比較方式でなければ +1.5s は window 内なのでここで閉じて (= win 1)
+      -- このテストが落ちる = 編集による arming 解除のリトマス。
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'draft edited' })
+      state.now = state.now + 1.5
+      assert.equals(2, tab_wins())
+      vim.cmd 'normal q'
+      assert.equals(2, tab_wins())
+      assert.same({}, state.confirmed)
+      assert.equals(2, #state.notifications)
+    end
+  )
+
+  it('discard window 超後の q は再び WARN (閉じない)', function()
+    open()
+    vim.cmd('normal ' .. 'idraft' .. ESC)
+    state.now = 1000.0
+    input._set_now(function()
+      return state.now
+    end)
+
+    vim.cmd 'normal q'
+    state.now = state.now + 3.0
+    vim.cmd 'normal q'
+    assert.equals(2, tab_wins())
+    assert.same({}, state.confirmed)
+    assert.equals(2, #state.notifications)
   end)
 
   it(
@@ -111,11 +210,22 @@ describe('input.open 表示契約', function()
   use_isolated_tabpage()
   it('float は border=rounded で開く (DESIGN.md 横断規約 UI)', function()
     open()
+    local wins_here = tab_wins()
     -- nvim_win_get_config の border は指定文字列でなく枠文字の table で返る。
     -- rounded 枠の代表文字で判定する。
     local cfg = vim.api.nvim_win_get_config(0)
     assert.equals('╭', cfg.border[1])
     assert.is_true(cfg.relative ~= '')
     vim.cmd('normal ' .. ESC)
+    assert.equals(wins_here, tab_wins())
+  end)
+
+  it('窓 title に確定/閉じる的操作ヒントが表示される', function()
+    open()
+    -- 0.10 では文字列、0.13 では { { str }, ... } の table で返る (両対応)。
+    local t = vim.api.nvim_win_get_config(0).title
+    local text = type(t) == 'table' and (type(t[1]) == 'table' and t[1][1] or t[1]) or (t or '')
+    assert.is_true(text:find('<CR> 確定', 1, true) ~= nil)
+    assert.is_true(text:find('q 閉じる', 1, true) ~= nil)
   end)
 end)

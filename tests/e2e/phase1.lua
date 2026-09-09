@@ -65,7 +65,11 @@ local function run()
   end, 'comment float open')
   local body = 'use a map here'
   local cy = vim.api.nvim_replace_termcodes('<C-y>', true, false, true)
-  vim.cmd('normal i' .. body .. cy)
+  local esc = vim.api.nvim_replace_termcodes('<Esc>', true, false, true)
+  local crn = vim.api.nvim_replace_termcodes('<CR>', true, true, true)
+  -- 新操作契約の主経路: insert で本文 -> <Esc> (Normal) -> <CR> 確定。
+  -- (:normal はキー列を続けて解釈 — <C-y> エイリアスは range 側で維持検証)
+  vim.cmd('normal ' .. 'i' .. body .. esc .. crn)
 
   local ns = vim.api.nvim_get_namespaces()['review_comment']
   if ns == nil then
