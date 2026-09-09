@@ -436,6 +436,182 @@ describe('VimEnter 継続通知フック (setup で登録)', function()
   end)
 end)
 
+describe(
+  ':Review prompt 結線と prompt_* / file 補完 (ai-prompt.md「実装の配置」facade)',
+  function()
+    local cli = require 'review.git.cli'
+    local paths = require 'review.store.paths'
+    local store = require 'review.store.session'
+    local session_handler = require 'review.handlers.session'
+    local prompt_handler = require 'review.handlers.prompt'
+
+    local PROMPT_REPO = vim.fn.tempname()
+    vim.fn.mkdir(PROMPT_REPO, 'p')
+
+    local RAW = table.concat({
+      'diff --git a/a.lua b/a.lua',
+      'index 1..2 100644',
+      '--- a/a.lua',
+      '+++ b/a.lua',
+      '@@ -1 +1,2 @@',
+      ' one',
+      '+two',
+      '',
+    }, '\n')
+
+    before_each(function()
+      config.reset()
+      notifications = {}
+      real_notify = vim.notify
+      vim.notify = function(msg, level)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+      state_dir = vim.fn.tempname()
+      vim.fn.mkdir(state_dir, 'p')
+      paths._set_data_dir(state_dir)
+      store._set_notify(function() end)
+      store._set_now(function()
+        return 4321
+      end)
+      session_handler._reset()
+      session_handler._set_now(function()
+        return 4321
+      end)
+      cli._set_system(function(cmd, _opts, on_exit)
+        if cmd[2] == 'rev-parse' then
+          on_exit { code = 0, stdout = PROMPT_REPO .. '\n', stderr = '' }
+        else
+          on_exit { code = 0, stdout = RAW, stderr = '' }
+        end
+      end)
+      cli._set_executable(function()
+        return 1
+      end)
+      vim.cmd 'tabnew'
+    end)
+    after_each(function()
+      vim.notify = real_notify
+      paths._set_data_dir(nil)
+      store._set_notify(nil)
+      store._set_now(nil)
+      session_handler._reset()
+      session_handler._set_now(nil)
+      cli._set_system(nil)
+      cli._set_executable(nil)
+      vim.cmd 'tabclose!'
+      vim.fn.delete(state_dir, 'rf')
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
+          vim.api.nvim_buf_delete(buf, { force = true })
+        end
+      end
+    end)
+
+    it(
+      ':Review prompt (引数なし) は handlers.prompt.all に委譲し結果型を返す',
+      function()
+        local called_with_opts = 'unset'
+        local real_all = prompt_handler.all
+        prompt_handler.all = function(opts)
+          called_with_opts = opts
+          return result.ok 'from-all'
+        end
+
+        local res = review.command { 'prompt' }
+
+        prompt_handler.all = real_all
+        assert.equals(nil, called_with_opts)
+        assert.same({ __class = 'review.Result', ok = true, data = 'from-all' }, res)
+      end
+    )
+
+    it(':Review prompt <file> は handlers.prompt.for_file に path を渡す', function()
+      local seen_path
+      local real_for_file = prompt_handler.for_file
+      prompt_handler.for_file = function(path, opts)
+        seen_path = path
+        assert.equals(nil, opts)
+        return result.ok 'from-file'
+      end
+
+      local res = review.command { 'prompt', 'lua/review/diff.lua' }
+
+      prompt_handler.for_file = real_for_file
+      assert.equals('lua/review/diff.lua', seen_path)
+      assert.same({ __class = 'review.Result', ok = true, data = 'from-file' }, res)
+    end)
+
+    it(
+      'Lua API prompt_all / prompt_for_file は active 不在で E_NOT_ACTIVE を同期で返す',
+      function()
+        assert.same({
+          __class = 'review.Result',
+          ok = false,
+          error = 'review.nvim: レビュー進行中セッションがありません',
+          code = 'E_NOT_ACTIVE',
+        }, review.prompt_all())
+        assert.same({
+          __class = 'review.Result',
+          ok = false,
+          error = 'review.nvim: レビュー進行中セッションがありません',
+          code = 'E_NOT_ACTIVE',
+        }, review.prompt_for_file('a.lua', { copy = false }))
+      end
+    )
+
+    it(
+      'prompt_all({copy=false}) は実セッションの全コメントを整形して返す (facade->core 結線)',
+      function()
+        session_handler.start { base = 'main', head = 'feature' }
+        table.insert(session_handler.active().comments, {
+          id = 'c1',
+          file = 'a.lua',
+          line = 2,
+          end_line = 2,
+          body = 'use map',
+          anchor = vim.NIL,
+          state = 'active',
+          created_at = 4321,
+        })
+
+        local res = review.prompt_all { copy = false }
+
+        assert.same({
+          __class = 'review.Result',
+          ok = true,
+          data = {
+            text = table.concat({
+              'Review the changes in main..feature. Please address the comments below.',
+              '',
+              '@a.lua#L2',
+              'use map',
+            }, '\n'),
+            count = 1,
+          },
+        }, res)
+      end
+    )
+
+    it(
+      '`prompt` の file 引数補完は active セッションの diff ファイル一覧 (customlist)',
+      function()
+        session_handler.start { base = 'main', head = 'feature' }
+
+        assert.same({ 'a.lua' }, review.complete('a', ':Review prompt a', 18))
+        assert.same({ 'a.lua' }, review.complete('', ':Review prompt ', 15))
+      end
+    )
+
+    it(
+      'file 補完は active 不在では空、2 引目ではサブコマンド補完を維持する',
+      function()
+        assert.same({}, review.complete('a', ':Review prompt a', 18))
+        assert.same({ 'pr', 'prompt' }, review.complete('p', ':Review p', 9))
+      end
+    )
+  end
+)
+
 describe('review.complete', function()
   mock_notify_and_handlers()
 

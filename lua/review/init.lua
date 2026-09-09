@@ -1,7 +1,5 @@
 -- review.nvim facade: setup と :Review コマンド入口 (+ Lua API)。
--- prompt は ai-prompt issue で cmd_prompt として追加される
--- (未登録 = unknown として WARN)。ハンドラは発火時の require とし、
--- 起動コストと循環を避ける。
+-- ハンドラは発火時の require とし、起動コストと循環を避ける。
 local config = require 'review.config'
 local result = require 'review.core.result'
 
@@ -75,7 +73,17 @@ function M.cmd_delete(args)
   return require('review.handlers.session').delete(args[2])
 end
 
--- Lua API (DESIGN.md「API 一覧」) — 結果型 passthrough。prompt_* は ai-prompt issue。
+--- `:Review prompt [file]` (ai-prompt.md「出力経路」)。file 指定はスコープ解決を
+--- handlers.prompt.for_file に委譲する。
+function M.cmd_prompt(args)
+  local file = args[2]
+  if file ~= nil and file ~= '' then
+    return M.prompt_for_file(file)
+  end
+  return M.prompt_all()
+end
+
+-- Lua API (DESIGN.md「API 一覧」) — 結果型 passthrough。
 function M.start(opts)
   return require('review.handlers.session').start(opts)
 end
@@ -106,6 +114,16 @@ function M.delete(opts)
   return require('review.handlers.session').delete(type(opts) == 'table' and opts.id or opts)
 end
 
+-- prompt_* は opts.copy=false でコピーを抑えられる (ai-prompt.md Lua API の
+-- テストフック)。戻り値は同期失敗 (E_NOT_ACTIVE) のみ結果型で表す。
+function M.prompt_all(opts)
+  return require('review.handlers.prompt').all(opts)
+end
+
+function M.prompt_for_file(path, opts)
+  return require('review.handlers.prompt').for_file(path, opts)
+end
+
 --- :Review の引数列を受け取り、cmd_<サブコマンド> へ委譲する。
 --- 引数個数の検証は各ハンドラの責務。戻り値はハンドラの結果型をそのまま返す。
 function M.command(args)
@@ -120,9 +138,34 @@ function M.command(args)
   return handler(args)
 end
 
---- complete=customlist 用。サブコマンド候補を prefix 一致で返す。
-function M.complete(arglead, _cmdline, _cursorpos)
+--- cmd_<サブコマンド> のファイル引数 (現状 prompt [file])。ai-prompt.md
+--- エッジケース「曖昧パスの補完 = 対象ファイル一覧」。active 不在は空。
+local function file_candidates(lead)
+  local session = require('review.handlers.session').active()
+  if session == nil or session.files == nil then
+    return {}
+  end
+  local out = {}
+  for path in pairs(session.files) do
+    if path:sub(1, #lead) == lead then
+      out[#out + 1] = path
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+--- complete=customlist 用。2 引目はサブコマンド、`prompt` の 3 引目は diff の
+--- ファイル一覧を prefix 一致で返す (ai-prompt.md「file 引数解決」)。
+--- custom 補完は入力語の末尾で発火するため cursorpos は見ない。
+function M.complete(arglead, cmdline, _cursorpos)
   local lead = arglead or ''
+  local words = vim.split((cmdline or ''):gsub('^:', ''), '%s+', { trimempty = true })
+  -- 末尾が空白なら新しい語を補完中 = 語数 +1、そうでないなら最後の語が arglead。
+  local pos = (cmdline or ''):sub(-1) == ' ' and #words + 1 or math.max(#words, 2)
+  if pos >= 3 and words[2] == 'prompt' and words[1] == 'Review' then
+    return file_candidates(lead)
+  end
   local candidates = {}
   for _, name in ipairs(M.subcommands) do
     if name:sub(1, #lead) == lead then
