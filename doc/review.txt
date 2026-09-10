@@ -27,8 +27,29 @@ USAGE						*review-usage*
 	:Review delete {id}			保存済みセッションを削除
 	:Review prompt [file]			プロンプトをクリップボードへ
 
-Lua API (~require("review")~): setup / start / start_pr / resume / close /
-delete / prompt_all / prompt_for_file。
+==============================================================================
+API						*review-api*
+
+Lua から呼ぶ公開 API (~require("review")~)。同じ操作のコマンドライン相当は
+|review-usage| を見る。戻り値は結果型 `{ok, data, error, code}` で、同期的に
+判定できる失敗 (引数不正、active 不在 `E_NOT_ACTIVE`、config 不正) を表す。
+git/gh を伴う実行の成否は非同期に UI 開閉か vim.notify で返る
+(同期/非同期の契約の正本は docs/design/DESIGN.md「API 一覧」)。
+
+	setup(opts)			config 合成と初期化 (省略可、既定値で
+					動作)。設定項目は |review-setup|
+	start({ base=, head= })		ブランチレビュー開始。head 省略時は
+					選択 UI になる
+	start_pr({ number= })		PR レビュー開始 (gh 連携、|review-usage|)
+	resume({ id= })			保存済みセッションを id で復元
+	close()				現セッションの save + 窓を閉じる +
+					worktree 掃除
+	delete({ id= })			保存済みセッションを削除 (worktree
+					掃除含む。active な id も可)
+	prompt_all(opts)		全コメントのプロンプトを整形し
+					クリップボード/"0 へ。opts.copy = false
+					でコピーせずに text を返す (テストフック)
+	prompt_for_file(path, opts)	そのファイルのコメントのみ同上
 
 ==============================================================================
 SETUP						*review-setup*
@@ -97,6 +118,7 @@ CONTENTS					*review-contents*
 
   INTRODUCTION		|review|
   USAGE			|review-usage|
+  API			|review-api|
   SETUP			|review-setup|
   KEYMAPS		|review-keymaps|
   COMMENT INPUT		|review-comment-input|
