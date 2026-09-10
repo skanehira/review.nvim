@@ -90,6 +90,29 @@ describe('cli.run 失敗', function()
     }, received)
   end)
 
+  -- 実 git は fatal 行の後に usage を続ける。末尾 1 行採取だと usage 末尾が
+  -- error になり、翻訳も「何に失敗したか」も届かない (UX review F4 の実測再発)。
+  it('fatal 行 + usage 続きの stderr では主メッセージ行を error にする', function()
+    local captured = {}
+    cli._set_system(stub_system(captured))
+    cli._set_executable(function()
+      return 1
+    end)
+    local received
+    cli.run('git', { 'diff', 'nope', 'feature' }, nil, function(res)
+      received = res
+    end)
+    captured.on_exit {
+      code = 128,
+      stdout = '',
+      stderr = [[fatal: bad revision 'nope'
+usage: git diff [<options>] [<commit>]
+  -u, --unified[=<n>] <n>
+]],
+    }
+    assert.equals("fatal: bad revision 'nope'", received.error)
+  end)
+
   it(
     'stderr が空の非ゼロ終了では終了コード入りの日本語メッセージになる',
     function()
@@ -352,17 +375,37 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
     end
   )
 
-  it('非ゼロ終了 -> err_code の err、stderr 末尾 1 行', function()
+  -- 主メッセージ行優先へ変更 (UX review F4)。補完で見るのは fatal/error 主行で
+  -- 足りるので、末尾 1 行采取 (usage 末尾が残る実 git shape での不整合) から
+  -- 同期側も同じ規則に揃える。
+  it(
+    '非ゼロ終了 -> err_code の err、stderr 主メッセージ行 (fatal 優先 / 先頭 fallback)',
+    function()
+      local captured = {}
+      cli._set_system(sync_stub(captured, { code = 128, stdout = '', stderr = 'boom1\nboom2\n' }))
+      ok_exec()
+
+      local res = cli.run_sync('git', { 'for-each-ref' }, { err_code = 'E_REF' })
+
+      assert.equals(false, res.ok)
+      assert.equals('E_REF', res.code)
+      assert.equals('boom1', res.error)
+      assert.equals(128, res.data.code)
+    end
+  )
+
+  it('run_sync も fatal 行を優先する (usage 続きの実 git shape)', function()
     local captured = {}
-    cli._set_system(sync_stub(captured, { code = 128, stdout = '', stderr = 'boom1\nboom2\n' }))
+    cli._set_system(sync_stub(captured, {
+      code = 128,
+      stdout = '',
+      stderr = "error: unknown option 'nope'\nusage: git for-each-ref [options]\n",
+    }))
     ok_exec()
 
     local res = cli.run_sync('git', { 'for-each-ref' }, { err_code = 'E_REF' })
 
-    assert.equals(false, res.ok)
-    assert.equals('E_REF', res.code)
-    assert.equals('boom2', res.error)
-    assert.equals(128, res.data.code)
+    assert.equals("error: unknown option 'nope'", res.error)
   end)
 
   it(

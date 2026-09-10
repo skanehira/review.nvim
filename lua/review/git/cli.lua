@@ -29,14 +29,21 @@ local function deliver(cb, res)
   end
 end
 
--- stderr を末尾 1 行に整形する (ユーザー通知にそのまま使うため)。
--- 末尾の改行 / 空行は捨てる。空なら nil。
-local function stderr_last_line(stderr)
+-- stderr から「主メッセージ行」を取る (ユーザー通知にそのまま使う)。
+-- 末尾 1 行採取だと git 実出力 fatal: ... + usage 続きの形で usage 末尾が
+-- 残り、翻訳も原因も届かなかった (UX review F4)。fatal:/error: 開始行を優先し、
+-- 無ければ先頭非空行 (gh も主メッセージが前)。空なら nil。
+local function stderr_main_line(stderr)
   local s = (stderr or ''):gsub('[\r\n]+$', '')
   if s == '' then
     return nil
   end
-  return (s:match '[^\r\n]*$')
+  for line in s:gmatch '[^\r\n]+' do
+    if line:match '^fatal:' or line:match '^error:' then
+      return line
+    end
+  end
+  return (s:match '^[^\r\n]+')
 end
 
 --- bin を args で実行し、結果型を cb に非同期で返す。
@@ -81,7 +88,7 @@ function M.run(bin, args, opts, cb)
         __class = result.class,
         ok = false,
         data = data,
-        error = stderr_last_line(out.stderr)
+        error = stderr_main_line(out.stderr)
           or (bin .. ' が終了コード ' .. code .. ' で失敗しました'),
         code = err_code,
       })
@@ -154,7 +161,7 @@ function M.run_sync(bin, args, opts)
     __class = result.class,
     ok = false,
     data = data,
-    error = stderr_last_line(out.stderr)
+    error = stderr_main_line(out.stderr)
       or (bin .. ' が終了コード ' .. code .. ' で失敗しました'),
     code = err_code,
   }

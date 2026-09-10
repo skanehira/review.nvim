@@ -268,7 +268,12 @@ describe('session.start 開始フロー', function()
       install_git {
         top_ok,
         function()
-          return { code = 128, stdout = '', stderr = "fatal: bad revision 'nope'\n" }
+          -- 実 git と同じ shape (fatal 主行 + usage 続き) で翻訳経路を通す
+          return {
+            code = 128,
+            stdout = '',
+            stderr = "fatal: bad revision 'nope'\nusage: git diff [<options>]\n",
+          }
         end,
       }
       -- git を伴う失敗は結果型では返さず notify で返す (DESIGN.md「API 一覧」非同期契約)。
