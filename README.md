@@ -2,7 +2,7 @@
 
 Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の差分をレビューし、コメントを蓄積して **AI エージェントに渡すプロンプト**として出力するプラグイン。
 
-コメントはディスクに永続化されるので、Neovim を間違えて終了しても次回起動後に `:Review` 1 操作で復元できる。PR を指定した場合は head を git worktree にチェックアウトし、**実ファイルを読みながら**レビューできる (レビュー終了時に worktree はクリーンアップされる)。
+コメントはディスクに永続化されるので、Neovim を間違えて終了しても次回起動後に `:Review` 1 操作で復元できる。レビュー開始時に head を git worktree にチェックアウトし (branch / PR どちらでも)、**実ファイルを読みながら**レビューできる (レビュー終了時に worktree はクリーンアップされる)。
 
 ## 特徴
 
@@ -58,14 +58,20 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 | 場所       | キー                              | 動作                                 |
 | ---------- | --------------------------------- | ------------------------------------ |
 | diff       | `c` (normal / visual-line)        | コメント作成 (visual は範囲)         |
-| diff       | `e` / `d`                         | カーソル行のコメント編集 / 削除      |
+| diff       | `e` / `d`                         | コメント編集 / 削除 (d は確認の二重押し) |
 | diff       | `y`                               | カーソル行コメントのプロンプトを yank |
 | diff       | `o`                               | その行の実ファイルを開く             |
 | diff       | `q` / `<F1>`                      | セッション終了 / help                |
 | 変更一覧   | `<CR>` / `o` / `x` / `q`          | diff 表示 / 実ファイル / viewed 切替 |
 | セッション一覧 | `<CR>` / `q`                  | 開く / 閉じる                        |
 
-すべて buffer-local で `setup` の `keymaps` から変更可能。
+すべて buffer-local で `setup` の `keymaps` から変更可能 (設定キー名と既定値は `:h review-keymaps`)。例:
+
+```lua
+require('review').setup({ keymaps = { diff = { add_comment = 'gc' } } })
+```
+
+diff バッファは `wrap=off` + `foldmethod=expr` で、大きい hunk は畳まれた状態で開く。`za` / `zR` (Neovim 標準) で展開するか、`o` で実ファイルを開いて読む。
 
 `c` / `e` で開くコメント入力ウィンドウは、本文入力中 (insert) は **`<CR>` = 改行**、`q` などで Normal に戻ったあと **`<CR>` = 確定** して閉じる。本文があるときは `q` では閉じず (誤って入力を捨てないため)、続けて `q` を押したときだけ破棄して閉じる。`<C-y>` は insert 中の確定、`<Esc>` は Normal に戻るだけで窓は閉じない。操作はウィンドウのタイトルと `<F1>` の help にも表示される。
 
@@ -83,7 +89,7 @@ Review the changes in main..feature. Please address the comments below.
 setup は冪等にしたい
 ```
 
-worktree を使うセッション (PR など) では `@` パスは worktree 内の絶対パスになるため、エージェントはその場で実ファイルを読める。outdated 認定されたコメント (差分の揺れで位置が特定できないもの) は既定で除外される。
+セッションは head の worktree で動くため `@` パスは worktree 内の絶対パスになり、エージェントはその場で実ファイルを読める (レビュー中の diff と完全に同一の内容)。outdated 認定されたコメント (差分の揺れで位置が特定できないもの) は既定で除外され、diff 上は `⚠ outdated` マークで判別できる。
 
 ## ドキュメント
 

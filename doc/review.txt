@@ -16,16 +16,33 @@ USAGE						*review-usage*
 
 すべての操作は単一コマンドとそのサブコマンドで行う:
 
-	:Review					開いているセッションを復元
-	:Review start {base} [{head}]		ブランチレビュー開始
+	:Review					続きのセッションを復元。open
+					状態のみが対象で、複数あれば選択 UI。
+					closed は |review-list| から再開する
+	:Review start {base} [{head}]		ブランチレビュー開始。
 					{base} / {head} は cmdline で <Tab>
 					により branches -> tags 順に補完
-					される (取得は同期・短時間 cache)
-	:Review pr {number|url}			PR レビュー開始 (gh 連携)
-	:Review list				保存済みセッション一覧
-	:Review close				現セッションを保存して閉じる
+					される (取得は同期・短時間 cache)。
+					head 省略時は `prompt` で head を
+					入力する。同一 refs 組の保存済み
+					セッションがある場合は「継承する
+					か」の [y/N] 確認が出る (y で
+					comments / viewed を引き継ぎ、n で
+					何もしない)
+	:Review pr {number|url}			PR レビュー開始 (gh 連携)。
+					head を git worktree に展開し、`o` で
+					差分と同一内容の実ファイルが開ける。
+					branch レビュー (`:Review start`) で
+					も worktree は作られ、`o` とプロンプト
+					の @path は worktree 基準の絶対パスに
+					なる (掃除は |review-sessions|)
+	:Review list				保存済みセッション一覧 |review-list|
+	:Review close				現セッションを保存して閉じる |review-sessions|
 	:Review delete {id}			保存済みセッションを削除
 	:Review prompt [file]			プロンプトをクリップボードへ
+
+確認プロンプト ([y/N] 等) は y か n を押して <Enter> で応答する。応答まで
+他の打鍵はそのプロンプトに入力として吸収される (cmdline に混ざらない)。
 
 ==============================================================================
 API						*review-api*
@@ -33,8 +50,7 @@ API						*review-api*
 Lua から呼ぶ公開 API (~require("review")~)。同じ操作のコマンドライン相当は
 |review-usage| を見る。戻り値は結果型 `{ok, data, error, code}` で、同期的に
 判定できる失敗 (引数不正、active 不在 `E_NOT_ACTIVE`、config 不正) を表す。
-git/gh を伴う実行の成否は非同期に UI 開閉か vim.notify で返る
-(同期/非同期の契約の正本は docs/design/DESIGN.md「API 一覧」)。
+git/gh を伴う実行の成否は非同期に UI 開閉か vim.notify で返る。
 
 	setup(opts)			config 合成と初期化 (省略可、既定値で
 					動作)。設定項目は |review-setup|
@@ -65,19 +81,57 @@ SETUP						*review-setup*
 	})
 <
 
+setup は省略可能。呼ばなくても既定値のキーが貼り付き、起動時の継続通知と
+worktree 残骸スキャンは走る (plugin read 時点で登録されるため)。設定を
+後から渡す場合も |review-sessions| の起動通知は設定値を実行時に読む。
+
 ==============================================================================
 KEYMAPS						*review-keymaps*
 
-すべてのキーマップは buffer-local で提供する。キーの既定値と config キーは
->docs/design/DESIGN.md 「API 一覧」> を参照 (setup の `keymaps` で変更可)。
-押した箇所が違うと効くキーも違うので、バッファのセクションで引くこと。
+すべてのキーマップは buffer-local。押した箇所 (バッファ種別) が違うと効く
+キーも違うので、以下のセクションで引くこと。
+
+既定値の全体と override の書式:
+
+	keymaps = {
+		diff = {                      -- diff バッファ
+			add_comment    = 'c',     -- |review-comment-input|
+			edit_comment   = 'e',
+			delete_comment = 'd',
+			yank_prompt    = 'y',
+			open_file      = 'o',
+			close          = 'q',
+			help           = '<F1>',
+		},
+		sidebar = {                   -- 変更ファイル一覧
+			open_diff      = '<CR>',
+			open_file      = 'o',
+			toggle_viewed  = 'x',
+			close          = 'q',
+		},
+		sessionlist = {               -- :Review list の一覧
+			open           = '<CR>',
+			close          = 'q',
+		},
+	}
+
+>
+	require("review").setup({
+		keymaps = { diff = { add_comment = 'gc' } },
+	})
+<
 
 DIFF バッファ					*review-keymaps-diff*
 
 	c		コメント作成。visual-line で範囲指定
 	e		カーソル行のコメントを編集 (入力窓は
-			|review-comment-input|)
-	d		カーソル行のコメントを即削除
+			|review-comment-input|)。その行に複数ある場合
+			は番号選択のプロンプトになる (既定の
+			vim.ui.select = `Type number and <Enter>`)
+	d		カーソル行のコメントを削除。誤爆防止の二重押し:
+			1 回目は armed + WARN だけを発し、同じ行で 2 秒
+			以内に続けて d で削除が確定する (vim 筋の dd で
+			複数件が消えないため)
 	y		カーソル行のコメントのプロンプトを yank
 	o		その行の実ファイルを開く (worktree あり =
 			編集可、なし = `git show <head>:<path>` の
@@ -87,16 +141,57 @@ DIFF バッファ					*review-keymaps-diff*
 
 変更ファイル一覧 (sidebar)			*review-keymaps-sidebar*
 
-	<CR>		そのファイルの diff へ移動 (viewed 自動 true)
+	<CR>		そのファイルの diff を開き、focus を diff へ移動
+			(viewed 自動 true)
 	o		そのファイルの実ファイルを開く (diff の o と
 			同じ規則)
 	x		viewed 切替
 	q		セッションを閉じる (diff の q と同じ)
 
-セッション一覧 (:Review list)			*review-keymaps-sessionlist*
+セッション一覧 (:Review list)			*review-keymaps-sessionlist* *review-list*
 
 	<CR>		選択セッションを開く (closed -> open)
 	q		一覧を閉じる (セッション状態は変えない)
+
+==============================================================================
+SESSION 状態と復旧				*review-sessions*
+
+保存済みセッションには open / closed の 2 状態がある (list で 1 行表示):
+
+	窓を閉じる操作 (q / `:Review close`)	comments + viewed を保存して
+		窓を閉じる。:Review q と close の違いは worktree掃除の有無:
+
+		q 	-> open のまま窓だけ閉じる (worktree は残る。
+			`:Review` で即復元)
+		close 	-> closed に変え、plugin が作った worktree を掃除
+			する (closed は `:Review` では復元できず、
+			`:Review list` からのみ再開できる。開くと
+			自動的に open に戻り worktree は再生成される)
+
+	Neovim 異常終了	 open のまま JSON が data dir に残り、次回起動時に
+			「続けられます」通知 (:Review で復元 / worktree
+			残骸は起動 scan が掃除)
+
+outdated 認定 (差分の揺れで対象行を特定できないコメント) は diff 上で
+`⚠ outdated: 抜粋` または複数件 group で `(⚠N)` を付与し (:h review-display)、
+`:Review prompt` の既定出力から除外される。本文は失わず closed 前の JSON に
+残るため、refs を戻せば再度 active として扱える場合がある。
+
+==============================================================================
+表示の特性					*review-display*
+
+diff バッファ				*review-display-diff*
+
+	・filetype=diff (標準 syntax) + 自前の add/delete hunk highlight の
+		二層で色分けする。
+	・ラップしない (wrap=off)。大きい hunk は fold されて開くので、
+		`za` / `zo` / `zR` (標準) で展開するか、`o` で実ファイルを
+		開いて読む。
+	・コメントは対象行末の virt_text 表示 (1 件 = 本文 40 字抜粋、複数 =
+		 `💬 N`、outdated を含む = `'💬 N (⚠M)'`、単独 outdated =
+		 `⚠ outdated: 抜粋`)。virt_text なので `/検索` の対象には
+		ならない (検索したい場合は :Review prompt 出力や data dir の
+		JSON を grep する)。
 
 ==============================================================================
 COMMENT INPUT					*review-comment-input*
@@ -110,8 +205,8 @@ c/e で開くコメント入力 (float) の確定と閉じる操作:
 	<C-y>		insert 中の確定 (エイリアス)
 	<Esc>		Normal へ戻るだけで窓は閉じない
 
-窓の title にも確定/閉じるの操作を表示する。<F1> の help float にも同じ
-一覧がある。
+窓の title には対象の `path:line` と確定/閉じるの操作を表示する。<F1> の
+help float にも同じ一覧がある。
 
 ==============================================================================
 CONTENTS					*review-contents*
@@ -121,6 +216,8 @@ CONTENTS					*review-contents*
   API			|review-api|
   SETUP			|review-setup|
   KEYMAPS		|review-keymaps|
+  SESSION		|review-sessions|
+  DISPLAY		|review-display|
   COMMENT INPUT		|review-comment-input|
 
  vim:tw=78:ts=8:noet:ft=help:norl:

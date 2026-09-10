@@ -21,16 +21,16 @@
 | --- | --- |
 | ヘッダ行 | `■ A lua/foo.lua +12 -3` (変更種別 = A/M/D/R、追加/削除行数) |
 | hunk 行 | `@@ ... @@` と diff 本体。`+` 行は new 側ファイル行番号を保持し、extmark の対象になる |
-| コメント表示 | コメント対象は `+` 行とコンテキスト行 (new 側に存在する行) で、diff バッファ上の対応する行に namespace `review_comment` の extmark を置く (下線 hl `ReviewCommentLine` と virt text)。virt text の内容: 1 件 = 先頭 40 文字の抜粋、複数件 = `💬 N`。outdated のコメントは先頭に `⚠`。コンテキスト行上でも位置は同一規則。`-` 行 (new 側行番号なし) には付けない。extmark の highlight は syntax より前面に出るため diff の +/- 配色と競合しても下線は視認できる |
+| コメント表示 | コメント対象は `+` 行とコンテキスト行 (new 側に存在する行) で、diff バッファ上の対応する行に namespace `review_comment` の extmark を置く (下線 hl `ReviewCommentLine` と virt text)。virt text の内容: 1 件 = 先頭 40 文字の抜粋 (`💬 ` 接頭辞)、複数件 = `💬 N`。outdated を含む group は `💬 N (⚠M)`、単独 outdated は `⚠ outdated: 抜粋` と、prompt から除外中である状態を常時見えるマークにする (UX review F7)。行が new 側差分から消えた outdated は hidden とし、ファイルヘッダ行 virt text に `⚠ outdated: 抜粋 | …` で一覧する。コンテキスト行上でも位置は同一規則。`-` 行 (new 側行番号なし) には付けない。extmark の highlight は syntax より前面に出るため diff の +/- 配色と競合しても下線は視認できる |
 
 **操作** (キーバインド既定値は DESIGN.md「API 一覧」が正本。すべて buffer-local、`silent nowait`):
 
 | 操作 | 起きること |
 | --- | --- |
-| `c` (normal) | 対象 range = カーソル位置の new 側行 (`-` 行 = new 側行番号が無ければ WARN で開かない)。コメント入力 float (マルチライン対応 scratch buffer、insert で開始、操作契約: Normal `<CR>` 確定 / insert `<CR>` 改行 / `q` 閉じる [本文なし=キャンセル、本文ありは閉じず続けて q で破棄] / `<C-y>` = insert 確定のエイリアス / `<Esc>` = Normal へ戻るだけで閉じない。窓 title に確定/閉じるのヒントを常時表示) を開く。確定でコメント追加 → extmark 再描画 → 即時 save |
+| `c` (normal) | 対象 range = カーソル位置の new 側行 (`-` 行 = new 側行番号が無ければ WARN で開かない)。コメント入力 float (マルチライン対応 scratch buffer、insert で開始、操作契約: Normal `<CR>` 確定 / insert `<CR>` 改行 / `q` 閉じる [本文なし=キャンセル、本文ありは閉じず続けて q で破棄] / `<C-y>` = insert 確定のエイリアス / `<Esc>` = Normal へ戻るだけで閉じない。窓 title に対象 `path:line[-end]` と確定/閉じるのヒントを常時表示。終端経路は必ず stopinsert してから窓を閉じる (残留 insert が diff バッファを傷めない — UX review F8)) を開く。確定でコメント追加 → extmark 再描画 → 即時 save |
 | `c` (visual-line) | 対象 range = 選択範囲の先頭〜末尾の new 側行 (`+` 行とコンテキスト行が対象、削除専用行を除く)。選択内に new 側行が無ければ WARN で開かない |
-| `e` | カーソル行のコメントを編集。複数ある場合は vim.ui.select で対象を選ぶ。body を事前入力した float を開き、確定で更新 → save |
-| `d` | カーソル行 (range 内) のコメントを即削除 (確認なし) → save。取り消しキーは用意しない |
+| `e` | カーソル行のコメントを編集。複数ある場合は vim.ui.select で対象を選ぶ (既定 provider は番号入力の inputlist になる — ユーザー help に記載、UX review F11)。body を事前入力した float を開き、確定で更新 → save |
+| `d` | カーソル行 (range 内) のコメントを削除。arming 二重押し: 1 回目は対象を armed + WARN にして削除しない、同じコメントへ discard window (2 秒) 内にもう一度 d で削除確定 → save。vim 筋 `dd` (d 2 回) で複数件が消えないため (armed は object 参照比較なので他行移動・編集で自然解除。旧「即削除・確認なし」は UX review F9 で废棄) |
 | `y` | カーソル行 range に含まれるコメントのプロンプトをコピー (ai-prompt「出力経路」参照) |
 | `q` | `:Review close` と同じ (pr-worktree「セッションとレビューの終了」参照)。コメント 0 件なら確認なしで閉じる |
 | `<F1>` | キーバインドと操作概要の help float (`<Esc>`/`q` で閉じる) |
@@ -39,7 +39,7 @@
 
 | 操作 | 起きること |
 | --- | --- |
-| 表示 | 1 ファイル 1 行 `<status> <path> +<a> -<d>`、パス昇順。viewed のファイルは行頭に `[✓]`。`<Enter>` → 右ペインをそのファイルの diff バッファに差し替え (ファイル先頭へスクロール) + viewed を true にして save。差分はファイルごとに別バッファ (複数ファイルを 1 バッファへ連結しない — fold と行番号管理が単純になるため) |
+| 表示 | 1 ファイル 1 行 `<status> <path> +<a> -<d>`、パス昇順。viewed のファイルは行頭に `[✓]`。`<Enter>` → 右ペインをそのファイルの diff バッファに差し替え (ファイル先頭へスクロール) + **focus を diff 窓へ移動** (直後の c/e が効く位置に立つ — UX review F12) + viewed を true にして save。右ペイン窓が側に閉じられていた場合は sidebar 隣へ vsplit 再建する (無反応にしない — UX review F1/F18)。差分はファイルごとに別バッファ (複数ファイルを 1 バッファへ連結しない — fold と行番号管理が単純になるため) |
 | `x` | viewed 切替 → save |
 | `o` | そのファイルの実ファイル開く (pr-worktree「実ファイル参照」参照)。削除ファイルは不可と通知 |
 | `q` | diff と同じくセッション終了 |
