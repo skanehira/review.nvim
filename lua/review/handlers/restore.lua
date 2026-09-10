@@ -11,6 +11,7 @@ local health = require 'review.handlers.health'
 local scan = require 'review.store.scan'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
+local usermsg = require 'review.handlers.usermsg'
 
 local M = {}
 
@@ -33,7 +34,7 @@ local function fetch_and_resume(session)
   git_diff.fetch({ base = session.base, head = session.head, cwd = session.repo }, function(res)
     if not res.ok then
       -- ref が解決不能 (force push / 削除) でも保存セッションは残す
-      notify_warn(res.error)
+      notify_warn(usermsg.git_ref_error(res.error))
       return
     end
     session_handler.resume_into(session, res.data.files)

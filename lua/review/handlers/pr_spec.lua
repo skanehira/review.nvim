@@ -279,6 +279,24 @@ end)
 describe('pr-handler 同一 repo branch / 失敗分岐', function()
   use_env()
 
+  it('gh の remote なし失敗は英語原文でなく日本語 + 対処を返す', function()
+    install_git {
+      top_ok,
+      function()
+        return { code = 1, stdout = '', stderr = 'no git remotes found\n' }
+      end,
+    }
+
+    pr_handler.start '7'
+
+    assert.same({
+      msg = 'review.nvim: このリポジトリに git remote (origin 等) がありません。'
+        .. ':Review pr は GitHub のリモートリポジトリでのみ利用できます',
+      level = vim.log.levels.WARN,
+    }, state.notifications[1])
+    assert.equals(2, #state.git_calls) -- top, gh pr_view のみ
+  end)
+
   it(
     '同一 repo の branch headRefName が解決できるなら refs/pull fetch なしで worktree 化 (mode=pr は常時作成)',
     function()

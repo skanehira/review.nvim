@@ -227,10 +227,14 @@ describe('session.start 開始フロー', function()
       -- git を伴う失敗は結果型では返さず notify で返す (DESIGN.md「API 一覧」非同期契約)。
       session_handler.start { base = 'main', head = 'nope' }
 
-      assert.same(
-        { msg = "review.nvim: fatal: bad revision 'nope'", level = vim.log.levels.WARN },
-        state.notifications[1]
-      )
+      -- 生 stderr 丸出しでなく「名前 + 次の行動」を伝える (UX review F4)
+      assert.same({
+        msg = "review.nvim: レビュー対象 ref が解決できません: 'nope'。存在するブランチ/コミットを"
+          .. '指定してください (start の base/head 引数は <Tab> で補完できます)',
+        level = vim.log.levels.WARN,
+      }, state.notifications[1])
+      -- 未知の git エラーは翻訳せず原文を通す (情報 loss 防止)
+      assert.not_equals(nil, state.notifications[1].msg:find("'nope'", 1, true))
       assert.equals(1, #state.notifications)
       assert.is_nil(load_saved())
       assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME))

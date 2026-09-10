@@ -323,6 +323,13 @@ describe('diffbuffer コメント extmark 表示', function()
     comment_model.add(state.session.comments, {
       file = 'a.lua',
       line = 2,
+      body = 'mixed first',
+      anchor = vim.NIL,
+      created_at = 1,
+    })
+    comment_model.add(state.session.comments, {
+      file = 'a.lua',
+      line = 2,
       body = 'mixed second',
       anchor = vim.NIL,
       created_at = 2,

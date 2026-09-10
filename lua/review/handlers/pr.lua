@@ -4,6 +4,7 @@
 -- gh / git の失敗は結果型の理由文字列を WARN 通知し、開始を中断する
 -- (E_GH / E_PR はアダプタ側で確定。gh 実行中の成否は非同期 = 戻り値は受理)。
 local gh = require 'review.git.gh'
+local usermsg = require 'review.handlers.usermsg'
 local git_ref = require 'review.git.ref'
 local paths = require 'review.store.paths'
 local result = require 'review.core.result'
@@ -82,7 +83,7 @@ function M.start(target)
     local repo = tres.data
     gh.pr_view({ target = target, cwd = repo }, function(vres)
       if not vres.ok then
-        notify_warn(vres.error)
+        notify_warn(usermsg.gh_error(vres.error))
         return
       end
       local meta = vres.data

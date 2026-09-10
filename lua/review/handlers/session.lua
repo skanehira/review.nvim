@@ -18,6 +18,7 @@ local store = require 'review.store.session'
 local ui_diffbuffer = require 'review.ui.diffbuffer'
 local ui_fileview = require 'review.ui.fileview'
 local ui_list = require 'review.ui.list'
+local usermsg = require 'review.handlers.usermsg'
 
 local M = {}
 
@@ -520,7 +521,7 @@ end
 local function fetch_and_begin(args, existing)
   git_diff.fetch({ base = args.base, head = args.head, cwd = args.repo }, function(res)
     if not res.ok then
-      notify_warn(res.error)
+      notify_warn(usermsg.git_ref_error(res.error))
       return
     end
     if #res.data.files == 0 then
