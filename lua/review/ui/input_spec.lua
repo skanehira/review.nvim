@@ -43,11 +43,18 @@ local function tab_wins()
   return #vim.api.nvim_tabpage_list_wins(state.tab)
 end
 
+local function title_text()
+  -- 0.10 では文字列、0.13 では { { str }, ... } の table で返る (両対応)。
+  local t = vim.api.nvim_win_get_config(0).title
+  return type(t) == 'table' and (type(t[1]) == 'table' and t[1][1] or t[1]) or (t or '')
+end
+
 -- on_confirm を記録して float を開く (Act の第一歩。以降のキー投入はテスト本体)。
 local function open(opts)
   opts = opts or {}
   input.open {
     value = opts.value,
+    hint = opts.hint,
     on_confirm = function(body)
       table.insert(state.confirmed, body)
     end,
@@ -75,6 +82,15 @@ describe('input.open 確定', function()
     vim.cmd 'normal iuse map here'
     vim.cmd('normal ' .. CY)
     assert.same({ 'use map here' }, state.confirmed)
+  end)
+
+  -- 確定後に insert が残留すると焦点が戻った diff バッファが insert-mode になり
+  -- 誤打鍵で review:// buffer を傷つける (UX review F8)。
+  it('<C-y> 確定後は insert モードに残留しない', function()
+    open()
+    vim.cmd 'normal idraft text'
+    vim.cmd('normal ' .. CY)
+    assert.is_true(vim.fn.mode() ~= 'i')
   end)
 
   it(
@@ -222,10 +238,13 @@ describe('input.open 表示契約', function()
 
   it('窓 title に確定/閉じる的操作ヒントが表示される', function()
     open()
-    -- 0.10 では文字列、0.13 では { { str }, ... } の table で返る (両対応)。
-    local t = vim.api.nvim_win_get_config(0).title
-    local text = type(t) == 'table' and (type(t[1]) == 'table' and t[1][1] or t[1]) or (t or '')
+    local text = title_text()
     assert.is_true(text:find('<CR> 確定', 1, true) ~= nil)
     assert.is_true(text:find('q 閉じる', 1, true) ~= nil)
+  end)
+
+  it('opts.hint (対象行の示唆) が title に載る', function()
+    open { hint = 'a.lua:4-5' }
+    assert.is_true(title_text():find('a.lua:4-5', 1, true) ~= nil)
   end)
 end)

@@ -314,7 +314,23 @@ describe('diffbuffer コメント extmark 表示', function()
     })
     state.session.comments[1].state = 'outdated'
     local buf = render()
-    assert.equals(' ⚠ 💬 kept', virt_at(comment_marks(buf), 4))
+    assert.equals(' ⚠ outdated: kept', virt_at(comment_marks(buf), 4))
+  end)
+
+  it('複数グループの件数表示に outdated 数を含める (💬 N (⚠M))', function()
+    -- 同 new 行に active + outdated の 2 件 (UX review F7: 複数だと active と
+    -- 無区別になり prompt から黙って除外されるのが見えなかった)
+    comment_model.add(state.session.comments, {
+      file = 'a.lua',
+      line = 2,
+      body = 'mixed second',
+      anchor = vim.NIL,
+      created_at = 2,
+    })
+    state.session.comments[1].state = 'outdated'
+    local buf = render()
+    -- 0-based row 3 = new 2 (both comments 同一行)
+    assert.equals(' 💬 2 (⚠1)', virt_at(comment_marks(buf), 3))
   end)
 
   it(

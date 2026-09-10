@@ -172,7 +172,7 @@ describe('comments c (作成)', function()
     comments_handler.add_normal()
 
     assert.same({
-      msg = 'review.nvim: その行にはコメントを付けられません',
+      msg = 'review.nvim: この行は new 側に存在しないためコメントを付けられません (削除行 / diff ヘッダ)',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
     assert.equals(0, #saved().comments)
@@ -184,7 +184,7 @@ describe('comments c (作成)', function()
     focus_diff_row(1)
     comments_handler.add_normal()
     assert.same({
-      msg = 'review.nvim: その行にはコメントを付けられません',
+      msg = 'review.nvim: この行は new 側に存在しないためコメントを付けられません (削除行 / diff ヘッダ)',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
     assert.equals(0, #saved().comments)
@@ -224,6 +224,16 @@ describe('comments c (作成)', function()
     vim.cmd('normal ' .. vim.api.nvim_replace_termcodes('<Esc>', true, false, true))
 
     assert.equals(0, #saved().comments)
+  end)
+
+  it('入力 float の title に対象の path:line が表示される', function()
+    focus_diff_row(4) -- '+two' = new 2
+    comments_handler.add_normal()
+    local t = vim.api.nvim_win_get_config(0).title
+    local text = type(t) == 'table' and (type(t[1]) == 'table' and t[1][1] or t[1]) or (t or '')
+    assert.is_true(text:find('a.lua:2', 1, true) ~= nil)
+    -- 本文なし q = 即時閉 (窓掃除)
+    vim.cmd('normal ' .. vim.api.nvim_replace_termcodes('<Esc>', true, false, true) .. 'q')
   end)
 
   it('2 件目の id は max+1 採番', function()
@@ -309,19 +319,68 @@ describe('comments e (編集) / d (削除)', function()
     }, state.notifications[1])
   end)
 
-  it(
-    'd: カーソル行のコメントを無確認で即削除 -> save + 表示から消える',
-    function()
-      seed_one()
-      focus_diff_row(4)
-      comments_handler.delete_current()
+  -- UX review F9: vim 筋 dd が「d 2 回」= 複数を無確認で消せた事故の再発防止。
+  -- 1 目は armed のみ、同じコメントへ 2 度目で削除 (window 内)。
+  it('d: 1 目は削除せず armed + WARN、同じ行 2 度目で削除 -> save', function()
+    seed_one()
+    focus_diff_row(4)
+    comments_handler.delete_current()
 
-      assert.equals(0, #saved().comments)
-      local ns = vim.api.nvim_get_namespaces()['review_comment']
-      assert.equals(0, #vim.api.nvim_buf_get_extmarks(state.diff_buf, ns, 0, -1, {}))
-      assert.equals(1, #state.notifications) -- 削除したという INFO 通知
-    end
-  )
+    assert.equals(1, #saved().comments) -- まだ消えていない
+    assert.equals('warn', state.notifications[1].level == vim.log.levels.WARN and 'warn' or 'FAIL')
+
+    comments_handler.delete_current()
+    assert.equals(0, #saved().comments)
+    local ns = vim.api.nvim_get_namespaces()['review_comment']
+    assert.equals(0, #vim.api.nvim_buf_get_extmarks(state.diff_buf, ns, 0, -1, {}))
+  end)
+
+  it('d: armed が discard window を過ぎると 1 目に戻る', function()
+    seed_one()
+    focus_diff_row(4)
+    local t = 100
+    comments_handler._set_now(function()
+      return t
+    end)
+    comments_handler.delete_current()
+    t = t + 3
+    comments_handler.delete_current()
+    assert.equals(1, #saved().comments) -- 再 armed (window 外)
+    comments_handler.delete_current()
+    assert.equals(0, #saved().comments)
+    comments_handler._set_now(nil)
+  end)
+
+  it('d: 別行へ移動すると arming はその行に切り替わる', function()
+    seed_one() -- c1 @ new 2 (row 4)
+    focus_diff_row(5) -- '+three' = new 3 にコメント無し -> ここは arming 対象なし
+    -- (comments_at_cursor が WARN)
+    comments_handler.delete_current()
+    assert.equals(
+      'review.nvim: その行のコメントはありません',
+      state.notifications[1].msg
+    )
+    assert.equals(1, #saved().comments)
+  end)
+
+  -- dd = d 2 回。arming により「同一行なら 1 件しか消えない」ことを担保
+  -- (旧実装は無確認即時削除で複数件吹き飛んだ — UX review F9)。
+  it('d 連打 (dd 相当) でも同一行のコメントは 1 件しか消えない', function()
+    comments_handler._set_now(function()
+      return 100
+    end)
+    seed_one 'first'
+    focus_diff_row(4)
+    comments_handler.add_normal()
+    type_into_float 'second' -- 同じ new 行に 2 件目
+
+    focus_diff_row(4)
+    comments_handler.delete_current()
+    comments_handler.delete_current()
+
+    assert.equals(1, #saved().comments)
+    comments_handler._set_now(nil)
+  end)
 
   it('d: コメントなしは WARN で save 内容不変', function()
     focus_diff_row(8)

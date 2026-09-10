@@ -24,7 +24,7 @@ function M._set_now(fn)
   now_fn = fn or default_now
 end
 
---- opts = { value?, on_confirm(body) }。
+--- opts = { value?, hint?, on_confirm(body) }。hint = 対象行の示唆 (title 表示)。
 --- 空 body (空白のみ) の確定はキャンセル扱い (決定: 空コメントを作らない)。
 function M.open(opts)
   local buf = vim.api.nvim_create_buf(false, true)
@@ -46,7 +46,9 @@ function M.open(opts)
     border = 'rounded',
     -- 確定/閉じるの操作は Discoverability の中心 (help だけでなく常時見える
     -- 場所に置く — README / doc/review.txt / <F1> help も同一契約)。
-    title = ' Comment  <CR> 確定  q 閉じる ',
+    title = ' Comment '
+      .. (opts.hint ~= nil and ('[' .. opts.hint .. '] ') or '')
+      .. ' <CR> 確定  q 閉じる ',
   })
 
   -- 解決済みフラグ。窓クローズ経路 (確定 / q / :q 等) と二重発火しないための境界。
@@ -63,6 +65,17 @@ function M.open(opts)
     end
   end
 
+  -- すべての終端経路 (確定 / 空 q / 破棄 / 窓離脱) は insert を止めてから閉じる。
+  -- 止ないと焦点が戻った diff バッファ insert-mode 残留で誤打鍵が review:// buffer
+  -- を傷つける (UX review F8)。
+  local function settle_and_close()
+    settled = true
+    if vim.fn.mode() == 'i' then
+      vim.cmd 'stopinsert'
+    end
+    close_window()
+  end
+
   local function body_text()
     return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
   end
@@ -73,12 +86,10 @@ function M.open(opts)
     end
     local body = body_text()
     if body:match '^%s*$' then
-      settled = true
-      close_window()
+      settle_and_close()
       return -- 空 body はキャンセル (on_confirm を呼ばない)
     end
-    settled = true
-    close_window()
+    settle_and_close()
     if opts.on_confirm ~= nil then
       opts.on_confirm(body)
     end
@@ -90,14 +101,12 @@ function M.open(opts)
     end
     local body = body_text()
     if body:match '^%s*$' then
-      settled = true
-      close_window()
+      settle_and_close()
       return
     end
     local now = now_fn()
     if armed ~= nil and now - armed.at <= DISCARD_WINDOW_S and armed.body == body then
-      settled = true
-      close_window() -- 明示的な破棄 (on_confirm を呼ばない)
+      settle_and_close() -- 明示的な破棄 (on_confirm を呼ばない)
       return
     end
     armed = { at = now, body = body }

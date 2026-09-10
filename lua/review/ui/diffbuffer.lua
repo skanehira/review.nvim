@@ -143,12 +143,16 @@ function M.render(session, file, opts)
 
   local outdated_hidden = {}
   local group_by_row = {}
+  local outdated_by_row = {}
   local visible = {}
   for _, c in ipairs(session.comments) do
     if c.file == file.path then
       local start_row = st.new_to_row[c.line]
       if start_row ~= nil then
         group_by_row[start_row] = (group_by_row[start_row] or 0) + 1
+        if c.state == 'outdated' then
+          outdated_by_row[start_row] = (outdated_by_row[start_row] or 0) + 1
+        end
         visible[#visible + 1] = { c = c, start_row = start_row }
       elseif c.state == 'outdated' then
         outdated_hidden[#outdated_hidden + 1] = excerpt(c.body)
@@ -165,16 +169,19 @@ function M.render(session, file, opts)
     if end_row < v.start_row then
       end_row = v.start_row
     end
-    -- virt text は開始行の group 先頭 extmark のみ: 1 件 = 40 文字抜粋、複数 = 💬 N、
-    -- outdated の 1 件は先頭 ⚠ (diff-review.md「コメント表示」)。
+    -- virt text は開始行の group 先頭 extmark のみ: 1 件 = 40 文字抜粋、
+    -- 複数 = 💬 N (outdated を含むとその数 '(⚠M)' を併記)。outdated は
+    -- ⚠ outdated: 抜粋 で「prompt から除外中」を常時見える状態にする
+    -- (diff-review.md「コメント表示」/ UX review F7)。
     local annotation
     if first then
       local count = group_by_row[v.start_row]
+      local n_out = outdated_by_row[v.start_row] or 0
       local excerpt_text
       if count > 1 then
-        excerpt_text = ' 💬 ' .. count
+        excerpt_text = ' 💬 ' .. count .. (n_out > 0 and (' (⚠' .. n_out .. ')') or '')
       elseif c.state == 'outdated' then
-        excerpt_text = ' ⚠ 💬 ' .. excerpt(c.body)
+        excerpt_text = ' ⚠ outdated: ' .. excerpt(c.body)
       else
         excerpt_text = ' 💬 ' .. excerpt(c.body)
       end

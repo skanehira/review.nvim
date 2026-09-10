@@ -86,13 +86,15 @@ local function add_with_range(r1, r2, single)
   local lo, hi = new_line_range(buf, r1, r2)
   if lo == nil then
     if single then
-      notify_warn 'その行にはコメントを付けられません'
+      notify_warn 'この行は new 側に存在しないためコメントを付けられません (削除行 / diff ヘッダ)'
     else
       notify_warn '選択に new 側行がありません'
     end
     return
   end
   ui_input.open {
+    -- どの行に対する入力かの常時表示 (UX review F16)。
+    hint = lo == hi and ('%s:%d'):format(path, lo) or ('%s:%d-%d'):format(path, lo, hi),
     on_confirm = function(body)
       create_comment(session, buf, path, lo, hi, body)
     end,
@@ -135,6 +137,9 @@ function M.edit_current()
   local function do_edit(c)
     ui_input.open {
       value = c.body,
+      hint = c.file
+        .. ':'
+        .. (c.line == c.end_line and tostring(c.line) or (c.line .. '-' .. c.end_line)),
       on_confirm = function(body)
         comment_model.update(session.comments, c.id, body)
         session_handler.commit_comment_change()
@@ -171,16 +176,39 @@ end
 
 --- `d`: カーソル行 (range 内) のコメントを無確認で即削除。複数該当時は保持順の
 --- 最初を削除する (決定: e と違い d は即行動キー、選択 UI を挟まない)。
+-- 削除は arming 二重押し (UX review F9: vim 筋 dd が「d 2 回」で無確認に複数件
+-- 消せた事故の再発防止。入力 float の q 破棄と同じ「同じ対象・窓内 2 回」契約)。
+-- armed は対象コメントへの参照で持つ — 他行へ移動 / 編集で別 object になると
+-- 自然に解除される (識別子衝突も防げる)。
+local DELETE_ARM_WINDOW_S = 2.0
+local delete_armed = nil
+
 function M.delete_current()
   local session, found = comments_at_cursor()
   if session == nil then
     return
   end
-  local removed = comment_model.remove(session.comments, found[1].id)
-  session_handler.commit_comment_change()
-  vim.notify(
-    ('review.nvim: コメント %s を削除しました'):format(removed.id),
-    vim.log.levels.INFO
+  local target = found[1]
+  local t = now()
+  if
+    delete_armed ~= nil
+    and delete_armed.ref == target
+    and t - delete_armed.at <= DELETE_ARM_WINDOW_S
+  then
+    delete_armed = nil
+    local removed = comment_model.remove(session.comments, target.id)
+    session_handler.commit_comment_change()
+    vim.notify(
+      ('review.nvim: コメント %s を削除しました'):format(removed.id),
+      vim.log.levels.INFO
+    )
+    return
+  end
+  delete_armed = { ref = target, at = t }
+  notify_warn(
+    ('コメント %s を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)'):format(
+      target.id
+    )
   )
 end
 
