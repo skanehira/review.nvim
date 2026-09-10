@@ -127,6 +127,15 @@ local function comments_at_cursor()
   return session, found
 end
 
+-- 削除 arming の状態 (M.delete_current が消费)。edit より前に置く: do_edit の
+-- on_confirm closure から upvalue として見える位置が必要 (後方宣言だと global
+-- に化けて解除が効かない)。UX review F9: vim 筋 dd が「d 2 回」= 無確認に複数件
+-- 消せた事故の再発防止。入力 float の q 破棄と同じ「同じ対象・待機窓内 2 回」で
+-- 確定し、「他行移動」「編集確定」「2 秒経過」で解除される。armed は object 参照
+-- 比較なので、削除・再作成・選択切替で自動的に無効化する。
+local DELETE_ARM_WINDOW_S = 2.0
+local delete_armed = nil
+
 --- `e`: カーソル行のコメントを編集 (複数なら vim.ui.select で対象を選ぶ)。
 function M.edit_current()
   local session, found = comments_at_cursor()
@@ -143,6 +152,9 @@ function M.edit_current()
       on_confirm = function(body)
         comment_model.update(session.comments, c.id, body)
         session_handler.commit_comment_change()
+        -- comment_model.update は同一 table を書き換える (armed ref と object
+        -- 一致が続く) ため、契約どおり明示解除する。
+        delete_armed = nil
       end,
     }
   end
@@ -174,15 +186,8 @@ function M.yank_current()
   prompt_handler.for_line(session, found)
 end
 
---- `d`: カーソル行 (range 内) のコメントを無確認で即削除。複数該当時は保持順の
---- 最初を削除する (決定: e と違い d は即行動キー、選択 UI を挟まない)。
--- 削除は arming 二重押し (UX review F9: vim 筋 dd が「d 2 回」で無確認に複数件
--- 消せた事故の再発防止。入力 float の q 破棄と同じ「同じ対象・窓内 2 回」契約)。
--- armed は対象コメントへの参照で持つ — 他行へ移動 / 編集で別 object になると
--- 自然に解除される (識別子衝突も防げる)。
-local DELETE_ARM_WINDOW_S = 2.0
-local delete_armed = nil
-
+--- `d`: カーソル行 (range 内) のコメントを arming 二重押しで削除 (状態定義は
+--- ファイル冒頭側)。複数該当時は保持順の最初を対象にする。
 function M.delete_current()
   local session, found = comments_at_cursor()
   if session == nil then

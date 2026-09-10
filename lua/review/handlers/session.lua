@@ -405,6 +405,30 @@ local function render_diff_file(path)
   return buf
 end
 
+-- 開通時に review UI 由緒でない「空の [No Name] 窓」を回収する (UX review F1:
+-- list 経由の再開で余剰の空窓がレイアウトに残って迷う症状)。条件は厳しく
+-- (無名・buftype 空・modifiable・中身空行・review meta なし・レビュー 2 窓以外)
+-- して、内容のある窓や review:// 窓には触れない。
+local function sweep_empty_wins()
+  local keep = { [active.sidebar_win] = true, [active.diff_win] = true }
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.api.nvim_win_is_valid(w) and not keep[w] then
+      local b = vim.api.nvim_win_get_buf(w)
+      local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+      local empty = #lines == 0 or (#lines == 1 and lines[1] == '')
+      if
+        vim.api.nvim_buf_get_name(b) == ''
+        and vim.bo[b].buftype == ''
+        and vim.bo[b].modifiable
+        and empty
+        and vim.b[b].review_meta == nil
+      then
+        pcall(vim.api.nvim_win_close, w, false)
+      end
+    end
+  end
+end
+
 local function open_session_ui()
   active.sidebar_buf = ui_list.render_sidebar(active.session, active.file_order_sorted)
   active.sidebar_win = vim.api.nvim_get_current_win()
@@ -417,6 +441,7 @@ local function open_session_ui()
   -- sorted が空 = 差分消滅復元で消失ファイルですらない (nil -> プレースホルダ)。
   local first = active.file_order_sorted[1]
   render_diff_file(first and first.path or nil)
+  sweep_empty_wins()
 end
 
 -- files_by_path から sidebar 用の並びを作る (parse の出現順 = file_order)。

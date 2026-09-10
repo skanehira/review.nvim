@@ -30,7 +30,7 @@
 | `c` (normal) | 対象 range = カーソル位置の new 側行 (`-` 行 = new 側行番号が無ければ WARN で開かない)。コメント入力 float (マルチライン対応 scratch buffer、insert で開始、操作契約: Normal `<CR>` 確定 / insert `<CR>` 改行 / `q` 閉じる [本文なし=キャンセル、本文ありは閉じず続けて q で破棄] / `<C-y>` = insert 確定のエイリアス / `<Esc>` = Normal へ戻るだけで閉じない。窓 title に対象 `path:line[-end]` と確定/閉じるのヒントを常時表示。終端経路は必ず stopinsert してから窓を閉じる (残留 insert が diff バッファを傷めない — UX review F8)) を開く。確定でコメント追加 → extmark 再描画 → 即時 save |
 | `c` (visual-line) | 対象 range = 選択範囲の先頭〜末尾の new 側行 (`+` 行とコンテキスト行が対象、削除専用行を除く)。選択内に new 側行が無ければ WARN で開かない |
 | `e` | カーソル行のコメントを編集。複数ある場合は vim.ui.select で対象を選ぶ (既定 provider は番号入力の inputlist になる — ユーザー help に記載、UX review F11)。body を事前入力した float を開き、確定で更新 → save |
-| `d` | カーソル行 (range 内) のコメントを削除。arming 二重押し: 1 回目は対象を armed + WARN にして削除しない、同じコメントへ discard window (2 秒) 内にもう一度 d で削除確定 → save。vim 筋 `dd` (d 2 回) で複数件が消えないため (armed は object 参照比較なので他行移動・編集で自然解除。旧「即削除・確認なし」は UX review F9 で废棄) |
+| `d` | カーソル行 (range 内) のコメントを削除。arming 二重押し: 1 回目は対象を armed + WARN にして削除しない、同じコメントへ待機窓 (2 秒) 内にもう一度 d で削除確定 → save。他行移動・e での編集確定・窓経過で arming 解除される (armed は object 参照比較 + 編集確定時の明示解除。vim 筋 `dd` でも 1 件しか消えない) |
 | `y` | カーソル行 range に含まれるコメントのプロンプトをコピー (ai-prompt「出力経路」参照) |
 | `q` | `:Review close` と同じ (pr-worktree「セッションとレビューの終了」参照)。コメント 0 件なら確認なしで閉じる |
 | `<F1>` | キーバインドと操作概要の help float (`<Esc>`/`q` で閉じる) |

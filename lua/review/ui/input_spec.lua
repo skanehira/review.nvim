@@ -84,14 +84,9 @@ describe('input.open 確定', function()
     assert.same({ 'use map here' }, state.confirmed)
   end)
 
-  -- 確定後に insert が残留すると焦点が戻った diff バッファが insert-mode になり
-  -- 誤打鍵で review:// buffer を傷つける (UX review F8)。
-  it('<C-y> 確定後は insert モードに残留しない', function()
-    open()
-    vim.cmd 'normal idraft text'
-    vim.cmd('normal ' .. CY)
-    assert.is_true(vim.fn.mode() ~= 'i')
-  end)
+  -- (F8 の「insert 残留しない」は headless の :normal では insert が継続せず
+  -- 検出能力ゼロの assert になるためここに置かない。契約の実証は 2026-09-10 の
+  -- 実 PTY 検証 (旧: mode=i 残留 / 現: mode=n) と docs の契約記述で担保。)
 
   it(
     'insert の <CR> は改行で、Normal <CR> 確定で \\n 連結の 1 body になる',

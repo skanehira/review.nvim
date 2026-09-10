@@ -175,6 +175,10 @@ describe('list.render_sessionlist', function()
         .. os.date('%Y-%m-%d %H:%M', 1725843600)
       assert.is_true(lines[1]:sub(1, #prefix_a) == prefix_a, lines[1])
       assert.is_true(lines[2]:sub(1, #prefix_z) == prefix_z, lines[2])
+      -- tz トークン (非空の後末) を pin: tz 付けを外す変異で落ちる (UX review F17
+      -- は「tz 表記なし UTC」が問題だったため、表記自体を検証する)
+      assert.is_true(lines[1]:match '^.- %d%d:%d%d %S+$' ~= nil, lines[1])
+      assert.is_true(lines[2]:match '^.- %d%d:%d%d %S+$' ~= nil, lines[2])
       assert.equals('review-list', vim.bo[buf].filetype)
     end
   )

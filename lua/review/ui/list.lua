@@ -92,7 +92,7 @@ function M.row_file(bufnr, row)
 end
 
 --- 保存済みセッション一覧を描画する。opts = { is_grey(sess)->bool? }。
---- 1 行 `<slug>  <status>  <mode>  <base>..<head>  <N> comments  <UTC 更新時刻>`、
+--- 1 行 `<slug>  <status>  <mode>  <base>..<head>  <N> comments  <ローカル時刻 + %Z tz>`、
 --- slug 昇順。grey 行 (repo 消失) は row_session が nil = <Enter> 不可。
 function M.render_sessionlist(sessions, opts)
   opts = opts or {}
@@ -108,7 +108,8 @@ function M.render_sessionlist(sessions, opts)
     -- ローカル時刻 + tz 短縮表記 (UX review F17: UTC 固定だと JST ユーザーが
     -- 9 時間誤読した)。%Z 非対応プラットフォームでは時刻だけで耐える。
     local tz = os.date('%Z', updated_at)
-    if tz == nil or tz:find('%%', 1, true) then
+    if tz == nil or tz:find('%', 1, true) then
+      -- strftime が %Z を解釈できないプラットフォーム (リテラル "%Z" が返る) 対策
       tz = ''
     else
       tz = ' ' .. tz

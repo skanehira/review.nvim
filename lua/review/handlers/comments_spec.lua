@@ -382,6 +382,56 @@ describe('comments e (編集) / d (削除)', function()
     comments_handler._set_now(nil)
   end)
 
+  -- 「取り消しは他行へ移動」が docs/help の契約なので positive に pin する
+  -- (review finding: 旧テストはコメントなし行の WARN しか見ておらず arming 解除
+  -- を検証できていなかった)。
+  it(
+    'd: 別行で d すると arming が移り、元行に戻ると再 armed から始まる',
+    function()
+      comments_handler._set_now(function()
+        return 100
+      end)
+      seed_one 'on-2'
+      focus_diff_row(5) -- '+three' = new 3
+      comments_handler.add_normal()
+      type_into_float 'on-3' -- 2 件目を作る (new 2 / new 3 に 1 件ずつ)
+
+      focus_diff_row(4)
+      comments_handler.delete_current() -- new 2 のコメントを armed
+      focus_diff_row(5)
+      comments_handler.delete_current() -- arming が new 3 へ移る (new 2 は消えない)
+      assert.equals(2, #saved().comments)
+
+      focus_diff_row(4)
+      comments_handler.delete_current() -- 元行 = 再度 1 目 (arming し直し)
+      assert.equals(2, #saved().comments)
+      comments_handler.delete_current()
+      assert.equals(1, #saved().comments) -- new 2 のみが消える
+      comments_handler._set_now(nil)
+    end
+  )
+
+  it(
+    'd 予約中のコメントを e で編集確定すると arming が解除される',
+    function()
+      comments_handler._set_now(function()
+        return 100
+      end)
+      seed_one 'armed-then-edited'
+      focus_diff_row(4)
+      comments_handler.delete_current() -- armed
+      comments_handler.edit_current() -- 1 件なので select なしで float
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'edited' }) -- 事前入力を置換
+      vim.cmd('normal ' .. CY) -- 確定 (= 「編集確定」で arming 解除のはず)
+      comments_handler.delete_current() -- 解除済み = 1 目は armed
+      assert.equals(1, #saved().comments)
+      assert.equals('edited', saved().comments[1].body)
+      comments_handler.delete_current()
+      assert.equals(0, #saved().comments)
+      comments_handler._set_now(nil)
+    end
+  )
+
   it('d: コメントなしは WARN で save 内容不変', function()
     focus_diff_row(8)
     comments_handler.delete_current()

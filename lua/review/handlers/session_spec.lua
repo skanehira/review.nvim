@@ -215,6 +215,21 @@ describe('session.start 開始フロー', function()
     end
   )
 
+  it('開通時、余剰の空 [No Name] 窓を回収してレビュー 2 窓に戻す', function()
+    -- list 経由再開などで空窓が残る症状 (UX review F1) への収束保証
+    vim.cmd 'vsplit' -- 中身なしの空窓を先に置く
+    start_done('main', 'feature')
+    assert.equals(2, #vim.api.nvim_tabpage_list_wins(state.tab))
+  end)
+
+  it('開通時は内容のあるユーザー窓を回収しない', function()
+    vim.cmd 'vsplit'
+    vim.api.nvim_buf_set_lines(vim.api.nvim_get_current_buf(), 0, -1, false, { 'note' })
+    vim.cmd 'wincmd h'
+    start_done('main', 'feature')
+    assert.equals(3, #vim.api.nvim_tabpage_list_wins(state.tab))
+  end)
+
   it(
     'ref 解決不能 (diff exit 128) は WARN 通知で UI を開かず save もしない',
     function()
