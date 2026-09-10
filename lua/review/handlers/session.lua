@@ -1225,13 +1225,13 @@ function M.focus_sidebar()
     vim.api.nvim_set_current_win(sw)
     return
   end
-  local anchor
+  local sb_anchor
   if active.diff_win ~= nil and vim.api.nvim_win_is_valid(active.diff_win) then
-    anchor = active.diff_win
+    sb_anchor = active.diff_win
   else
-    anchor = vim.api.nvim_get_current_win()
+    sb_anchor = vim.api.nvim_get_current_win()
   end
-  vim.api.nvim_set_current_win(anchor)
+  vim.api.nvim_set_current_win(sb_anchor)
   vim.cmd 'vsplit'
   vim.cmd 'wincmd H'
   active.sidebar_win = vim.api.nvim_get_current_win()

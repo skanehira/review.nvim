@@ -814,8 +814,6 @@ describe('sidebar 操作 (viewed / 差分切替) と INV-4 save', function()
     assert.is_true(vim.fn.win_screenpos(sb)[2] < vim.fn.win_screenpos(db)[2])
   end)
 
-  local function ex_bufname_unused() end
-
   it('x で viewed 切替 -> 直後に save (両方向)', function()
     start_done('main', 'feature')
     focus_sidebar_row(1)
