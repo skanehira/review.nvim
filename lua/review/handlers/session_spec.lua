@@ -215,6 +215,38 @@ describe('session.start 開始フロー', function()
     end
   )
 
+  -- sidebar=左 / diff=右 は設計 (diff-review「sidebar 左 30 桁」) 契約。vsplit は
+  -- splitleft/splitright オプションで結果反転するため、明示的な位置指定を pin する。
+  it('レイアウトは splitright=false でも sidebar 左 / diff 右', function()
+    vim.o.splitright = false
+    start_done('main', 'feature')
+    local sb = vim.fn.win_findbuf(vim.fn.bufnr(SIDEBAR_NAME))[1]
+    local db = vim.fn.win_findbuf(vim.fn.bufnr(DIFF_A_NAME))[1]
+    assert.is_true(vim.fn.win_screenpos(sb)[2] < vim.fn.win_screenpos(db)[2])
+  end)
+
+  it('レイアウトは splitright=true でも sidebar 左 / diff 右', function()
+    vim.o.splitright = true
+    start_done('main', 'feature')
+    local sb = vim.fn.win_findbuf(vim.fn.bufnr(SIDEBAR_NAME))[1]
+    local db = vim.fn.win_findbuf(vim.fn.bufnr(DIFF_A_NAME))[1]
+    assert.is_true(vim.fn.win_screenpos(sb)[2] < vim.fn.win_screenpos(db)[2])
+  end)
+
+  it('diff 窓再建時も sidebar 左 / diff 右の位置に戻る', function()
+    vim.o.splitright = false
+    start_done('main', 'feature')
+    local dbuf = vim.fn.bufnr(DIFF_A_NAME)
+    vim.api.nvim_win_close(vim.fn.win_findbuf(dbuf)[1], true)
+    local sb = vim.fn.win_findbuf(vim.fn.bufnr(SIDEBAR_NAME))[1]
+    vim.api.nvim_set_current_win(sb)
+    vim.api.nvim_win_set_cursor(sb, { 2, 0 })
+    session_handler.open_selected_file() -- b.lua で再建経路
+    local new_dbuf = vim.fn.bufnr('review://diff/' .. SLUG .. '/b.lua')
+    local dwin = vim.fn.win_findbuf(new_dbuf)[1]
+    assert.is_true(vim.fn.win_screenpos(sb)[2] < vim.fn.win_screenpos(dwin)[2])
+  end)
+
   it('開通時、余剰の空 [No Name] 窓を回収してレビュー 2 窓に戻す', function()
     -- list 経由再開などで空窓が残る症状 (UX review F1) への収束保証
     vim.cmd 'vsplit' -- 中身なしの空窓を先に置く

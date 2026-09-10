@@ -384,6 +384,10 @@ local function ensure_diff_win()
   end
   vim.api.nvim_set_current_win(anchor_win)
   vim.cmd 'vsplit'
+  -- 新窓は splitleft/splitright の設定次第で左右どちらにも出るので、設計どおり
+  -- 「sidebar 左 / diff (再建窓) 右」へ寄せる (UX review: ユーザー環境で一覧が右に
+  -- 出て視線移動が GitHub Files changed と逆になった)
+  vim.cmd 'wincmd L'
   active.diff_win = vim.api.nvim_get_current_win()
 end
 
@@ -435,6 +439,7 @@ local function open_session_ui()
   vim.api.nvim_win_set_buf(active.sidebar_win, active.sidebar_buf)
   pcall(vim.api.nvim_win_set_width, active.sidebar_win, 30)
   vim.cmd 'vsplit'
+  vim.cmd 'wincmd L' -- 同上: sidebar 左 / diff 右を splitright 設定に依らせない
   active.diff_win = vim.api.nvim_get_current_win()
   -- 「右ペインには一覧の先頭ファイルの diff を開く」= 一覧はパス昇順なので
   -- sorted 先頭を使う (core/diff の parse 出現順ではない)。
