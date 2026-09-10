@@ -102,6 +102,10 @@ KEYMAPS						*review-keymaps*
 			open_file      = 'o',
 			close          = 'q',
 			help           = '<F1>',
+			next_file      = ']d',
+			prev_file      = '[d',
+			focus_sidebar  = 'S',
+			view_comments  = 'i',
 		},
 		sidebar = {                   -- 変更ファイル一覧
 			open_diff      = '<CR>',
@@ -112,6 +116,7 @@ KEYMAPS						*review-keymaps*
 		sessionlist = {               -- :Review list の一覧
 			open           = '<CR>',
 			close          = 'q',
+			delete         = 'd',
 		},
 	}
 
@@ -139,6 +144,13 @@ DIFF バッファ					*review-keymaps-diff*
 			read-only)
 	q		セッションを閉じる (コメント 0 件は無確認)
 	<F1>		キーバインドの help float
+	]d		次のファイルの diff を開く (パス昇順の並び。端では
+			無動作。viewed 更新と save は一覧の <CR> と同じ)
+	[d		前のファイルの diff を開く (上記と同じ規則)
+	S		sidebar (変更ファイル一覧) へ移動 (窓が閉じて
+			いれば左に再建してから移動)
+	i		カーソル行のコメント全文を read-only 窓で閲覧
+			(編集は e)。q / <Esc> で閉じる
 
 変更ファイル一覧 (sidebar)			*review-keymaps-sidebar*
 
@@ -153,6 +165,8 @@ DIFF バッファ					*review-keymaps-diff*
 
 	<CR>		選択セッションを開く (closed -> open)
 	q		一覧を閉じる (セッション状態は変えない)
+	d		選択セッションを削除 (:Review delete と同じ
+			確認フロー)
 
 ==============================================================================
 SESSION 状態と復旧				*review-sessions*
@@ -192,7 +206,10 @@ diff バッファ				*review-display-diff*
 		 `💬 N`、outdated を含む = `'💬 N (⚠M)'`、単独 outdated =
 		 `⚠ outdated: 抜粋`)。virt_text なので `/検索` の対象には
 		ならない (検索したい場合は :Review prompt 出力や data dir の
-		JSON を grep する)。
+		JSON を grep する)。全文を見たいときは `i` (read-only 窓)。
+	・標準の `[c` / `]c` (ftplugin で定義される diff の hunk 移動) はこの
+		バッファでもそのまま効く。ファイル単位の移動は `]d` / `[d`
+		(|review-keymaps-diff)。
 
 ==============================================================================
 COMMENT INPUT					*review-comment-input*

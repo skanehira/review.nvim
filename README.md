@@ -64,8 +64,11 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 | diff       | `y`                               | カーソル行コメントのプロンプトを yank |
 | diff       | `o`                               | その行の実ファイルを開く             |
 | diff       | `q` / `<F1>`                      | セッション終了 / help                |
+| diff       | `]d` / `[d`                        | 次 / 前のファイル (一覧順。端は無動作) |
+| diff       | `S`                               | 変更一覧へ移動                       |
+| diff       | `i`                               | カーソル行のコメント全文を閲覧        |
 | 変更一覧   | `<CR>` / `o` / `x` / `q`          | diff 表示 / 実ファイル / viewed 切替 |
-| セッション一覧 | `<CR>` / `q`                  | 開く / 閉じる                        |
+| セッション一覧 | `<CR>` / `q` / `d`            | 開く / 閉じる / 削除                 |
 
 すべて buffer-local で `setup` の `keymaps` から変更可能 (設定キー名と既定値は `:h review-keymaps`)。例:
 
@@ -73,7 +76,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 require('review').setup({ keymaps = { diff = { add_comment = 'gc' } } })
 ```
 
-diff バッファは `wrap=off` + `foldmethod=expr` で、大きい hunk は畳まれた状態で開く。`za` / `zR` (Neovim 標準) で展開するか、`o` で実ファイルを開いて読む。
+diff バッファは `wrap=off` + `foldmethod=expr` で、大きい hunk は畳まれた状態で開く。`za` / `zo` / `zR` (Neovim 標準) で展開するか、`o` で実ファイルを開いて読む。hunk 間は `[c` / `]c` (diff filetype 標準)、ファイル間は `]d` / `[d` で移動する。
 
 `c` / `e` で開くコメント入力ウィンドウは、本文入力中 (insert) は **`<CR>` = 改行**、`q` などで Normal に戻ったあと **`<CR>` = 確定** して閉じる。本文があるときは `q` では閉じず (誤って入力を捨てないため)、続けて `q` を押したときだけ破棄して閉じる。`<C-y>` は insert 中の確定、`<Esc>` は Normal に戻るだけで窓は閉じない。操作はウィンドウのタイトルと `<F1>` の help にも表示される。
 

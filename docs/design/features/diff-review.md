@@ -34,6 +34,9 @@
 | `y` | カーソル行 range に含まれるコメントのプロンプトをコピー (ai-prompt「出力経路」参照) |
 | `q` | `:Review close` と同じ (pr-worktree「セッションとレビューの終了」参照)。コメント 0 件なら確認なしで閉じる |
 | `<F1>` | キーバインドと操作概要の help float (`<Esc>`/`q` で閉じる) |
+| `]d` / `[d` | 一覧順 (パス昇順) の次 / 前のファイルを右ペインに開く。端は無動作 (`[c`/`]c` の hunk 移動と同感)。処理は sidebar `<Enter>` と同一 (viewed=true + save + focus は diff 窓に留まる)。ftplugin 標準の `[c`/`]c` (hunk 移動) は `filetype=diff` なのでそのまま使える |
+| `S` | focus を sidebar へ移す。一覧窓が閉じられていた場合は現 diff 窓の左に再建 (窓役割の修復は UX review F1 系と同じ内容導出) |
+| `i` | カーソル行範囲のコメント全文を read-only float で閲覧 (`ui/commentview`)。id / path:line[-end] / outdated 表示。閉じるのは `q` / `<Esc>` / `<CR>` のみ (編集は `e`) |
 
 **sidebar** (左 30 桁、scratch、filetype `review-list` — syntax は持たず buffer-local キーマップと hl group の適用先。キーは DESIGN.md「デフォルトキーマップ」参照):
 

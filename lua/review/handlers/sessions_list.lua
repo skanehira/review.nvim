@@ -46,4 +46,23 @@ function M.open_current()
   restore.resume_session(sess)
 end
 
+--- 一覧のカーソル行セッションを削除 (d)。`:Review delete` と同一の
+--- 確認フロー (コメント件数 WARN + [y/N]) を経由する。grey 行 (repo path 消失)
+--- は対象解決できないため WARN。
+function M.delete_current()
+  local buf = vim.api.nvim_get_current_buf()
+  local meta = vim.b[buf].review_meta or {}
+  if meta.kind ~= 'sessionlist' then
+    return
+  end
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local sess = ui_list.row_session(buf, row)
+  if sess == nil then
+    notify_warn 'その行はセッションではないため削除できません (repo path 消失行は :Review delete <id> を直接)'
+    return
+  end
+  local session_handler = require 'review.handlers.session'
+  session_handler.delete(sess.id)
+end
+
 return M

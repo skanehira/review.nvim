@@ -4,6 +4,7 @@
 -- 入力 float は :normal キーシーケンスで実経路を駆動する (ui/input_spec と同じ前提)。
 local cli = require 'review.git.cli'
 local config = require 'review.config'
+local comment_model = require 'review.core.comment'
 local comments_handler = require 'review.handlers.comments'
 local paths = require 'review.store.paths'
 local session_handler = require 'review.handlers.session'
@@ -431,6 +432,65 @@ describe('comments e (編集) / d (削除)', function()
       comments_handler._set_now(nil)
     end
   )
+
+  it(
+    'i: 該当行のコメント全文を read-only float で開く (閉じるのみ / 編集しない)',
+    function()
+      local session = session_handler.active()
+      comment_model.add(session.comments, {
+        file = 'a.lua',
+        line = 2,
+        body = 'first line\nsecond line',
+        anchor = vim.NIL,
+        created_at = 4321,
+      })
+      session_handler.commit_comment_change()
+      local wins_after_commit = #vim.api.nvim_tabpage_list_wins(state.tab)
+      focus_diff_row(4)
+
+      comments_handler.view_current()
+
+      assert.equals(wins_after_commit + 1, #vim.api.nvim_tabpage_list_wins(state.tab))
+      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+      assert.equals('[1] c1  a.lua:2', lines[1])
+      -- 本文は全文 (切り詰めなし・複数行保つ)、行頭インデント付き
+      assert.equals('  first line', lines[2])
+      assert.equals('  second line', lines[3])
+      assert.is_true(vim.bo[vim.api.nvim_get_current_buf()].modifiable == false)
+      -- q で閉じる (編集経路ではない: コメントも save も変わらない)
+      local ws = vim.api.nvim_tabpage_list_wins(state.tab)
+      vim.api.nvim_win_close(ws[#ws], true)
+      assert.equals(1, #saved().comments)
+      assert.equals('first line\nsecond line', saved().comments[1].body)
+    end
+  )
+
+  it(
+    'i の float は q で閉じられる (焦点が diff に戻る・コメント不変)',
+    function()
+      seed_one 'x'
+      focus_diff_row(4)
+      comments_handler.view_current()
+      local w = vim.api.nvim_tabpage_list_wins(state.tab)
+      vim.api.nvim_win_close(w[#w], true)
+      assert.equals(2, #vim.api.nvim_tabpage_list_wins(state.tab))
+      assert.equals(1, #saved().comments)
+    end
+  )
+
+  it('i: outdated コメントは prompt 除外中と表示する', function()
+    seed_one 'drifted'
+    saved().comments[1].state = 'outdated'
+    -- 内存側も同じオブジェクトなので state 反映済み
+    local session = session_handler.active()
+    session.comments[1].state = 'outdated'
+
+    focus_diff_row(4)
+    comments_handler.view_current()
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert.is_true(lines[1]:find('outdated', 1, true) ~= nil, lines[1])
+    assert.is_true(lines[1]:find('prompt 除外中', 1, true) ~= nil)
+  end)
 
   it('d: コメントなしは WARN で save 内容不変', function()
     focus_diff_row(8)

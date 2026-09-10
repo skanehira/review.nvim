@@ -14,11 +14,18 @@ local SECTIONS = {
     rows = {
       { 'add_comment', '作成コメント (visual-line で範囲指定)' },
       { 'edit_comment', 'カーソル行のコメントを編集' },
-      { 'delete_comment', 'カーソル行のコメントを即削除' },
+      {
+        'delete_comment',
+        'カーソル行のコメントを削除 (arming: 同じ行でもう一度 d)',
+      },
       { 'yank_prompt', 'カーソル行のコメントのプロンプトを yank' },
       { 'open_file', 'その行の実ファイルを開く' },
       { 'close', 'セッションを閉じる' },
       { 'help', 'このヘルプ' },
+      { 'next_file', '次のファイルへ (端では無動作)' },
+      { 'prev_file', '前のファイルへ (端では無動作)' },
+      { 'focus_sidebar', 'sidebar (変更ファイル一覧) へ移動' },
+      { 'view_comments', 'カーソル行のコメントを閲覧 (read-only)' },
     },
   },
   {
@@ -37,6 +44,7 @@ local SECTIONS = {
     rows = {
       { 'open', '選択セッションを開く' },
       { 'close', '一覧を閉じる (セッション状態は変えない)' },
+      { 'delete', '選択セッションを削除 (:Review delete と同じ確認)' },
     },
   },
   {

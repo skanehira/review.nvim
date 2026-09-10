@@ -128,11 +128,15 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | diff | `o` | その行の実ファイルを開く (worktree あり = 編集可の通常バッファ / なし = `git show <head>:<path>` の read-only scratch) |
 | diff | `q` | `:Review close` 相当 (コメントありなら確認プロンプト) |
 | diff | `<F1>` | help float |
+| diff | `]d` / `[d` | 次 / 前のファイルへ (list 昇順を辿る。端は無動作。viewed 更新と save は sidebar `<Enter>` と同一) |
+| diff | `S` | sidebar (変更ファイル一覧) へ focus 移動。一覧窓が閉じられていれば左に再建 |
+| diff | `i` | カーソル行範囲のコメント全文を read-only float で閲覧 (編集は `e`。`q`/`<Esc>`/`<CR>` で閉じる) |
 | sidebar (変更ファイル一覧) | `<Enter>` | そのファイルの diff へ移動 |
 | sidebar | `o` | そのファイルの実ファイルを開く (diff の `o` と同じ規則) |
 | sidebar | `x` | viewed 切替 |
 | sidebar | `q` | `:Review close` 相当 (diff の `q` と同じ) |
 | sessionlist (`:Review list` のバッファ) | `<Enter>` | 選択セッションを開く (closed → open。worktree 要否は pr-worktree の作成判断で再開時に再作成) |
+| sessionlist | `d` | 選択セッションを削除 (`:Review delete` と同一の確認フロー) |
 | sessionlist | `q` | 一覧バッファを閉じる (セッション状態は変えない) |
 
 ## 横断規約

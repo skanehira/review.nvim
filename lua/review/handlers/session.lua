@@ -1140,6 +1140,105 @@ function M.resume_into(session, files)
   end)
 end
 
+-- 現在 diff バッファの path (meta.kind=diff のとき)。NO_DIFF プレースホルダは
+-- 一覧に無いので「先頭扱い」の根拠に使う。
+local function current_diff_path()
+  local meta = vim.b[vim.api.nvim_get_current_buf()].review_meta or {}
+  if meta.kind == 'diff' then
+    return meta.path
+  end
+  return nil
+end
+
+-- ]d / [d: 一覧 (パス昇順) を辿って右ペインのファイルを進める/戻す。
+-- 処理は sidebar <CR> と同一 (viewed=true + save + 再描画)。focus は diff 窓に
+-- 留まる (キーを押している場所が diff なので移動先も diff = [c/]c と同じ感覚)。
+-- 端では何もしない (]c が最終 hunk で止まる標準と同じ)。
+local function step_file(delta)
+  if active == nil then
+    return
+  end
+  local order = {}
+  for _, e in ipairs(active.file_order_sorted) do
+    order[#order + 1] = e.path
+  end
+  if #order == 0 then
+    return
+  end
+  local cur = current_diff_path()
+  local idx = 1
+  for i, p in ipairs(order) do
+    if p == cur then
+      idx = i
+      break
+    end
+  end
+  local ni = idx + delta
+  if ni < 1 or ni > #order then
+    return
+  end
+  local path = order[ni]
+  local entry = active.session.files[path]
+  if entry == nil then
+    entry = { viewed = false }
+    active.session.files[path] = entry
+  end
+  entry.viewed = true
+  render_diff_file(path)
+  persist()
+  refresh_sidebar()
+end
+
+--- `]d`: 次のファイルへ。
+function M.next_file()
+  step_file(1)
+end
+
+--- `[d`: 前のファイルへ。
+function M.prev_file()
+  step_file(-1)
+end
+
+--- `S`: sidebar (変更ファイル一覧) へ focus を移す。一覧窓が側から閉じられて
+--- いた場合は diff 窓の隣 (左) に再建する (回線の向きは設計どおり sidebar 左)。
+function M.focus_sidebar()
+  if active == nil then
+    return
+  end
+  -- sidebar buf は scratch (bufhidden=wipe) で、表示窓が閉じられると消える
+  -- (only / :bdelete 経由)。その場合は状態から描き直して作り直す。
+  if active.sidebar_buf == nil or not vim.api.nvim_buf_is_valid(active.sidebar_buf) then
+    active.sidebar_buf = ui_list.render_sidebar(active.session, active.file_order_sorted)
+    active.sidebar_win = nil
+  end
+  local sw = nil
+  if active.sidebar_win ~= nil and vim.api.nvim_win_is_valid(active.sidebar_win) then
+    sw = active.sidebar_win
+  end
+  local shows_sb = sw ~= nil and vim.api.nvim_win_get_buf(sw) == active.sidebar_buf
+  if not shows_sb then
+    sw = sidebar_display_win(nil)
+    shows_sb = sw ~= nil
+  end
+  if shows_sb then
+    active.sidebar_win = sw
+    vim.api.nvim_set_current_win(sw)
+    return
+  end
+  local anchor
+  if active.diff_win ~= nil and vim.api.nvim_win_is_valid(active.diff_win) then
+    anchor = active.diff_win
+  else
+    anchor = vim.api.nvim_get_current_win()
+  end
+  vim.api.nvim_set_current_win(anchor)
+  vim.cmd 'vsplit'
+  vim.cmd 'wincmd H'
+  active.sidebar_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(active.sidebar_win, active.sidebar_buf)
+  pcall(vim.api.nvim_win_set_width, active.sidebar_win, 30)
+end
+
 --- `o`: 現在バッファ (diff / sidebar) に行っているファイルの実体を開く。
 --- worktree あり = worktree 基準の実ファイル (編集可) / なし = git show read-only
 --- (ui/fileview)。削除ファイルと diff 削除行 (new 側に無い) はコンテキストへ

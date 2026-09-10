@@ -7,6 +7,7 @@ local prompt_handler = require 'review.handlers.prompt'
 local session_handler = require 'review.handlers.session'
 local ui_diffbuffer = require 'review.ui.diffbuffer'
 local ui_input = require 'review.ui.input'
+local ui_view = require 'review.ui.commentview'
 
 local M = {}
 
@@ -184,6 +185,32 @@ function M.yank_current()
     return
   end
   prompt_handler.for_line(session, found)
+end
+
+--- `i`: カーソル行範囲のコメント全文を read-only float で閲覧 (UX 提案:
+--- virt_text は 40 字で切れ、編集 float は操作経路が編集なので閲覧に不向き)。
+--- 対象行の path:line は表示済み。outdated は prompt 除外中である旨を添える。
+function M.view_current()
+  local session, found = comments_at_cursor()
+  if session == nil then
+    return
+  end
+  local meta = vim.b[vim.api.nvim_get_current_buf()].review_meta or {}
+  local lines = {}
+  for i, c in ipairs(found) do
+    local loc = ('%s:%d'):format(c.file, c.line)
+    if (c.end_line or c.line) > c.line then
+      loc = loc .. '-' .. c.end_line
+    end
+    local flag = c.state == 'outdated' and '  ! outdated (prompt 除外中)' or ''
+    lines[#lines + 1] = ('[%d] %s  %s%s'):format(i, c.id, loc, flag)
+    for _, body_line in ipairs(vim.split(c.body, '\n', { plain = true })) do
+      lines[#lines + 1] = '  ' .. body_line
+    end
+  end
+  ui_view.open(lines, {
+    title = ' Comment ' .. (meta.path or ''),
+  })
 end
 
 --- `d`: カーソル行 (range 内) のコメントを arming 二重押しで削除 (状態定義は

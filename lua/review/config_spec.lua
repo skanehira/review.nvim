@@ -23,6 +23,10 @@ describe('config.get', function()
           open_file = 'o',
           close = 'q',
           help = '<F1>',
+          next_file = ']d',
+          prev_file = '[d',
+          focus_sidebar = 'S',
+          view_comments = 'i',
         },
         sidebar = {
           open_diff = '<CR>',
@@ -33,6 +37,7 @@ describe('config.get', function()
         sessionlist = {
           open = '<CR>',
           close = 'q',
+          delete = 'd',
         },
       },
       highlight = {},
@@ -57,6 +62,10 @@ describe('config.get', function()
           open_file = 'o',
           close = 'q',
           help = '<F1>',
+          next_file = ']d',
+          prev_file = '[d',
+          focus_sidebar = 'S',
+          view_comments = 'i',
         },
         sidebar = {
           open_diff = '<CR>',
@@ -67,6 +76,7 @@ describe('config.get', function()
         sessionlist = {
           open = '<CR>',
           close = 'q',
+          delete = 'd',
         },
       },
       highlight = {},

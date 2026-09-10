@@ -44,7 +44,16 @@ describe('help.open', function()
     local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
     assert.is_true(has_line(lines, 'c 作成コメント (visual-line で範囲指定)'))
     assert.is_true(has_line(lines, 'e カーソル行のコメントを編集'))
-    assert.is_true(has_line(lines, 'd カーソル行のコメントを即削除'))
+    assert.is_true(
+      has_line(
+        lines,
+        'd カーソル行のコメントを削除 (arming: 同じ行でもう一度 d)'
+      )
+    )
+    assert.is_true(has_line(lines, ']d 次のファイルへ (端では無動作)'))
+    assert.is_true(has_line(lines, '[d 前のファイルへ (端では無動作)'))
+    assert.is_true(has_line(lines, 'S sidebar (変更ファイル一覧) へ移動'))
+    assert.is_true(has_line(lines, 'i カーソル行のコメントを閲覧 (read-only)'))
     assert.is_true(has_line(lines, 'y カーソル行のコメントのプロンプトを yank'))
     assert.is_true(has_line(lines, 'o その行の実ファイルを開く'))
     assert.is_true(has_line(lines, 'q セッションを閉じる'))
@@ -63,6 +72,9 @@ describe('help.open', function()
     )
     assert.is_true(has_line(lines, '<C-y> 確定 (insert)'))
     assert.is_true(has_line(lines, '<Esc> Normal へ戻るだけ (窓は閉じない)'))
+    assert.is_true(
+      has_line(lines, 'd 選択セッションを削除 (:Review delete と同じ確認)')
+    )
     vim.cmd 'normal q'
   end)
 

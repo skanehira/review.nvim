@@ -673,6 +673,10 @@ end)
 describe('sidebar 操作 (viewed / 差分切替) と INV-4 save', function()
   use_env()
 
+  local function ex_bufname()
+    return vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+  end
+
   local function focus_sidebar_row(row)
     local sb = vim.fn.bufnr(SIDEBAR_NAME)
     local win = vim.fn.win_findbuf(sb)[1]
@@ -762,6 +766,55 @@ describe('sidebar 操作 (viewed / 差分切替) と INV-4 save', function()
       assert.is_true(seen_diff_b, 'b.lua diff 窓が無い')
     end
   )
+
+  it(']d で次ファイルへ切り替え (viewed save / focus は diff に留まる)', function()
+    start_done('main', 'feature') -- 右ペイン = a.lua (パス昇順先頭)
+    session_handler.next_file()
+
+    assert.equals('review://diff/' .. SLUG .. '/b.lua', ex_bufname())
+    assert.equals(true, load_saved().files['b.lua'].viewed)
+  end)
+
+  it('[d で前ファイルに戻る', function()
+    start_done('main', 'feature')
+    session_handler.next_file()
+    session_handler.prev_file()
+
+    assert.equals('review://diff/' .. SLUG .. '/a.lua', ex_bufname())
+  end)
+
+  it('端では ]d/[d は無動作 (最後の次へを進まない)', function()
+    start_done('main', 'feature')
+    session_handler.next_file() -- b
+    session_handler.next_file() -- 端 = noop
+    assert.equals('review://diff/' .. SLUG .. '/b.lua', ex_bufname())
+    session_handler.prev_file()
+    session_handler.prev_file() -- 端 = noop
+    assert.equals('review://diff/' .. SLUG .. '/a.lua', ex_bufname())
+  end)
+
+  it('S で focus が sidebar へ移る', function()
+    start_done('main', 'feature')
+    session_handler.focus_sidebar()
+    assert.equals(SIDEBAR_NAME, ex_bufname())
+  end)
+
+  it('S は sidebar 窓が失われた単窓状態でも左に再建する', function()
+    start_done('main', 'feature')
+    local dw = vim.fn.win_findbuf(vim.fn.bufnr(DIFF_A_NAME))[1]
+    vim.api.nvim_set_current_win(dw)
+    vim.cmd 'only'
+    session_handler.focus_sidebar()
+
+    assert.equals(SIDEBAR_NAME, ex_bufname())
+    assert.equals(2, #vim.api.nvim_tabpage_list_wins(state.tab))
+    -- sidebar 左 / diff 右 (設計契約)
+    local sb = vim.fn.win_findbuf(vim.fn.bufnr(SIDEBAR_NAME))[1]
+    local db = vim.fn.win_findbuf(vim.fn.bufnr(DIFF_A_NAME))[1]
+    assert.is_true(vim.fn.win_screenpos(sb)[2] < vim.fn.win_screenpos(db)[2])
+  end)
+
+  local function ex_bufname_unused() end
 
   it('x で viewed 切替 -> 直後に save (両方向)', function()
     start_done('main', 'feature')

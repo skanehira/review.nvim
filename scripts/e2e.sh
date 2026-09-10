@@ -76,6 +76,7 @@ S1=$(grep -oE 'E2E-S1 body=.* line=[0-9]+' "$OUT1" || true)
 [ -n "$S1" ] || { echo "e2e: phase1 の E2E-S1 行が無い (assert 不合格)" >&2; exit 1; }
 grep -q 'E2E-S1 body=use a map here' "$OUT1" || { echo 'e2e: phase1 本文不一致' >&2; exit 1; }
 grep -q 'E2E-O1 fileview=readonly' "$OUT1" || { echo 'e2e: phase1 sidebar o で fileview が開かない' >&2; exit 1; }
+grep -q 'E2E-V1 viewwin=scratch' "$OUT1" || { echo 'e2e: phase1 ]d/[d/i/S 一連 (閲覧 float が開かない等) に失敗' >&2; exit 1; }
 # prompt yank (issue #7): y で "0 = @path#L.. + 本文、:Review prompt = 全文一致
 grep -q 'E2E-Y1 yank=@path-range+body' "$OUT1" || {
   echo 'e2e: phase1 y で "0 に range コメントのプロンプトが入らない' >&2

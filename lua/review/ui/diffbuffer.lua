@@ -99,6 +99,10 @@ local function apply_keymaps(buf)
   map('n', k.open_file, "require('review.handlers.session').open_file_current()")
   map('n', k.close, "require('review.handlers.session').close_by_key()")
   map('n', k.help, "require('review.ui.help').open()")
+  map('n', k.next_file, "require('review.handlers.session').next_file()")
+  map('n', k.prev_file, "require('review.handlers.session').prev_file()")
+  map('n', k.focus_sidebar, "require('review.handlers.session').focus_sidebar()")
+  map('n', k.view_comments, "require('review.handlers.comments').view_current()")
 end
 
 --- session の file を winid に描画し bufnr を返す。opts = { winid? }。

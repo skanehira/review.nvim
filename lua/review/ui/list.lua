@@ -139,6 +139,7 @@ function M.render_sessionlist(sessions, opts)
   local drawn = paint(buf, lines, { kind = 'sessionlist' }, rows, {
     { k.open, "require('review.handlers.sessions_list').open_current()" },
     { k.close, "require('review.ui.list').close_current()" },
+    { k.delete, "require('review.handlers.sessions_list').delete_current()" },
   })
   -- grey (repo path 消失) 行は hl を被せて <Enter> 不可を示す (行データ自体は rows から除外済み)
   vim.api.nvim_buf_clear_namespace(buf, grey_ns, 0, -1)

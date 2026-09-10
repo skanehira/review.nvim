@@ -31,7 +31,7 @@
 
 **anchor 検証 (復元時の位置整合)**: 差分は再取得されるため行番号は変わる。コメントごとに (a) 保存行番号の行テキスト == `anchor.line` → active 維持、(b) 同一ファイルの保存行番号 ±20 行以内に `anchor.line` と一致 → active にして保持行番号を補正、(c) 見つからない → `state=outdated`。outdated でも `line` / `end_line` の値は書き換えない (保存値のまま保持)。表示上、その行が new 側差分に存在しない場合は当該ファイルの diff バッファ ヘッダ行に `⚠ outdated: <抜粋>` の virt text で一覧表示する。補正・outdated 化の結果は復元時に save して次回以降の検証を省く
 
-**`:Review list`**: 当該 repo の保存済みセッション全件を scratch split window (filetype `review-list`) に一覧表示 (slug / status / mode / base..head / コメント数 / 更新時刻 = **ローカル時刻 + %Z tz 表記** — 固定 UTC は JST ユーザーに誤読された、UX review F17)。キーは DESIGN.md「デフォルトキーマップ」の sessionlist 行 (`<Enter>` で開く = 復元手順を実行、closed → open)。repo path 消失のセッションは grey 表示で `<Enter>` 不可。
+**`:Review list`**: 当該 repo の保存済みセッション全件を scratch split window (filetype `review-list`) に一覧表示 (slug / status / mode / base..head / コメント数 / 更新時刻 = **ローカル時刻 + %Z tz 表記** — 固定 UTC は JST ユーザーに誤読された、UX review F17)。キーは DESIGN.md「デフォルトキーマップ」の sessionlist 行 (`<Enter>` で開く = 復元手順を実行、closed → open。`d` = `:Review delete` と同一の確認フローで削除)。repo path 消失のセッションは grey 表示で `<Enter>` 不可。
 
 ## 実装の配置
 

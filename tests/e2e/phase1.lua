@@ -96,6 +96,37 @@ local function run()
     fail('sidebar viewed 切り替え後の行不一致: ' .. tostring(sb_lines[2]))
   end
 
+  -- [d キーバインド系 (UX 提案): focus は sidebar <CR> で diff に渡っているので、
+  -- 直接 [d で a.lua に戻り、i で閲覧 float -> 閉じる -> S で一覧へ。
+  vim.cmd 'normal [d'
+  wait_for(function()
+    return vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+      == 'review://diff/main--feature/a.lua'
+  end, '[d で a.lua diff')
+  -- 閲覧 float は「コメントのある行」からしか開かない (S1 の行へ戻る)
+  vim.api.nvim_win_set_cursor(0, { target_row, 0 })
+  vim.cmd 'normal i'
+  wait_for(function()
+    return #vim.api.nvim_tabpage_list_wins(0) == 3
+  end, 'comment view float')
+  local vc = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+  print(('E2E-V1 viewwin=%s'):format(vc == '' and 'scratch' or vc))
+  vim.cmd 'normal q'
+  wait_for(function()
+    return #vim.api.nvim_tabpage_list_wins(0) == 2
+  end, 'comment view close')
+  vim.cmd 'normal S'
+  wait_for(function()
+    return vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+      == 'review://sidebar/main--feature'
+  end, 'S で sidebar focus')
+  -- 以降の range コメント検証は b.lua diff 窓が必要。sidebar 2 行目の <CR> で
+  -- 開き直すこの動作自体が sidebar <CR> + focus 移動の回帰にもなる)。
+  vim.cmd('normal ' .. cr)
+  wait_for(function()
+    return vim.fn.win_findbuf(vim.fn.bufnr 'review://diff/main--feature/b.lua')[1] ~= nil
+  end, 'b.lua diff win')
+
   -- sidebar o キー (キーマップ経由): git show <head>:<path> の read-only
   -- fileview が開く (DESIGN.md キーマップ表 sidebar o 行)。
   vim.cmd 'normal o'
