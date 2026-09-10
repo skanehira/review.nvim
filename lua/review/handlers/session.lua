@@ -367,20 +367,68 @@ local function refresh_sidebar()
   end
 end
 
--- diff 描画先の窓を必ず有効にする。<C-w>o / :q / 終了確認無視などで右ペインが
--- 側に消えていると、そのままでは render がどの窓にも見えず「無反応 & 無音」に
--- なる (UX review F1/F18)。sidebar 窓があればその隣、無ければ current の隣に
--- vsplit で作り直す。
+-- diff 役の窓を「有効 + 内容が diff らしい」に揃える。<C-w>o / :q で窓が側に
+-- 消えるケースに加え、:buffer 等で**窓 id は生き残ったまま内容だけ差し替わる**
+-- drift がある (UX review F1 の真因: id 実体だけ見て set_buf すると、sidebar を
+-- 表示中の窓が diff に化けて一覧が失われ、1 窓 UI になる)。役割は window id で
+-- なく実際に何を表示しているから導く。
+local function diff_win_ok()
+  local w = active.diff_win
+  if w == nil or not vim.api.nvim_win_is_valid(w) then
+    return false
+  end
+  local b = vim.api.nvim_win_get_buf(w)
+  if active.sidebar_buf ~= nil and b == active.sidebar_buf then
+    return false -- diff 役の顔に sidebar が乗っている = 役割がずれている
+  end
+  local name = vim.api.nvim_buf_get_name(b)
+  if name:match '^review://' ~= nil then
+    return true
+  end
+  -- 作りたての空窓 (直前の vsplit が確保した diff 役) はそのまま許容する。
+  -- ユーザー buffer が乗った窓 (内容あり or 名前あり) だけを drift とみなす。
+  local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+  return name == ''
+    and vim.bo[b].buftype == ''
+    and (#lines == 0 or (#lines == 1 and lines[1] == ''))
+end
+
+-- 実際に sidebar buf を見せている窓 (diff 役候補を優先的に除外して探す)
+local function sidebar_display_win(exclude)
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.api.nvim_win_get_buf(w) == active.sidebar_buf and w ~= exclude then
+      return w
+    end
+  end
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.api.nvim_win_get_buf(w) == active.sidebar_buf then
+      return w
+    end
+  end
+  return nil
+end
+
 local function ensure_diff_win()
-  if vim.api.nvim_win_is_valid(active.diff_win) then
+  if diff_win_ok() then
     return
   end
-  local anchor_win
-  if vim.api.nvim_win_is_valid(active.sidebar_win) then
-    anchor_win = active.sidebar_win
-  else
-    -- 両窓失われた経路 (一覧から開く直前など) は current を anchor にする
-    anchor_win = vim.api.nvim_get_current_win()
+  local stale_dw = active.diff_win
+  local anchor_win = nil
+  if active.sidebar_buf ~= nil and vim.api.nvim_buf_is_valid(active.sidebar_buf) then
+    anchor_win = sidebar_display_win(stale_dw)
+    if anchor_win ~= nil then
+      -- 役割を実在窓へ再紐付け (以後の refresh_sidebar も正しい窓を打つ)
+      active.sidebar_win = anchor_win
+    end
+  end
+  if anchor_win == nil then
+    if stale_dw ~= nil and vim.api.nvim_win_is_valid(stale_dw) then
+      anchor_win = stale_dw
+    elseif active.sidebar_win ~= nil and vim.api.nvim_win_is_valid(active.sidebar_win) then
+      anchor_win = active.sidebar_win
+    else
+      anchor_win = vim.api.nvim_get_current_win()
+    end
   end
   vim.api.nvim_set_current_win(anchor_win)
   vim.cmd 'vsplit'
@@ -391,8 +439,14 @@ local function ensure_diff_win()
   active.diff_win = vim.api.nvim_get_current_win()
 end
 
-local function render_diff_file(path)
-  ensure_diff_win()
+-- skip_ensure: open_session_ui 専用 (直前に vsplit で diff 役を確保済み)。
+-- vsplit は現窓の buffer を継承するため、中身のある窓が起点だと new 窓も同じ
+-- buffer を持ってしまい、drift 判定が二重 split する (開通時は窓の存在自体が
+-- 保証されているので判定を迂回する)。
+local function render_diff_file(path, skip_ensure)
+  if not skip_ensure then
+    ensure_diff_win()
+  end
   if path == nil then
     -- 復元時に差分がまるごと消滅し、しかもコメント由来の消失ファイルも無いとき
     -- 右ペインは「変更なし」プレースホルダを開く (persistence-restore.md、開くことを拒否しない)。
@@ -435,17 +489,22 @@ end
 
 local function open_session_ui()
   active.sidebar_buf = ui_list.render_sidebar(active.session, active.file_order_sorted)
-  active.sidebar_win = vim.api.nvim_get_current_win()
+  local sw = vim.api.nvim_get_current_win()
+  -- 先に vsplit して diff 役の窓 ([No Name] のまま) を確保し、その後に sidebar を
+  -- 流し込む。set_buf から先に入れると vsplit の新窓が sidebar buf を継承して
+  -- [No Name] でなくなり、ensure_diff_win の drift 判定が再 split して余剰窓が
+  -- 残る (UX review F1 の「余剰の空窓」の正体)。
+  vim.cmd 'vsplit'
+  vim.cmd 'wincmd L' -- sidebar 左 / diff 右を splitright 設定に依らせない
+  active.diff_win = vim.api.nvim_get_current_win()
+  active.sidebar_win = sw
   vim.api.nvim_win_set_buf(active.sidebar_win, active.sidebar_buf)
   pcall(vim.api.nvim_win_set_width, active.sidebar_win, 30)
-  vim.cmd 'vsplit'
-  vim.cmd 'wincmd L' -- 同上: sidebar 左 / diff 右を splitright 設定に依らせない
-  active.diff_win = vim.api.nvim_get_current_win()
   -- 「右ペインには一覧の先頭ファイルの diff を開く」= 一覧はパス昇順なので
   -- sorted 先頭を使う (core/diff の parse 出現順ではない)。
   -- sorted が空 = 差分消滅復元で消失ファイルですらない (nil -> プレースホルダ)。
   local first = active.file_order_sorted[1]
-  render_diff_file(first and first.path or nil)
+  render_diff_file(first and first.path or nil, true)
   sweep_empty_wins()
 end
 

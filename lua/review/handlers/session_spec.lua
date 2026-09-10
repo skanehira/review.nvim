@@ -723,6 +723,46 @@ describe('sidebar 操作 (viewed / 差分切替) と INV-4 save', function()
     end
   )
 
+  -- 実 repro (UX review F1 の真因): diff 窓の内容が sidebar buf に差し替わった
+  -- 状態 (:buffer など) で sidebar 窓を閉じると、active の win id 実体は
+  -- 「diff 役 = 実際 sidebar 表示」「sidebar 役 = 消滅」にズレる。<CR> が
+  -- 1 窓のまま diff を表示して sidebar を失う (一覧が消える = UI 不能)。
+  it(
+    '<CR> は窓役割のズレを修復する (diff 窓に sidebar が乗った単窓 -> 2 窓)',
+    function()
+      start_done('main', 'feature')
+      local sb_buf = vim.fn.bufnr(SIDEBAR_NAME)
+      local dbuf = vim.fn.bufnr(DIFF_A_NAME)
+      local dwin = vim.fn.win_findbuf(dbuf)[1]
+      local swin = nil
+      for _, w in ipairs(vim.api.nvim_tabpage_list_wins(state.tab)) do
+        if w ~= dwin then
+          swin = w
+        end
+      end
+      -- 実測 repro と同一操作: diff 窓に sidebar buf / sidebar 窓を閉じる
+      vim.api.nvim_win_set_buf(dwin, sb_buf)
+      vim.api.nvim_win_close(swin, true)
+      vim.api.nvim_win_set_cursor(dwin, { 2, 0 })
+
+      session_handler.open_selected_file()
+
+      local wins = vim.api.nvim_tabpage_list_wins(state.tab)
+      local seen_sb, seen_diff_b = false, false
+      for _, w in ipairs(wins) do
+        local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
+        if name == SIDEBAR_NAME then
+          seen_sb = true
+        elseif name == 'review://diff/' .. SLUG .. '/b.lua' then
+          seen_diff_b = true
+        end
+      end
+      assert.equals(2, #wins)
+      assert.is_true(seen_sb, 'sidebar 窓が消えたまま = 役割修復されていない')
+      assert.is_true(seen_diff_b, 'b.lua diff 窓が無い')
+    end
+  )
+
   it('x で viewed 切替 -> 直後に save (両方向)', function()
     start_done('main', 'feature')
     focus_sidebar_row(1)
