@@ -44,10 +44,38 @@ SETUP						*review-setup*
 	})
 <
 
-キーマップは diff バッファ (c: コメント作成 / e: 編集 / d: 削除 / y: yank /
-o: 実ファイル / q: close / <F1>: help)、変更ファイル一覧 (o, x, q, <CR>)、
-セッション一覧 (<CR>, q) を buffer-local で提供する。設定キーと既定値は
->docs/design/DESIGN.md 「API 一覧」> を参照。
+==============================================================================
+KEYMAPS						*review-keymaps*
+
+すべてのキーマップは buffer-local で提供する。キーの既定値と config キーは
+>docs/design/DESIGN.md 「API 一覧」> を参照 (setup の `keymaps` で変更可)。
+押した箇所が違うと効くキーも違うので、バッファのセクションで引くこと。
+
+DIFF バッファ					*review-keymaps-diff*
+
+	c		コメント作成。visual-line で範囲指定
+	e		カーソル行のコメントを編集 (入力窓は
+			|review-comment-input|)
+	d		カーソル行のコメントを即削除
+	y		カーソル行のコメントのプロンプトを yank
+	o		その行の実ファイルを開く (worktree あり =
+			編集可、なし = `git show <head>:<path>` の
+			read-only)
+	q		セッションを閉じる (コメント 0 件は無確認)
+	<F1>		キーバインドの help float
+
+変更ファイル一覧 (sidebar)			*review-keymaps-sidebar*
+
+	<CR>		そのファイルの diff へ移動 (viewed 自動 true)
+	o		そのファイルの実ファイルを開く (diff の o と
+			同じ規則)
+	x		viewed 切替
+	q		セッションを閉じる (diff の q と同じ)
+
+セッション一覧 (:Review list)			*review-keymaps-sessionlist*
+
+	<CR>		選択セッションを開く (closed -> open)
+	q		一覧を閉じる (セッション状態は変えない)
 
 ==============================================================================
 COMMENT INPUT					*review-comment-input*
@@ -70,6 +98,7 @@ CONTENTS					*review-contents*
   INTRODUCTION		|review|
   USAGE			|review-usage|
   SETUP			|review-setup|
+  KEYMAPS		|review-keymaps|
   COMMENT INPUT		|review-comment-input|
 
  vim:tw=78:ts=8:noet:ft=help:norl:
