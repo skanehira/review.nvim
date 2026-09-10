@@ -1184,14 +1184,17 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
   )
 
   it(
-    'remove 失敗は WARN を出し close (save・クローズ) 自体は完了させる (残骸は起動 scan)',
+    'remove 失敗は WARN + 二段目自己修復 (prune + 自前 dir 削除) で close を完走させる',
     function()
       started_with_worktree()
+      local wt = wt_path()
+      vim.fn.mkdir(wt, 'p')
       install_git {
         git_ok, -- status clean
         function()
           return { code = 128, stdout = '', stderr = 'fatal: remove boom\n' }
         end,
+        git_ok, -- prune (二段目)
       }
 
       session_handler.close()
@@ -1202,6 +1205,55 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
         msg = 'review.nvim: worktree 掃除に失敗しました (残骸は起動 scan が回収します): fatal: remove boom',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
+      -- 孤児 dir を残さない (does not point back 系の崩れ登録は prune + dir rm が正攻)
+      assert.is_true(vim.uv.fs_stat(wt) == nil)
+      assert.equals(1, #state.notifications)
+    end
+  )
+
+  it(
+    'close -> 即同 refs start で add は remove 完了待ち (同一 path 直列化 = 二重登録防止)',
+    function()
+      started_with_worktree()
+      -- close(q,0 件=無確認): status -> remove(deferred)。start(継承y): top,
+      -- diff(read=待たない)。lock 下なので judge/add は remove 後。
+      install_git_deferred_remove {
+        git_ok, -- status (close)
+        git_ok, -- remove (deferred: placeholder)
+        top_ok, -- top (start)
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+        JUDGE_HEAD_DIFF[1],
+        JUDGE_HEAD_DIFF[2],
+        JUDGE_HEAD_DIFF[3],
+        git_ok, -- add
+      }
+      state.input_answer = 'y'
+
+      session_handler.close_by_key()
+      session_handler.start { base = 'main', head = 'feature' }
+
+      for _, c in ipairs(state.git_calls) do
+        if c[3] == 'add' or (c[2] == 'worktree' and c[3] == 'status') then
+          error(
+            'remove 完了前に worktree 変更/判断が走った (race = main--x + main--x1 二重登録の源)',
+            0
+          )
+        end
+      end
+      assert.is_true(state.deferred ~= nil)
+
+      state.deferred { code = 0, stdout = '', stderr = '' }
+
+      local has_add = false
+      for _, c in ipairs(state.git_calls) do
+        if c[3] == 'add' then
+          has_add = true
+        end
+      end
+      assert.is_true(has_add, 'remove 完了後も add が再開しない')
+      assert.equals('main--feature', session_handler.active().id)
     end
   )
 
@@ -1402,11 +1454,18 @@ describe('delete の worktree / ref 掃除', function()
         msg = 'review.nvim: worktree 掃除に失敗しました (残骸は起動 scan が回収します): fatal: remove boom',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
-      assert.same({
-        msg = 'review.nvim: 孤児 worktree dir を消去できませんでした。孤児 dir を残さないためセッション削除は中止します: '
-          .. wt,
-        level = vim.log.levels.WARN,
-      }, state.notifications[2])
+      -- close 側の二段目自己修復 (prune + dir 削除) も失敗した旨の通知が挟まり、
+      -- delete 側の中止通知が続く (same-id delete = close 連鎖の上に乗るため)。
+      local function has_msg(pat)
+        for _, n in ipairs(state.notifications) do
+          if n.msg:find(pat, 1, true) ~= nil then
+            return true
+          end
+        end
+        return false
+      end
+      assert.is_true(has_msg 'worktree dir を削除できませんでした')
+      assert.is_true(has_msg '孤児 worktree dir を消去できませんでした')
       -- JSON を消さない = closed + created_by_us=true の記録が残る。これは起動
       -- scan (health.classify) の「掃除してよい残骸」入力そのもの (孤児化しない)。
       assert.is_true(vim.uv.fs_stat(json_path()) ~= nil)

@@ -46,6 +46,53 @@ local function notify_warn(msg)
   vim.notify('review.nvim: ' .. msg, vim.log.levels.WARN)
 end
 
+-- worktree 登録変更の直列化 (close -> 即 start 競合の是正)。
+-- q close の `git worktree remove` (管理登録の解除 + ツリー削除 = 重い git I/O)
+-- の最中に同じ path へ `git worktree add` を実行すると、remove の中間状態
+-- (登録は外れたが dir は半分残る) を跨いで再登録になり、git が衝突しない管理名
+-- (`main--issue-4` + `main--issue-41`) で同一 dir を二重登録する。以後の remove
+-- が "does not point back" で失敗し続ける実測状態の源。同一 dir path では
+-- remove/add 連鎖を直列に 1 本だけ走らせる (ロック保持側が全終了経路で
+-- wt_unlock を呼ぶ責務)。
+local wt_lock_q = {}
+
+local function wt_with_lock(path, fn)
+  local q = wt_lock_q[path]
+  if q ~= nil then
+    q[#q + 1] = fn
+    return
+  end
+  wt_lock_q[path] = {}
+  fn()
+end
+
+local function wt_unlock(path)
+  local q = wt_lock_q[path]
+  if q == nil then
+    return
+  end
+  wt_lock_q[path] = nil
+  for i = 1, #q do
+    wt_with_lock(path, q[i])
+  end
+end
+
+-- remove 失敗後の二段目 (delete 側 sweep と共通の正攻): 崩れた自己登録は prune
+-- が直し、dir は再帰削除で消す (git 自身の手順)。close 側は dir 残りを理由に
+-- 終了を中断しないので成否に関わらず完了コールへ進む。
+local function prune_and_rm_dir(repo, path, done)
+  git_worktree.prune({ repo = repo }, function()
+    if not git_worktree.remove_dir(path) then
+      notify_warn(
+        ('worktree dir を削除できませんでした (起動 scan / :Review delete が回収します): %s'):format(
+          path
+        )
+      )
+    end
+    done()
+  end)
+end
+
 -- [y/N] の確認。vim.ui.input を使う (vim.fn.confirm は headless で絞込めない)。
 local function confirm(prompt, cb)
   vim.ui.input({ prompt = prompt }, function(answer)
@@ -162,6 +209,11 @@ local function cleanup_skipped_record(record, cb)
               rres.error
             )
           )
+          -- resolve_worktree の lock 下なので prune+dir 削除も同じ lock 内で続ける
+          prune_and_rm_dir(record.repo, record.path, function()
+            cb(result.ok(vim.NIL))
+          end)
+          return
         end
         cb(result.ok(vim.NIL))
       end)
@@ -180,10 +232,8 @@ local function cleanup_skipped_record(record, cb)
   end)
 end
 
---- args = { repo, id, mode, head, record? } -> cb(result)。
---- result.data = worktree 記録テーブル | vim.NIL (作らない)。
---- 失敗 (E_WORKTREE / E_CANCELLED) は呼び出し側が通知して開始を中断する。
-function M.resolve_worktree(args, cb)
+--- 作成判断〜add〜cb まで (M.resolve_worktree が lock を持つ)。
+local function resolve_locked(args, cb)
   local record = args.record
   if record ~= nil and record ~= vim.NIL and type(record) ~= 'table' then
     record = nil
@@ -221,6 +271,26 @@ function M.resolve_worktree(args, cb)
       return
     end
     add_with_recovery(args, path, record, cb)
+  end)
+end
+
+--- args = { repo, id, mode, head, record? } -> cb(result)。
+--- result.data = worktree 記録テーブル | vim.NIL (作らない)。
+--- 失敗 (E_WORKTREE / E_CANCELLED) は呼び出し側が通知して開始を中断する。
+--- 同一 dir path の remove/add 競合を避けるため worktree lock を取得する
+--- (add 判断〜作成〜cb 完了まで lock 下。judge の読み取り git も含む)。
+function M.resolve_worktree(args, cb)
+  local lock_path = paths.worktree_path(args.repo, args.id)
+  wt_with_lock(lock_path, function()
+    local released = false
+    local function done(res)
+      if not released then
+        released = true
+        wt_unlock(lock_path)
+      end
+      cb(res)
+    end
+    resolve_locked(args, done)
   end)
 end
 
@@ -309,19 +379,27 @@ local function finish_close(current, force, skip_remove, cb, after_remove)
     finish_after_remove()
     return -- INV-3: created_by_us=true の自前作成分のみ削除対象
   end
-  git_worktree.remove({
-    repo = current.session.repo,
-    path = wt.path,
-    force = force or nil,
-  }, function(rres)
-    if not rres.ok then
-      notify_warn(
-        ('worktree 掃除に失敗しました (残骸は起動 scan が回収します): %s'):format(
-          rres.error
+  wt_with_lock(wt.path, function()
+    git_worktree.remove({
+      repo = current.session.repo,
+      path = wt.path,
+      force = force or nil,
+    }, function(rres)
+      if not rres.ok then
+        notify_warn(
+          ('worktree 掃除に失敗しました (残骸は起動 scan が回収します): %s'):format(
+            rres.error
+          )
         )
-      )
-    end
-    finish_after_remove()
+        prune_and_rm_dir(current.session.repo, wt.path, function()
+          wt_unlock(wt.path)
+          finish_after_remove()
+        end)
+        return
+      end
+      wt_unlock(wt.path)
+      finish_after_remove()
+    end)
   end)
 end
 
@@ -953,12 +1031,18 @@ function M.delete(id)
         git_worktree.status({ repo = repo, path = wt.path }, function(sres)
           local dirty = sres.ok and sres.data.dirty
           local function with_remove(force)
-            git_worktree.remove({ repo = repo, path = wt.path, force = force }, function(rres)
-              if rres.ok then
-                finalize()
-                return
-              end
-              sweep_or_abort(repo, wt.path, finalize)
+            wt_with_lock(wt.path, function()
+              git_worktree.remove({ repo = repo, path = wt.path, force = force }, function(rres)
+                if rres.ok then
+                  wt_unlock(wt.path)
+                  finalize()
+                  return
+                end
+                sweep_or_abort(repo, wt.path, function()
+                  wt_unlock(wt.path)
+                  finalize()
+                end)
+              end)
             end)
           end
           if dirty then

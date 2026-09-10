@@ -36,7 +36,9 @@
 1. worktree 作成済みなら `git -C <worktree-path> status --porcelain` で未コミット変更を検知。変更ありなら `--force` で削除してよいか確認 (キャンセル = **close を最初から中止**。セッション・UI・保存状態は何も変わらない)。変更なしなら確認不要で続行
 2. 現セッションを save して status=closed、active を解除、UI 窓を閉じる (コメント保持。`:Review` / list で再開可)
 3. worktree を `git worktree remove <path>` (1 で force 承認済みなら `--force`) で削除。**自前 ref (`review-nvim/pr-<n>`) は close では消さない** (再開時に fetch を省略して再利用するため)
-4. 掃除失敗 (`remove` の失敗等) は WARN を出し、close (save・クローズ) 自体は完了させる。残骸は起動 scan が closed + dir 残骸として回収する
+4. 掃除失敗 (`remove` の失敗等) は WARN を出し、**二段目として `git worktree prune` + 自前 dir の再帰削除で自己修復する** (登録と dir の対応が崩れた形 = `does not point back` は prune が正すのが git の手順)。dir 削除まで失敗した場合のみ追加 WARN し、close (save・クローズ) 自体は完了させる。残骸は起動 scan が closed + dir 残骸として回収する
+
+**worktree 登録操作の直列化**: 同じ dir path に対する `git worktree remove` (close / delete) と `git worktree add` (start / resume の作成判断〜作成) は、セッション内で 1 本ずつ直列に実行する。remove は管理登録の解除 + ツリー削除の重い git I/O で、その最中に同じ path へ add すると remove の中間状態を跨いで再登録となり、git が衝突しない管理名 (`main--issue-4` + `main--issue-41` の形) で同一 dir を二重登録することがある (以後の remove が "does not point back" で失敗し続け、close するたびに WARN が出る実測状態)。add 側は読み取り (diff 取得など) を待たず、**登録を作る経路 (resolve_worktree の判断〜作成〜完了、remove 連鎖の完了) だけが待機する**
 
 **セッションの削除 (`:Review delete <id>`)**: 入力時に確認 (`コメント N 件を削除します`)。active と同じ id なら close の 1〜3 を先に実行してから、セッション JSON ファイルを削除し、このセッション用に作った `review-nvim/pr-<n>` ref があれば消す。closed でも `created_by_us=true` の worktree 残骸 (close の掃除失敗経路で発生しうる) があれば close の 3〜4 と同等の掃除を行ってからファイルを削除する (孤児 dir を残さない)。削除は不可逆で、undo は提供しない。
 
