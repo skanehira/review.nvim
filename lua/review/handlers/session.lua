@@ -366,24 +366,41 @@ local function refresh_sidebar()
   end
 end
 
+-- diff 描画先の窓を必ず有効にする。<C-w>o / :q / 終了確認無視などで右ペインが
+-- 側に消えていると、そのままでは render がどの窓にも見えず「無反応 & 無音」に
+-- なる (UX review F1/F18)。sidebar 窓があればその隣、無ければ current の隣に
+-- vsplit で作り直す。
+local function ensure_diff_win()
+  if vim.api.nvim_win_is_valid(active.diff_win) then
+    return
+  end
+  local anchor
+  if vim.api.nvim_win_is_valid(active.sidebar_win) then
+    anchor = active.sidebar_win
+  else
+    -- 両窓失われた経路 (一覧から開く直前など) は current を anchor にする
+    anchor = vim.api.nvim_get_current_win()
+  end
+  vim.api.nvim_set_current_win(anchor)
+  vim.cmd 'vsplit'
+  active.diff_win = vim.api.nvim_get_current_win()
+end
+
 local function render_diff_file(path)
+  ensure_diff_win()
   if path == nil then
     -- 復元時に差分がまるごと消滅し、しかもコメント由来の消失ファイルも無いとき
     -- 右ペインは「変更なし」プレースホルダを開く (persistence-restore.md、開くことを拒否しない)。
     local buf = ui_diffbuffer.render_no_changes(active.session, { winid = active.diff_win })
     active.diff_bufs[ui_diffbuffer.NO_DIFF_PATH] = buf
-    if vim.api.nvim_win_is_valid(active.diff_win) then
-      vim.api.nvim_win_set_buf(active.diff_win, buf)
-    end
+    vim.api.nvim_win_set_buf(active.diff_win, buf)
     return buf
   end
   local file = active.files_by_path[path]
     or { path = path, status = 'M', binary = false, added = 0, deleted = 0, hunks = {} }
   local buf = ui_diffbuffer.render(active.session, file, { winid = active.diff_win })
   active.diff_bufs[path] = buf
-  if vim.api.nvim_win_is_valid(active.diff_win) then
-    vim.api.nvim_win_set_buf(active.diff_win, buf)
-  end
+  vim.api.nvim_win_set_buf(active.diff_win, buf)
   return buf
 end
 
@@ -895,6 +912,10 @@ function M.open_selected_file()
   end
   entry.viewed = true
   render_diff_file(path)
+  -- 「そのファイルの diff へ移動」の語感どおり focus を diff へ送る。
+  -- sidebar に残ったままだと直後の c/e/y が一覧側に該当作用を持たず無反応に
+  -- 見える (UX review F12)。
+  vim.api.nvim_set_current_win(active.diff_win)
   persist()
   refresh_sidebar()
 end

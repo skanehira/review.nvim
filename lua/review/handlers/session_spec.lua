@@ -637,6 +637,36 @@ describe('sidebar 操作 (viewed / 差分切替) と INV-4 save', function()
     end
   )
 
+  it(
+    '<Enter> は focus を diff ペインへ移す (sidebar に残らない。以降の c/e が効く)',
+    function()
+      start_done('main', 'feature')
+      focus_sidebar_row(2)
+
+      session_handler.open_selected_file()
+
+      assert.equals(vim.fn.bufnr('review://diff/' .. SLUG .. '/b.lua'), vim.api.nvim_win_get_buf(0))
+    end
+  )
+
+  it(
+    '<Enter> が diff 窓を閉じた単窓状態でも split 再建して diff を出す (無反応にしない)',
+    function()
+      start_done('main', 'feature')
+      -- 右ペイン (初期 a.lua の diff) を外から閉じる = <C-w>o / :q 相当
+      local dbuf = vim.fn.bufnr('review://diff/' .. SLUG .. '/a.lua')
+      vim.api.nvim_win_close(vim.fn.win_findbuf(dbuf)[1], true)
+      focus_sidebar_row(2)
+
+      session_handler.open_selected_file()
+
+      local new_buf = vim.fn.bufnr('review://diff/' .. SLUG .. '/b.lua')
+      assert.is_true(new_buf ~= -1)
+      assert.is_true(#vim.fn.win_findbuf(new_buf) > 0)
+      assert.equals(new_buf, vim.api.nvim_win_get_buf(0))
+    end
+  )
+
   it('x で viewed 切替 -> 直後に save (両方向)', function()
     start_done('main', 'feature')
     focus_sidebar_row(1)
