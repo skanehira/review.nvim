@@ -15,6 +15,20 @@ end
 
 local desc = 'GitHub Files changed 風のブランチ / PR 差分レビュー'
 
+-- 起動時の worktree scan + 継続通知を **plugin 側**で登録する (rtp source 時点で
+-- setup 呼び出しの有無に依らず走る — README「setup() は省略可能」の実体。
+-- UX review F3 で setup なり install の既定が音もなく黙っていた)。
+-- 通知可否 (auto_notify_resume) は startup_scan が実行時に config を読むため、
+-- setup が後から走っても設定が効く。group 名前と clear でハンドル重複を防ぐ。
+local group = vim.api.nvim_create_augroup('review_nvim', { clear = true })
+vim.api.nvim_create_autocmd('VimEnter', {
+  group = group,
+  desc = 'review.nvim: worktree 残骸 scan + open セッションの継続通知 (窓は開かない)',
+  callback = function()
+    require('review.handlers.restore').startup_scan()
+  end,
+})
+
 -- customlist 補完の API が Neovim の間で異なる:
 --   0.10 系: complete = "customlist" + completion = fn
 --   0.13 系: complete = fn (completion key は invalid key)

@@ -26,13 +26,16 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 {
   'skanehira/review.nvim',
   lazy = false,
+  build = ':helptags ALL', -- doc/tags 生成 (プラグインマネージャが自動の場合でも保険)
   config = function()
     require('review').setup {}
   end,
 }
 ```
 
-`setup()` は省略可能 (既定値で動作)。設定項目 (`git_bin` / `gh_bin` / `diff_context` / `auto_notify_resume` / `keymaps` / `highlight`) は `:h review-setup` を参照。
+マネージャを使わず `rtp` に直接足す場合は、clone 先の `doc/` に対して `:helptags <repo>/doc` を 1 回実行すると `:h review` が引けるようになります。
+
+`setup()` は省略可能 (既定値で動作 — 起動時のセッション復元通知・worktree 残骸掃除も設定なしで動きます)。設定項目 (`git_bin` / `gh_bin` / `diff_context` / `auto_notify_resume` / `keymaps` / `highlight`) は `:h review-setup` を参照。
 
 ## 使い方
 

@@ -20,18 +20,9 @@ end
 -- (foundation.md「setup は通す」)。
 function M.setup(opts)
   config.setup(opts)
-  -- 起動時の worktree scan + 継続通知 (persistence-restore.md「起動時」/
-  -- pr-worktree.md「異常終了からの回復」)。掃除は auto_notify_resume に依らず
-  -- 走るためフックは無条件。通知可否は startup_scan 側で見る。
-  -- 再 setup で_augroup を立て直すので重複しない。
-  local group = vim.api.nvim_create_augroup('review_nvim', { clear = true })
-  vim.api.nvim_create_autocmd('VimEnter', {
-    group = group,
-    desc = 'review.nvim: worktree 残骸 scan + open セッションの継続通知 (窓は開かない)',
-    callback = function()
-      require('review.handlers.restore').startup_scan()
-    end,
-  })
+  -- 起動 scan (worktree 残骸 + 継続通知) の autocmd は plugin/review.lua が
+  -- rtp source 時点で登録する (setup 省略インストールでも走るように — UX review
+  -- F3)。setup は config 合成のみを行い、ここで登録し直すと二重になる。
 end
 
 function M.cmd_start(args)

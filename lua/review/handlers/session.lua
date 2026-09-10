@@ -375,14 +375,14 @@ local function ensure_diff_win()
   if vim.api.nvim_win_is_valid(active.diff_win) then
     return
   end
-  local anchor
+  local anchor_win
   if vim.api.nvim_win_is_valid(active.sidebar_win) then
-    anchor = active.sidebar_win
+    anchor_win = active.sidebar_win
   else
     -- 両窓失われた経路 (一覧から開く直前など) は current を anchor にする
-    anchor = vim.api.nvim_get_current_win()
+    anchor_win = vim.api.nvim_get_current_win()
   end
-  vim.api.nvim_set_current_win(anchor)
+  vim.api.nvim_set_current_win(anchor_win)
   vim.cmd 'vsplit'
   active.diff_win = vim.api.nvim_get_current_win()
 end

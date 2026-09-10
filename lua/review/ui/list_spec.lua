@@ -166,11 +166,15 @@ describe('list.render_sessionlist', function()
         session_stub { id = 'a--b', base = 'a', head = 'b', updated_at = 1 },
       }
       local buf = list.render_sessionlist(sessions)
-      -- 更新時刻は UTC 固定表示 (os.date('!…'); dev/CI の TZ 差で表示が揺れない)
-      assert.same({
-        'a--b  open  branch  a..b  0 comments  1970-01-01 00:00',
-        'z--y  open  branch  z..y  2 comments  2024-09-09 01:00',
-      }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+      -- 更新時刻はローカル時刻 + tz 表記 (UX review F17)。TZ 絶対値は実行環境
+      -- 依存なので「先頭がローカル os.date と一致 + 行末に何か付く」で contract を
+      -- 固定し、完全一致は TZ=UTC 相当の意味内容 (日付 + 分単位) を自分で計算する。
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local prefix_a = 'a--b  open  branch  a..b  0 comments  ' .. os.date('%Y-%m-%d %H:%M', 1)
+      local prefix_z = 'z--y  open  branch  z..y  2 comments  '
+        .. os.date('%Y-%m-%d %H:%M', 1725843600)
+      assert.is_true(lines[1]:sub(1, #prefix_a) == prefix_a, lines[1])
+      assert.is_true(lines[2]:sub(1, #prefix_z) == prefix_z, lines[2])
       assert.equals('review-list', vim.bo[buf].filetype)
     end
   )

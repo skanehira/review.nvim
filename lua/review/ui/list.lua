@@ -104,6 +104,18 @@ function M.render_sessionlist(sessions, opts)
     return a.id < b.id
   end)
 
+  local function timestamp(updated_at)
+    -- ローカル時刻 + tz 短縮表記 (UX review F17: UTC 固定だと JST ユーザーが
+    -- 9 時間誤読した)。%Z 非対応プラットフォームでは時刻だけで耐える。
+    local tz = os.date('%Z', updated_at)
+    if tz == nil or tz:find('%%', 1, true) then
+      tz = ''
+    else
+      tz = ' ' .. tz
+    end
+    return os.date('%Y-%m-%d %H:%M', updated_at) .. tz
+  end
+
   local buf = buffer 'review://sessions'
   local lines, rows = {}, {}
   for _, s in ipairs(sorted) do
@@ -115,7 +127,7 @@ function M.render_sessionlist(sessions, opts)
       s.base,
       s.head,
       comment_count,
-      os.date('!%Y-%m-%d %H:%M', s.updated_at)
+      timestamp(s.updated_at)
     )
     local grey = opts.is_grey ~= nil and opts.is_grey(s)
     if not grey then
