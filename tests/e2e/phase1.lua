@@ -101,7 +101,12 @@ local function run()
     end
   end
   if not (found_cnt and found_body) then
-    fail('コメントスレッド表示が壊れた count=' .. tostring(found_cnt) .. ' body=' .. tostring(found_body))
+    fail(
+      'コメントスレッド表示が壊れた count='
+        .. tostring(found_cnt)
+        .. ' body='
+        .. tostring(found_body)
+    )
   end
   print 'E2E-T1 thread=eol+virtlines'
 
