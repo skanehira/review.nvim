@@ -44,6 +44,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 ```vim
 :Review start main feature      " main..feature の差分を開く (head 省略時は補完付きで選択)
                                 " base / head は <Tab> で branches -> tags 順に補完
+                                " :Review delete の <id> と :Review pr の番号も <Tab> で補完
                                 " 同一 refs 組の保存済みセッションがある場合は
                                 " 「継承して comments/viewed を引き継ぐか」の [y/N] 確認が出る
 :Review pr 42                   " PR #42 を worktree でレビュー

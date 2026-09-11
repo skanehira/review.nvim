@@ -146,7 +146,70 @@ local function file_candidates(lead)
   return out
 end
 
--- :Review start の base/head 補完。head 選択 UI と同じ候補源 (branches -> tags、
+-- :Review delete の <id> 補完。store.list は純 FS で同期に列挙できるが、
+-- repo 解决に git 実行が要るため handlers の非同期 with_repo_top は使わず
+-- cli.run_sync で直接 solve する (start refs と同じ「補完は同期」世界線。
+-- repo 解决不能・store 空は候補 0・無通知 — 補完中の vim.notify は禁）。
+local function repo_top_sync()
+  local cli = require 'review.git.cli'
+  local res = cli.run_sync(
+    config.get().git_bin,
+    { 'rev-parse', '--show-toplevel' },
+    { cwd = vim.fn.getcwd() }
+  )
+  if not res.ok then
+    return nil
+  end
+  local top = (res.data.stdout or ''):gsub('%s+$', '')
+  return top ~= '' and top or nil
+end
+
+local function session_id_candidates(lead)
+  local repo = repo_top_sync()
+  if repo == nil then
+    return {}
+  end
+  local sessions = require('review.store.session').list(repo).data
+  local out = {}
+  for _, sess in ipairs(sessions or {}) do
+    local id = tostring(sess.id or '')
+    if id ~= '' and (#lead == 0 or id:sub(1, #lead) == lead) then
+      out[#out + 1] = id
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+-- :Review pr の <number> 補完。open PR の番号 (GitHub 一覧と同じ newest 25)。
+-- 标题は候補に混ぜない (customlist の返り値は挿入語そのものになる = 実測
+-- 前提の契約。番号のみの挿入が期待挙動)。pr list は状態が動きやすいので
+-- cache なし (run_sync の timeout がコスト上限)。gh 失敗は候補 0・無通知。
+local function pr_number_candidates(lead)
+  local cli = require 'review.git.cli'
+  local res = cli.run_sync(
+    config.get().gh_bin,
+    { 'pr', 'list', '--state', 'open', '--limit', '25', '--json', 'number' },
+    { cwd = vim.fn.getcwd(), err_code = 'E_PR' }
+  )
+  if not res.ok then
+    return {}
+  end
+  local ok, items = pcall(vim.json.decode, res.data.stdout or '')
+  if not ok or type(items) ~= 'table' then
+    return {}
+  end
+  local out = {}
+  for _, item in ipairs(items) do
+    local n = tostring(item.number or '')
+    if n ~= '' and (#lead == 0 or n:sub(1, #lead) == lead) then
+      out[#out + 1] = n
+    end
+  end
+  return out
+end
+
+--- complete=customlist 用。head 選択 UI と同じ候補源 (branches -> tags、
 -- diff-review.md「開始」手順 1) を cmdline customlist から返す。customlist は
 -- 同期関数なので取得は同期 (git/ref.refs_sync の待機上限 + ここでの TTL cache が
 -- 暴走防止の 2 段構え — DESIGN.md「既知の制約」補完例外行)。
@@ -212,6 +275,12 @@ function M.complete(arglead, cmdline, _cursorpos)
   end
   if pos >= 3 and words[2] == 'prompt' and words[1] == 'Review' then
     return file_candidates(lead)
+  end
+  if pos >= 3 and words[1] == 'Review' and words[2] == 'delete' then
+    return session_id_candidates(lead)
+  end
+  if pos >= 3 and words[1] == 'Review' and words[2] == 'pr' then
+    return pr_number_candidates(lead)
   end
   local candidates = {}
   for _, name in ipairs(M.subcommands) do

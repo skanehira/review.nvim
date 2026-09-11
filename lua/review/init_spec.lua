@@ -695,3 +695,114 @@ describe(':Review start の base/head ref 補完 (cmdline)', function()
     assert.equals(0, captured.calls)
   end)
 end)
+
+describe(':Review delete <id> と :Review pr <number> の補完', function()
+  mock_notify_and_handlers()
+
+  local cli = require 'review.git.cli'
+  local store = require 'review.store.session'
+  local paths = require 'review.store.paths'
+
+  local data_dir
+  before_each(function()
+    data_dir = vim.fn.tempname()
+    vim.fn.mkdir(data_dir, 'p')
+    paths._set_data_dir(data_dir)
+    store._set_notify(function() end)
+    cli._set_executable(function()
+      return 1
+    end)
+  end)
+  after_each(function()
+    cli._set_system(nil)
+    cli._set_executable(nil)
+    paths._set_data_dir(nil)
+    store._set_notify(nil)
+    vim.fn.delete(data_dir, 'rf')
+  end)
+
+  -- run_sync 経路の handle を模す。cmd 結合文字列 -> {code, stdout}。
+  local function stub(responses)
+    cli._set_system(function(cmd)
+      local key = table.concat(cmd, ' ')
+      for pattern, r in pairs(responses) do
+        if key:match(pattern) then
+          return {
+            wait = function()
+              return { code = r.code or 0, stdout = r.stdout or '', stderr = '' }
+            end,
+            kill = function() end,
+          }
+        end
+      end
+      return {
+        wait = function()
+          return nil
+        end,
+        kill = function() end,
+      }
+    end)
+  end
+
+  local function seed(ids)
+    for _, id in ipairs(ids) do
+      assert.is_true(store.save({
+        repo = '/repo/top',
+        id = id,
+        base = 'main',
+        head = id,
+        mode = 'branch',
+        state = 'closed',
+        comments = {},
+      }).ok)
+    end
+  end
+
+  it('delete 3 引目は store のセッション id (lead prefix 一致)', function()
+    seed { 'main--a', 'main--ab', 'pr-7' }
+    stub { ['rev%-parse'] = { stdout = '/repo/top\n' } }
+
+    assert.same({ 'main--a', 'main--ab' }, review.complete('main--a', ':Review delete main--a', 20))
+    assert.same({ 'main--a', 'main--ab', 'pr-7' }, review.complete('', ':Review delete ', 16))
+    assert.same({ 'pr%-7' and 'pr-7' or 'pr-7' }, review.complete('pr', ':Review delete pr', 17))
+  end)
+
+  it('delete 補完は repo 解決不能・store 空で空候補 (通知しない)', function()
+    stub {}
+    assert.same({}, review.complete('', ':Review delete ', 16))
+
+    stub { ['rev%-parse'] = { stdout = '/no/such/repo\n' } }
+    assert.same({}, review.complete('', ':Review delete ', 16))
+    assert.equals(0, #notifications)
+  end)
+
+  it('delete 2 引目従来 (サブコマンド候補) は維持', function()
+    assert.same({ 'delete' }, review.complete('delete', ':Review delete', 14))
+  end)
+
+  it('pr 3 引目は gh open PR の番号 (lead prefix 一致)', function()
+    stub {
+      ['gh.*pr'] = {
+        stdout = ' [{"number":41},{"number":7}] ',
+      },
+    }
+    assert.same({ '41', '7' }, review.complete('', ':Review pr ', 11))
+    assert.same({ '41' }, review.complete('4', ':Review pr 4', 12))
+  end)
+
+  it('pr 補完は gh 失敗・gh 不在で空候補 (通知しない)', function()
+    stub { ['gh.*pr'] = { code = 1, stdout = '' } }
+    assert.same({}, review.complete('', ':Review pr ', 11))
+    assert.equals(0, #notifications)
+
+    cli._set_system(nil)
+    cli._set_executable(function()
+      return 0
+    end)
+    assert.same({}, review.complete('', ':Review pr ', 11))
+  end)
+
+  it('pr 2 引目従来 (サブコマンド候補) は維持', function()
+    assert.same({ 'pr', 'prompt' }, review.complete('pr', ':Review pr', 10))
+  end)
+end)

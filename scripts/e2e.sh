@@ -151,6 +151,10 @@ grep -q 'E2E-C1 completion=feature,hotfix,main' "$OUT4" || {
   echo 'e2e: :Review start ref 補完が実 git 候補 (branches 昇順) と一致しない' >&2
   exit 1
 }
+grep -q 'E2E-C2 delete_ids=main--e2e-del' "$OUT4" || {
+  echo 'e2e: :Review delete id 補完が store 実データと一致しない' >&2
+  exit 1
+}
 
 # --- PR mode (issue #6: worktree / gh スタブ + 実 git) --------------------
 # pr-worktree.md「テスト方針」E2E + DoD シナリオ 1〜5。gh は PATH スタブ、

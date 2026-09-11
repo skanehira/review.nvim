@@ -46,6 +46,31 @@ local function run()
   end
 
   print('E2E-C1 completion=' .. joined)
+
+  -- :Review delete <id> 補完: 実 git rev-parse + 実 store (tmp data dir に隔離) を
+  -- 同期経路で引く。pr の gh 補完は e2e fixture に gh 必須にしない (unit stub)。
+  local paths = require 'review.store.paths'
+  local store = require 'review.store.session'
+  local tmp = vim.fn.tempname()
+  vim.fn.mkdir(tmp, 'p')
+  paths._set_data_dir(tmp)
+  store.save {
+    repo = vim.fn.trim(vim.fn.system { 'git', 'rev-parse', '--show-toplevel' }),
+    id = 'main--e2e-del',
+    base = 'main',
+    head = 'e2e-del',
+    mode = 'branch',
+    state = 'closed',
+    comments = {},
+  }
+  local ids = review.complete('main--', ':Review delete main--', 0)
+  if #ids ~= 1 or ids[1] ~= 'main--e2e-del' then
+    paths._set_data_dir(nil)
+    fail('delete id 補完が違う: ' .. table.concat(ids, ','))
+  end
+  paths._set_data_dir(nil)
+  print('E2E-C2 delete_ids=' .. table.concat(ids, ','))
+
   vim.cmd 'qa'
 end
 

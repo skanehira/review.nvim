@@ -30,6 +30,8 @@ USAGE						*review-usage*
 					comments / viewed を引き継ぎ、n で
 					何もしない)
 	:Review pr {number|url}			PR レビュー開始 (gh 連携)。
+					{number} は <Tab> で open PR の番号が
+					補完できる (gh を同期実行)。
 					head を git worktree に展開し、`o` で
 					差分と同一内容の実ファイルが開ける。
 					branch レビュー (`:Review start`) で
@@ -39,6 +41,7 @@ USAGE						*review-usage*
 	:Review list				保存済みセッション一覧 |review-list|
 	:Review close				現セッションを保存して閉じる |review-sessions|
 	:Review delete {id}			保存済みセッションを削除
+					<id> は <Tab> で保存済み id が補完できる
 	:Review prompt [file]			プロンプトをクリップボードへ
 
 確認プロンプト ([y/N] 等) は y か n を押して <Enter> で応答する。応答まで
