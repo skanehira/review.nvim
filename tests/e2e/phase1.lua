@@ -86,6 +86,25 @@ local function run()
     )
   )
 
+  -- コメント行下スレッド (GitHub 風): eol に件数、virt_lines に本文 (同一 mark)
+  local found_cnt, found_body = false, false
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(a_buf, ns, 0, -1, { details = true })) do
+    local d = m[4] or {}
+    local vt = d.virt_text and d.virt_text[1] and d.virt_text[1][1] or ''
+    if vt:find('💬', 1, true) ~= nil then
+      found_cnt = true
+    end
+    for _, vl in ipairs(d.virt_lines or {}) do
+      if vl[1] and vl[1][1] and vl[1][1]:find(body, 1, true) ~= nil then
+        found_body = true
+      end
+    end
+  end
+  if not (found_cnt and found_body) then
+    fail('コメントスレッド表示が壊れた count=' .. tostring(found_cnt) .. ' body=' .. tostring(found_body))
+  end
+  print 'E2E-T1 thread=eol+virtlines'
+
   -- sidebar <CR> で 2 ファイル目へ切り替える (viewed 反映)
   local sidebar = vim.fn.bufnr 'review://sidebar/main--feature'
   local sb_win = vim.fn.win_findbuf(sidebar)[1]

@@ -76,6 +76,7 @@ S1=$(grep -oE 'E2E-S1 body=.* line=[0-9]+' "$OUT1" || true)
 [ -n "$S1" ] || { echo "e2e: phase1 の E2E-S1 行が無い (assert 不合格)" >&2; exit 1; }
 grep -q 'E2E-S1 body=use a map here' "$OUT1" || { echo 'e2e: phase1 本文不一致' >&2; exit 1; }
 grep -q 'E2E-W1 winbar=true' "$OUT1" || { echo 'e2e: phase1 winbar chrome が入っていない' >&2; exit 1; }
+grep -q 'E2E-T1 thread=eol+virtlines' "$OUT1" || { echo 'e2e: コメント行下スレッド (件数 eol + virt_lines 本文) が表示されない' >&2; exit 1; }
 grep -q 'E2E-O1 fileview=readonly' "$OUT1" || { echo 'e2e: phase1 sidebar o で fileview が開かない' >&2; exit 1; }
 grep -q 'E2E-V1 viewwin=scratch' "$OUT1" || { echo 'e2e: phase1 ]d/[d/i/S 一連 (閲覧 float が開かない等) に失敗' >&2; exit 1; }
 # prompt yank (issue #7): y で "0 = @path#L.. + 本文、:Review prompt = 全文一致
