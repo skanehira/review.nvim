@@ -116,7 +116,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 
 **Lua API**: `require("review").setup(opts)` / `.start({base, head})` / `.start_pr({number})` / `.resume({id})` / `.close()` / `.delete({id})` / `.prompt_all(opts)` / `.prompt_for_file(path, opts)`。戻り値の結果型 `{ok, data, error, code}` は**同期的に判定できる失敗** (引数不正、active 不在、config 不正) のみを表し、git/gh を伴う操作は「ディスパッチを受け付けた」ことの `ok` として返る。実行の成否 (差分取得の結果) は非同期に UI 開閉か vim.notify でフィードバックする (UI をブロックしないため `:wait()` は使わない。例外は cmdline ref 補完のみ — 「既知の制約」参照)。**active セッションを必要とする API (close / prompt_* / レビュー操作) が active 0 件で呼ばれた場合は `E_NOT_ACTIVE` を同期で返す** (`:Review` 無印・`:Review list`・`:Review delete` は active 不要)。
 
-**config (setup で受け付ける既定値)**: `git_bin="git"`、`gh_bin="gh"`、`diff_context=nil` (git 既定の 3)、`auto_notify_resume=true`、`keymaps={...}` (下記のデフォルト表)、`highlight={}` (グループ別 override)。
+**config (setup で受け付ける既定値)**: `git_bin="git"`、`gh_bin="gh"`、`diff_context=nil` (git 既定の 3)、`auto_notify_resume=true`、`keymaps={...}` (下記のデフォルト表)、`highlight={}` (グループ別 override)、`winbar=true` / `number=false` (review 窓の装飾 — diff-review「窓装飾 (chrome)」)。
 
 **デフォルトキーマップ** (すべて buffer-local、config で変更可):
 
@@ -145,7 +145,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - **非同期**: 単発実行は `vim.system`。コールバックはアダプタ境界で `vim.in_fast_event()` を判定して `vim.schedule` でイベントループへ回す。**UI 操作はスローイベント限定**
 - **永続化**: 書き込みは即時・アトミック (同一ディレクトリの tmp に書いて `os.rename`)。読み込み失敗 (JSON 破損) は `.corrupt` に退避してから空セッション扱いとし、通知する (レビュー不能にしない)
 - **エラー表示**: `vim.notify` (エラー = WARN、情報 = INFO)。レビュー操作の途中失敗は元の状態を保持したまま理由 1 行を出す
-- **命名**: namespace は `review` (`lua/review/`、`plugin/review.lua`)。highlight グループは `ReviewCommentLine` (コメント range の下線)、`ReviewDiffAdd` / `ReviewDiffDelete` / `ReviewDiffHunk` (diff 種別の色づけ)、`ReviewSidebarFile` / `ReviewSidebarStatus` (`review-list` バッファ = sidebar とセッション一覧で共通。横断規約「UI」参照)。テストはソースと同ディレクトリに `*_spec.lua` (例外: `plugin/` 配下のファイルの spec は `lua/review/` 直下に置く。plugin 直下に置くと rtp 起動時に spec が自動 source されるため)
+- **命名**: namespace は `review` (`lua/review/`、`plugin/review.lua`)。highlight グループは `ReviewCommentLine` (コメント range の下線)、`ReviewCommentBody` / `ReviewCommentOutdated` (行下スレッド本文 / outdated の gray)、`ReviewDiffAdd` / `ReviewDiffDelete` / `ReviewDiffHunk` (diff 種別の色づけ)、`ReviewSidebarFile` / `ReviewSidebarStatus` (`review-list` バッファ = sidebar とセッション一覧で共通。横断規約「UI」参照)。テストはソースと同ディレクトリに `*_spec.lua` (例外: `plugin/` 配下のファイルの spec は `lua/review/` 直下に置く。plugin 直下に置くと rtp 起動時に spec が自動 source されるため)
 - **UI**: float は `border="rounded"`。入力に telescope 等は使わず `vim.ui.input` / 標準バッファに載せる。scratch 系バッファは filetype を意図的に集約する: 変更ファイル一覧 (sidebar) と `:Review list` のセッション一覧は共通の `review-list`、diff は `diff`。**buffer-local キーマップと extmark namespace はバッファ作成元 (buffer に持たせる `review_meta` テーブル) で判定して付ける** (FileType autocmd での分岐は使わない — filetype 集約と両立させるため)
 
 ## ドメインモデル

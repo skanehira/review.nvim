@@ -2,6 +2,7 @@
 -- worktree あり = `<worktree>/<path>` の実ファイルを :e のように開く (編集可。
 -- 編集内容はレビューの diff には反映されない — pr-worktree.md)。
 -- worktree なし = `git show <head>:<path>` の read-only scratch。
+local chrome = require 'review.ui.chrome'
 local cli = require 'review.git.cli'
 local config = require 'review.config'
 local result = require 'review.core.result'
@@ -95,6 +96,11 @@ function M.open(opts, cb)
       vim.cmd 'vsplit'
       vim.api.nvim_win_set_buf(0, buf)
     end
+    -- vsplit の新窓/再利用窓どちらでも、実際に buf を見せている窓へ chrome を
+    -- 当てる (opts.win は呼び出し元の現在窓で vsplit 後は別窓になる)。
+    chrome.bar(buf, opts.winbar or ('%s · read-only (git show)'):format(opts.path))
+    local fwin = vim.fn.win_findbuf(buf)[1]
+    chrome.window(fwin ~= nil and fwin or opts.win)
     if cb ~= nil then
       cb(nil, buf)
     end

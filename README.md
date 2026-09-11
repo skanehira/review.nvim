@@ -35,7 +35,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 
 マネージャを使わず `rtp` に直接足す場合は、clone 先の `doc/` に対して `:helptags <repo>/doc` を 1 回実行すると `:h review` が引けるようになります。
 
-`setup()` は省略可能 (既定値で動作 — 起動時のセッション復元通知・worktree 残骸掃除も設定なしで動きます)。設定項目 (`git_bin` / `gh_bin` / `diff_context` / `auto_notify_resume` / `keymaps` / `highlight`) は `:h review-setup` を参照。
+`setup()` は省略可能 (既定値で動作 — 起動時のセッション復元通知・worktree 残骸掃除も設定なしで動きます)。設定項目 (`git_bin` / `gh_bin` / `diff_context` / `auto_notify_resume` / `keymaps` / `highlight` / `winbar` / `number`) は `:h review-setup` を参照。
 
 ## 使い方
 
@@ -94,7 +94,9 @@ Review the changes in main..feature. Please address the comments below.
 setup は冪等にしたい
 ```
 
-セッションは head の worktree で動くため `@` パスは worktree 内の絶対パスになり、エージェントはその場で実ファイルを読める (レビュー中の diff と完全に同一の内容)。outdated 認定されたコメント (差分の揺れで位置が特定できないもの) は既定で除外され、diff 上は `⚠ outdated` マークで判別できる。
+セッションは head の worktree で動くため `@` パスは worktree 内の絶対パスになり、エージェントはその場で実ファイルを読める (レビュー中の diff と完全に同一の内容)。outdated 認定されたコメント (差分の揺れで位置が特定できないもの) は既定で除外され、diff 上はグレーアウトした `⚠` スレッドで判別できる。本文は対象行の下に全文スレッドで表示される (GitHub の Files changed と同じ向き)。短いスレッドは 10 行で折りたたまれ、全文は `i` の閲覧窓に出る。
+review 窓では既定で行番号を隠し、winbar に `base..head · path · +a -d · N comments` を
+表示する (GitHub Files changed 風。`setup` の `winbar` / `number` で戻せる)。
 
 ## ドキュメント
 

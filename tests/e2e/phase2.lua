@@ -52,11 +52,18 @@ local function run()
   end
   local virt = marks[1][4].virt_text and marks[1][4].virt_text[1] and marks[1][4].virt_text[1][1]
     or ''
-  if not virt:find('use a map here', 1, true) then
-    fail('復元 extmark virt text 本文不一致: ' .. virt)
+  -- 行下スレッド表示 (GitHub 風): eol は件数、本文は virt_lines 先頭行
+  if not virt:find('💬', 1, true) then
+    fail('復元 extmark の件数表示が無い: ' .. virt)
   end
-  if virt:find('⚠', 1, true) ~= nil then
-    fail('anchor 検証で active のはずが outdated 表示: ' .. virt)
+  local vlines = marks[1][4].virt_lines or {}
+  local first_line = vlines[1] and vlines[1][1] and vlines[1][1][1] or ''
+  if not first_line:find('use a map here', 1, true) then
+    fail('復元 extmark virt_lines 本文不一致: ' .. first_line)
+  end
+  local all = virt .. first_line
+  if all:find('⚠', 1, true) ~= nil then
+    fail('anchor 検証で active のはずが outdated 表示: ' .. all)
   end
 
   local sidebar_lines =

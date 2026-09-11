@@ -15,6 +15,7 @@ local paths = require 'review.store.paths'
 local anchor = require 'review.core.anchor'
 local result = require 'review.core.result'
 local store = require 'review.store.session'
+local ui_chrome = require 'review.ui.chrome'
 local ui_diffbuffer = require 'review.ui.diffbuffer'
 local ui_fileview = require 'review.ui.fileview'
 local ui_list = require 'review.ui.list'
@@ -442,6 +443,7 @@ local function refresh_sidebar()
   active.sidebar_buf = ui_list.render_sidebar(active.session, active.file_order_sorted)
   if vim.api.nvim_win_is_valid(active.sidebar_win) then
     vim.api.nvim_win_set_buf(active.sidebar_win, active.sidebar_buf)
+    ui_chrome.window(active.sidebar_win)
   end
 end
 
@@ -531,6 +533,7 @@ local function render_diff_file(path, skip_ensure)
     local buf = ui_diffbuffer.render_no_changes(active.session, { winid = active.diff_win })
     active.diff_bufs[ui_diffbuffer.NO_DIFF_PATH] = buf
     vim.api.nvim_win_set_buf(active.diff_win, buf)
+    ui_chrome.window(active.diff_win)
     return buf
   end
   local file = active.files_by_path[path]
@@ -538,6 +541,9 @@ local function render_diff_file(path, skip_ensure)
   local buf = ui_diffbuffer.render(active.session, file, { winid = active.diff_win })
   active.diff_bufs[path] = buf
   vim.api.nvim_win_set_buf(active.diff_win, buf)
+  -- render 後も diff 窓が差し替わる経路 (drift 再 split 等) があるため、buf を
+  -- 当てたこの時点で chrome を確実に適用する (set_buf する側が窓の装飾も持つ)。
+  ui_chrome.window(active.diff_win)
   return buf
 end
 
@@ -578,6 +584,7 @@ local function open_session_ui()
   active.sidebar_win = sw
   vim.api.nvim_win_set_buf(active.sidebar_win, active.sidebar_buf)
   pcall(vim.api.nvim_win_set_width, active.sidebar_win, 30)
+  ui_chrome.window(active.sidebar_win)
   -- 「右ペインには一覧の先頭ファイルの diff を開く」= 一覧はパス昇順なので
   -- sorted 先頭を使う (core/diff の parse 出現順ではない)。
   -- sorted が空 = 差分消滅復元で消失ファイルですらない (nil -> プレースホルダ)。
@@ -1237,6 +1244,7 @@ function M.focus_sidebar()
   active.sidebar_win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(active.sidebar_win, active.sidebar_buf)
   pcall(vim.api.nvim_win_set_width, active.sidebar_win, 30)
+  ui_chrome.window(active.sidebar_win)
 end
 
 --- `o`: 現在バッファ (diff / sidebar) に行っているファイルの実体を開く。
@@ -1281,10 +1289,17 @@ function M.open_file_current()
     head = active.session.head,
     id = active.session.id,
     path = path,
+    win = win,
     -- worktree ありなら worktree 基準の実ファイル (編集可)。記録があっても
     -- dir が無い場合は従来経路 (git show) に倒すと古い head 内容を取り違えるため
     -- fileview 側の stat 失敗として WARN 通知になる。
     worktree = wt ~= nil and wt.path or nil,
+    -- read-only 参照窓だけ winbar 文言を出す (編集可の窓はユーザーのファイル)。
+    winbar = wt == nil and ('%s..%s · %s · read-only (git show)'):format(
+      active.session.base or '',
+      active.session.head or '',
+      path
+    ) or nil,
   }, function(err)
     if err ~= nil then
       notify_warn(err.error)

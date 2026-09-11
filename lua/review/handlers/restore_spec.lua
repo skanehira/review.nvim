@@ -330,6 +330,7 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
         { '■ M a.lua +0 -0', '変更なし' },
         vim.api.nvim_buf_get_lines(dbuf, 0, -1, false)
       )
+      assert.equals('main..feature · a.lua · +0 -0 · 1 comment', vim.b[dbuf].review_winbar)
       -- 全コメント outdated -> ヘッダ行 virt text 一覧 (通常時と同じ規則)
       local ns = vim.api.nvim_get_namespaces()['review_comment']
       local marks = vim.api.nvim_buf_get_extmarks(dbuf, ns, 0, -1, { details = true })
@@ -338,7 +339,13 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
           and marks[1][4].virt_text[1]
           and marks[1][4].virt_text[1][1]
         or ''
-      assert.equals(' ⚠ outdated: note', virt)
+      -- eol は集約カウント、本文は行下 thread (thread 化後の契約)
+      assert.equals(' ⚠ 1 outdated (prompt 除外中)', virt)
+      local vl = marks[1][4].virt_lines
+      assert.is_true(
+        vl ~= nil and vl[1] ~= nil and vl[1][1][1]:find('[c1]', 1, true) ~= nil,
+        vim.inspect(marks[1][4].virt_lines)
+      )
       -- outdated 化の結果が save される (status=open 含む)
       local reloaded = store.load(REPO_TOP, 'main--feature').data
       assert.equals('open', reloaded.status)

@@ -82,6 +82,24 @@ describe('fileview.open (git show read-only 経路)', function()
     assert.is_true(#vim.api.nvim_tabpage_list_wins(state.tab) >= 2)
   end)
 
+  it(
+    'opts.winbar が与えられると開いた buf の b:review_winbar になる (Chrome 連携)',
+    function()
+      stub_show 'one\n'
+      local got
+      fileview.open({
+        repo = '/repo',
+        head = 'feature',
+        id = 'main--feature',
+        path = 'a.txt',
+        winbar = 'main..feature · a.txt · read-only (git show)',
+      }, function(_e, b)
+        got = b
+      end)
+      assert.equals('main..feature · a.txt · read-only (git show)', vim.b[got].review_winbar)
+    end
+  )
+
   it('.lua 拡張は detected filetype が付く', function()
     stub_show 'local x = 1\n'
     fileview.open({ repo = '/r', head = 'h', id = 'z', path = 'foo.lua' }, function() end)

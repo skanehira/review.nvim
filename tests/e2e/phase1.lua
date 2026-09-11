@@ -79,6 +79,12 @@ local function run()
     return #vim.api.nvim_buf_get_extmarks(a_buf, ns, 0, -1, {}) > 0
   end, 'comment extmark')
   print(('E2E-S1 body=%s line=%d'):format(body, target_row))
+  -- winbar chrome (GitHub 風既定): 描画窓には b:review_winbar が入る
+  print(
+    ('E2E-W1 winbar=%s'):format(
+      tostring(vim.b[vim.api.nvim_get_current_buf()].review_winbar ~= nil)
+    )
+  )
 
   -- sidebar <CR> で 2 ファイル目へ切り替える (viewed 反映)
   local sidebar = vim.fn.bufnr 'review://sidebar/main--feature'

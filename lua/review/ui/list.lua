@@ -2,6 +2,7 @@
 -- 両者は filetype `review-list` を共有する (DESIGN.md「横断規約」UI)。挙動の分岐は
 -- buffer に付けた review_meta で行う (FileType autocmd 分岐は使わない)。
 -- 行 -> データの引き渡しは行番号写像 (render ごとに再構築、バッファ側に値を持たない)。
+local chrome = require 'review.ui.chrome'
 local config = require 'review.config'
 
 local M = {}
@@ -71,6 +72,17 @@ function M.render_sidebar(session, files)
     )
     rows[#lines] = file.path
   end
+  chrome.bar(
+    buf,
+    ('%s..%s · %d %s · %d %s'):format(
+      session.base or '',
+      session.head or '',
+      #lines,
+      #lines == 1 and 'file' or 'files',
+      #(session.comments or {}),
+      #(session.comments or {}) == 1 and 'comment' or 'comments'
+    )
+  )
   local k = config.get().keymaps.sidebar
   return paint(buf, lines, { kind = 'sidebar', session_id = session.id }, rows, {
     { k.open_diff, "require('review.handlers.session').open_selected_file()" },
@@ -135,6 +147,7 @@ function M.render_sessionlist(sessions, opts)
       rows[#lines] = s
     end
   end
+  chrome.bar(buf, ('review.nvim · %d %s'):format(#lines, #lines == 1 and 'session' or 'sessions'))
   local k = config.get().keymaps.sessionlist
   local drawn = paint(buf, lines, { kind = 'sessionlist' }, rows, {
     { k.open, "require('review.handlers.sessions_list').open_current()" },

@@ -1,6 +1,7 @@
 -- :Review list フロー: repo の保存済みセッション一覧を開き、<Enter> で再開する
 -- (persistence-restore.md「:Review list」/ 実装の配置 handlers/sessions_list.lua)。
 -- repo path 消失セッションは grey 表示で行データから外す (<Enter> 不可)。
+local chrome = require 'review.ui.chrome'
 local git_ref = require 'review.git.ref'
 local restore = require 'review.handlers.restore'
 local store = require 'review.store.session'
@@ -27,6 +28,7 @@ function M.open()
     vim.cmd 'vsplit'
     local buf = ui_list.render_sessionlist(sessions, { is_grey = repo_missing })
     vim.api.nvim_win_set_buf(0, buf)
+    chrome.window(0)
   end)
 end
 

@@ -78,6 +78,8 @@ SETUP						*review-setup*
 		auto_notify_resume = true, -- 起動時に open セッションを通知
 		keymaps = {},              -- buffer-local キーマップ override
 		highlight = {},            -- グループ別 highlight override
+		winbar = true,           -- review 窓に winbar 情報 (既定 on)
+		number = false,            -- review 窓の行番号 (既定 off、global は不変)
 	})
 <
 
@@ -188,7 +190,7 @@ SESSION 状態と復旧				*review-sessions*
 			残骸は起動 scan が掃除)
 
 outdated 認定 (差分の揺れで対象行を特定できないコメント) は diff 上で
-`⚠ outdated: 抜粋` または複数件 group で `(⚠N)` を付与し (:h review-display)、
+行末に `(⚠N)`、スレッドを gray + `⚠` で示し (:h review-display)、
 `:Review prompt` の既定出力から除外される。本文は失わず closed 前の JSON に
 残るため、refs を戻せば再度 active として扱える場合がある。
 
@@ -202,11 +204,11 @@ diff バッファ				*review-display-diff*
 	・ラップしない (wrap=off)。大きい hunk は fold されて開くので、
 		`za` / `zo` / `zR` (標準) で展開するか、`o` で実ファイルを
 		開いて読む。
-	・コメントは対象行末の virt_text 表示 (1 件 = 本文 40 字抜粋、複数 =
-		 `💬 N`、outdated を含む = `'💬 N (⚠M)'`、単独 outdated =
-		 `⚠ outdated: 抜粋`)。virt_text なので `/検索` の対象には
-		ならない (検索したい場合は :Review prompt 出力や data dir の
-		JSON を grep する)。全文を見たいときは `i` (read-only 窓)。
+	・コメントは対象行に下線_extmark+行末に件数 (`💬 N`、outdated を含む =
+		`💬 N (⚠M)`)、本文は**行下スレッド** (GitHub 風) に全文出る。位置は
+		変わらない (スレッドは実行ではなく virt_lines のため `/検索` と移動の
+		対象外 = 検索したい場合は :Review prompt 出力や data dir の JSON を
+		grep する)。長文スレッドは 10 行で打ち切れ、全文は `i` 窓 (read-only)。
 	・標準の `[c` / `]c` (ftplugin で定義される diff の hunk 移動) はこの
 		バッファでもそのまま効く。ファイル単位の移動は `]d` / `[d`
 		(|review-keymaps-diff)。

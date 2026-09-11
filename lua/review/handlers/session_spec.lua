@@ -247,6 +247,26 @@ describe('session.start 開始フロー', function()
     assert.is_true(vim.fn.win_screenpos(sb)[2] < vim.fn.win_screenpos(dwin)[2])
   end)
 
+  it('開通時に chrome が効く (winbar 式入・窓 number off・winbar 内容)', function()
+    vim.o.winbar = ''
+    vim.o.number = true -- レビュー開始直前まで番号表示が有効な環境から開始する
+    start_done('main', 'feature')
+    local dbuf = vim.api.nvim_get_current_buf()
+    assert.equals('main..feature · a.lua · +1 -0 · 0 comments', vim.b[dbuf].review_winbar)
+    assert.equals(
+      'main..feature · 2 files · 0 comments',
+      vim.b[vim.fn.bufnr(SIDEBAR_NAME)].review_winbar
+    )
+    assert.is_true(vim.o.winbar:find('review_winbar', 1, true) ~= nil, vim.o.winbar)
+    local dw = vim.api.nvim_get_current_win()
+    assert.equals(false, vim.api.nvim_get_option_value('number', { win = dw }))
+    -- sidebar 窓も chrome 済み (両窓が対象 = 他窓 contract)
+    local sw = vim.fn.win_findbuf(vim.fn.bufnr(SIDEBAR_NAME))[1]
+    assert.equals(false, vim.api.nvim_get_option_value('number', { win = sw }))
+    -- tab 開始時点の窓 (レビュー外) は number のまま = 窓ローカル操作の保証
+    vim.o.winbar = ''
+  end)
+
   it('開通時、余剰の空 [No Name] 窓を回収してレビュー 2 窓に戻す', function()
     -- list 経由再開などで空窓が残る症状 (UX review F1) への収束保証
     vim.cmd 'vsplit' -- 中身なしの空窓を先に置く

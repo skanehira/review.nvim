@@ -152,7 +152,8 @@ describe('comments c (作成)', function()
     -- 表示は extmark virt text)。
     local ns = vim.api.nvim_get_namespaces()['review_comment']
     local marks = vim.api.nvim_buf_get_extmarks(state.diff_buf, ns, 0, -1, { details = true })
-    assert.equals(' 💬 use map here', marks[1][4].virt_text[1][1])
+    assert.equals(' 💬 1', marks[1][4].virt_text[1][1])
+    assert.equals('  [c1] use map here', marks[1][4].virt_lines[1][1][1])
     -- save は操作直後 (INV-4)
     assert.equals(4321, saved().updated_at)
     assert.equals(0, #state.notifications)

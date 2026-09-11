@@ -56,6 +56,27 @@ end
 describe('list.render_sidebar', function()
   use_env()
 
+  it('sidebar buf に refs/ファイル数/コメント数の winbar 文字列が入る', function()
+    local buf = list.render_sidebar({
+      version = 1,
+      id = 'main--feature',
+      repo = '/r',
+      mode = 'branch',
+      base = 'main',
+      head = 'feature',
+      pr = vim.NIL,
+      worktree = vim.NIL,
+      status = 'open',
+      files = {},
+      comments = { { id = 'c1' } },
+      created_at = 1,
+      updated_at = 1,
+    }, {
+      { path = 'a.lua', status = 'M', binary = false, added = 1, deleted = 0 },
+    })
+    assert.equals('main..feature · 1 file · 1 comment', vim.b[buf].review_winbar)
+  end)
+
   it('パス昇順・`<status> <path> +a -d` 表示で viewed は行頭に [✓]', function()
     local session = session_stub {
       files = { ['b.lua'] = { viewed = true }, ['a.lua'] = { viewed = false } },
@@ -151,6 +172,14 @@ end)
 
 describe('list.render_sessionlist', function()
   use_env()
+
+  it('セッション一覧 buf に winbar 文字列 (N sessions) が入る', function()
+    local buf = list.render_sessionlist {
+      session_stub { id = 'a--b', base = 'a', head = 'b', updated_at = 1 },
+      session_stub { id = 'c--d', base = 'c', head = 'd', updated_at = 1 },
+    }
+    assert.equals('review.nvim · 2 sessions', vim.b[buf].review_winbar)
+  end)
 
   it(
     'slug / status / mode / base..head / コメント数 / 更新時刻の行を slug 昇順で並べる',

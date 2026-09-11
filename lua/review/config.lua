@@ -36,6 +36,11 @@ M.defaults = {
     },
   },
   highlight = {},
+  -- GitHub Files changed 風の窓装飾 (既定): winbar = review 窓に path/session 情報、
+  -- number = diff/sidebar/list 窓の行番号 off (GitHub 同様に diff 行へ集中するため)。
+  -- どちらも設定で戻せる (winbar はユーザーが既存設定を有する場合上書きしない)。
+  winbar = true,
+  number = false,
 }
 
 local current = vim.deepcopy(M.defaults)

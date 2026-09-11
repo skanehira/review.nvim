@@ -41,6 +41,8 @@ describe('config.get', function()
         },
       },
       highlight = {},
+      winbar = true,
+      number = false,
     }, config.get())
   end)
 
@@ -80,6 +82,8 @@ describe('config.get', function()
         },
       },
       highlight = {},
+      winbar = true,
+      number = false,
     }, config.defaults)
     config.reset()
   end)

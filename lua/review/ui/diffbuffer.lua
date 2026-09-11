@@ -6,6 +6,7 @@
 -- キーマップの rhs は require を"発火時"に解決する文字列で、ui → handlers の
 -- module-load 循環を避ける (読み込み順の依存を作らない)。
 local config = require 'review.config'
+local chrome = require 'review.ui.chrome'
 local highlight = require 'review.ui.highlight'
 
 local M = {}
@@ -36,19 +37,35 @@ local function buffer_for(session, file)
   return buf
 end
 
--- excerpt: 先頭 40 文字 (DESIGN 表示契約)。改行は 1 空間に縮め、溢れは … を付ける
--- (決定: 抜粋の桁計数は strcharpart の表示文字数)。
-local function excerpt(body)
-  local one = (body:gsub('\n', ' '))
-  if vim.fn.strchars(one) > 40 then
-    return vim.fn.strcharpart(one, 0, 40) .. '…'
-  end
-  return one
+M.NO_DIFF_PATH = '(no-diff)'
+
+-- winbar 表示文字列 (b:review_winbar 経由 / ui/chrome 参照)。件数は単複を分ける。
+local function plural(n, word)
+  return ('%d %s%s'):format(n, word, n == 1 and '' or 's')
 end
 
--- 復元時に差分がまるごと消滅しファイル単位の新側差分が無いときのプレースホルダ
--- 経路が使う擬似パス (実リポジトリのパスとは衝突しない括弧付き固定名)。
-M.NO_DIFF_PATH = '(no-diff)'
+local function set_winbar(buf, session, file)
+  local refs = ('%s..%s'):format(session.base or '', session.head or '')
+  local text
+  if file.path == M.NO_DIFF_PATH then
+    text = refs .. ' · 変更なし'
+  else
+    local n = 0
+    for _, c in ipairs(session.comments or {}) do
+      if c.file == file.path then
+        n = n + 1
+      end
+    end
+    text = ('%s · %s · +%d -%d · %s'):format(
+      refs,
+      file.path,
+      file.added or 0,
+      file.deleted or 0,
+      plural(n, 'comment')
+    )
+  end
+  chrome.bar(buf, text)
+end
 
 -- 構築した行・写像を buffer へ反映する。
 local function build_lines(file)
@@ -145,67 +162,118 @@ function M.render(session, file, opts)
     end
   end
 
+  -- 行下スレッド表示 (GitHub Files changed 風)。eol には件数だけ置き、本文は
+  -- virt_lines でコメント範囲末尾行の下に出す。virt_lines は buffer 行を占有
+  -- しないので new 側行番号写像 (c/e/d/o の位置契約) は不変、fold 時は自動で
+  -- 非表示になり wrap と干渉しない (既知の制約は wrap=off 強制で解消済み)。
+  -- 長文は MAX_THREAD_LINES で打ち切り、全文は `i` 窓 (read-only) が正しい経路。
+  local MAX_THREAD_LINES = 10
+  local function thread_lines(c)
+    local out = {}
+    local prefix = c.state == 'outdated' and ('⚠ [%s] '):format(c.id) or ('  [%s] '):format(c.id)
+    local pad = string.rep(' ', vim.fn.strchars(prefix))
+    local hl = c.state == 'outdated' and 'ReviewCommentOutdated' or 'ReviewCommentBody'
+    local blines = vim.split(c.body, '\n', { plain = true })
+    for i, bl in ipairs(blines) do
+      if i > MAX_THREAD_LINES then
+        out[#out + 1] = { { pad .. '… (i で全文)', hl } }
+        break
+      end
+      out[#out + 1] = { { (i == 1 and prefix or pad) .. bl, hl } }
+    end
+    return out
+  end
+
+  local function group_thread(comments)
+    local acc = {}
+    for _, c in ipairs(comments) do
+      local t = thread_lines(c)
+      for i = 1, #t do
+        if i == 1 and #acc > 0 then
+          acc[#acc + 1] = { { ' ', 'ReviewCommentBody' } }
+        end
+        acc[#acc + 1] = t[i]
+      end
+    end
+    return acc
+  end
+
   local outdated_hidden = {}
   local group_by_row = {}
   local outdated_by_row = {}
-  local visible = {}
+  local groups = {}
+  local group_order = {}
   for _, c in ipairs(session.comments) do
     if c.file == file.path then
       local start_row = st.new_to_row[c.line]
       if start_row ~= nil then
+        local g = groups[start_row]
+        if g == nil then
+          g = { comments = {}, end_row = nil }
+          groups[start_row] = g
+          group_order[#group_order + 1] = start_row
+        end
+        g.comments[#g.comments + 1] = c
         group_by_row[start_row] = (group_by_row[start_row] or 0) + 1
         if c.state == 'outdated' then
           outdated_by_row[start_row] = (outdated_by_row[start_row] or 0) + 1
         end
-        visible[#visible + 1] = { c = c, start_row = start_row }
+        local er = st.new_to_row[c.end_line] or start_row
+        if er < start_row then
+          er = start_row
+        end
+        if g.end_row == nil or er > g.end_row then
+          g.end_row = er
+        end
       elseif c.state == 'outdated' then
-        outdated_hidden[#outdated_hidden + 1] = excerpt(c.body)
+        -- new 側の行番号が解決できない (差分が消えた) outdated。行位置が無いので
+        -- ファイルヘッダ行に集約する (本文は thread、プロンプトから除外中)。
+        outdated_hidden[#outdated_hidden + 1] = c
       end
     end
   end
 
-  local annotated = {}
-  for _, v in ipairs(visible) do
-    local c = v.c
-    local first = not annotated[v.start_row]
-    annotated[v.start_row] = true
-    local end_row = st.new_to_row[c.end_line] or v.start_row
-    if end_row < v.start_row then
-      end_row = v.start_row
-    end
-    -- virt text は開始行の group 先頭 extmark のみ: 1 件 = 40 文字抜粋、
-    -- 複数 = 💬 N (outdated を含むとその数 '(⚠M)' を併記)。outdated は
-    -- ⚠ outdated: 抜粋 で「prompt から除外中」を常時見える状態にする
-    -- (diff-review.md「コメント表示」/ UX review F7)。
-    local annotation
-    if first then
-      local count = group_by_row[v.start_row]
-      local n_out = outdated_by_row[v.start_row] or 0
-      local excerpt_text
-      if count > 1 then
-        excerpt_text = ' 💬 ' .. count .. (n_out > 0 and (' (⚠' .. n_out .. ')') or '')
-      elseif c.state == 'outdated' then
-        excerpt_text = ' ⚠ outdated: ' .. excerpt(c.body)
-      else
-        excerpt_text = ' 💬 ' .. excerpt(c.body)
+  local seen_head = {}
+  for _, sr in ipairs(group_order) do
+    local g = groups[sr]
+    -- thread は group の見出し extmark (start 行) に併合する (同一位置に
+    -- マークを二つ作ると取得順序が不定で spec/契約が保てない)。
+    local thr = group_thread(g.comments)
+    for _, c in ipairs(g.comments) do
+      local v_start = st.new_to_row[c.line]
+      local end_row = st.new_to_row[c.end_line] or v_start
+      if end_row < v_start then
+        end_row = v_start
       end
-      annotation = excerpt_text
+      local annotation
+      if not seen_head[v_start] then
+        seen_head[v_start] = true
+        local n_out = outdated_by_row[v_start] or 0
+        annotation = ' 💬 '
+          .. group_by_row[v_start]
+          .. (n_out > 0 and (' (⚠' .. n_out .. ')') or '')
+      end
+      vim.api.nvim_buf_set_extmark(buf, comment_ns, v_start - 1, 0, {
+        end_row = end_row - 1,
+        end_col = #lines[end_row],
+        hl_group = 'ReviewCommentLine',
+        virt_text = annotation and { { annotation, 'Comment' } } or nil,
+        virt_text_pos = annotation and 'eol' or nil,
+        virt_lines = (annotation and #thr > 0 and thr) or nil,
+      })
     end
-    vim.api.nvim_buf_set_extmark(buf, comment_ns, v.start_row - 1, 0, {
-      end_row = end_row - 1,
-      end_col = #lines[end_row],
-      hl_group = 'ReviewCommentLine',
-      virt_text = annotation and { { annotation, 'Comment' } } or nil,
-      virt_text_pos = 'eol',
-    })
   end
 
   if #outdated_hidden > 0 then
     vim.api.nvim_buf_set_extmark(buf, comment_ns, 0, 0, {
       virt_text = {
-        { ' ⚠ outdated: ' .. table.concat(outdated_hidden, ' | '), 'Comment' },
+        {
+          (' ⚠ %d outdated (prompt 除外中)'):format(#outdated_hidden),
+          'Comment',
+        },
       },
       virt_text_pos = 'eol',
+      virt_lines = group_thread(outdated_hidden),
     })
   end
 
@@ -213,9 +281,11 @@ function M.render(session, file, opts)
     vim.wo[opts.winid].wrap = false -- extmark virt text と wrap の干渉 (既知の制約)
     vim.wo[opts.winid].foldmethod = 'expr'
     vim.wo[opts.winid].foldexpr = 'v:lua.require("review.ui.diffbuffer").foldexpr(v:lnum)'
+    chrome.window(opts.winid)
   end
 
   apply_keymaps(buf)
+  set_winbar(buf, session, file)
   return buf
 end
 
@@ -238,6 +308,7 @@ function M.render_no_changes(session, opts)
     vim.wo[opts.winid].wrap = false -- extmark virt text と wrap の干渉 (既知の制約)
   end
   apply_keymaps(buf)
+  set_winbar(buf, session, { path = M.NO_DIFF_PATH })
   return buf
 end
 

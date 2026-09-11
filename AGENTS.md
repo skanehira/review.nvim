@@ -70,6 +70,11 @@ vsplit すると新窓が sidebar buf を継承して drift 誤検出 → **先�
 - 入力 float: insert `<CR>`=改行 / Normal `<CR>`=確定 / `q` (本文なし=閉じる・
   本文あり=arming 2 回で破棄) / `<C-y>`=insert 確定エイリアス / `<Esc>`=Normal 復帰だけ。
   終端経路は必ず stopinsert してから閉じる
+- コメント本文の表示は行下スレッド (extmark の virt_lines = buffer 行を占有
+  しない = 行番号写像不変)。見出し eol と同一 anchors にmark を二つ作ると
+  取得順が不定になるので **1 extmark に virt_text と virt_lines を併合**する。
+  virt_text/virt_lines の chunk は常に `{ {text, hl} }` のネスト構造 ({text,hl}
+  フラットは "expected Array, got String" になる — 実測の教訓)
 - コメント削除 `d`・破棄 `q` は arming 二重押し (同じ対象・同じ行・2 秒内)。
   `dd` で複数消えないことが契約
 - headless テストでは `cmdheight` の関係で notify が hit-enter を起こし、後続キーが

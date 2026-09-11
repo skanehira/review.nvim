@@ -91,9 +91,28 @@ local function comment_marks(buf)
       end_row = d.end_row,
       virt = d.virt_text and d.virt_text[1] and d.virt_text[1][1] or nil,
       hl = d.hl_group,
+      vlines = d.virt_lines,
     }
   end
   return out
+end
+
+local function thread_at(marks, row)
+  -- virt_lines は行の配列で、各行は chunk { {text, hl}, ... }。text を連結して返す
+  for _, m in ipairs(marks) do
+    if m.start_row == row and m.vlines ~= nil then
+      local out = {}
+      for _, chunks in ipairs(m.vlines) do
+        local text = ''
+        for _, ch in ipairs(chunks) do
+          text = text .. ch[1]
+        end
+        out[#out + 1] = text
+      end
+      return out
+    end
+  end
+  return nil
 end
 
 local function virt_at(marks, row)
@@ -151,6 +170,20 @@ describe('diffbuffer.render 描画', function()
       assert.equals('expr', vim.wo[state.win].foldmethod)
     end
   )
+
+  it('b:review_winbar に refs/path/増減/コメント数が入る', function()
+    local buf = render()
+    assert.equals('main..feature · a.lua · +2 -0 · 0 comments', vim.b[buf].review_winbar)
+    comment_model.add(state.session.comments, {
+      file = 'a.lua',
+      line = 2,
+      body = 'x',
+      anchor = vim.NIL,
+      created_at = 1,
+    })
+    local buf2 = render()
+    assert.equals('main..feature · a.lua · +2 -0 · 1 comment', vim.b[buf2].review_winbar)
+  end)
 
   it(
     'binary ファイルはヘッダと (binary files differ) のみでコメント対象行が無い',
@@ -244,7 +277,7 @@ end)
 describe('diffbuffer コメント extmark 表示', function()
   use_render_env()
 
-  it('単一コメント: 下線 extmark と先頭 40 文字抜粋の virt text', function()
+  it('単一コメント: eol は 💬 1、本文は行下 thread に全文', function()
     local body = string.rep('あ', 45)
     comment_model.add(state.session.comments, {
       file = 'a.lua',
@@ -255,13 +288,19 @@ describe('diffbuffer コメント extmark 表示', function()
     })
     local buf = render()
     local marks = comment_marks(buf)
-    -- buffer row 4 = 0-based 3。1 件 = 先頭 40 文字抜粋 (41 文字目以降は …)。
+    -- eol は件数表示のみ。本文は行下 thread (virt_lines) に全文出る (GitHub 風)。
     assert.same({
       start_row = 3,
       end_row = 3,
-      virt = ' 💬 ' .. string.rep('あ', 40) .. '…',
+      virt = ' 💬 1',
       hl = 'ReviewCommentLine',
-    }, marks[1])
+    }, {
+      start_row = marks[1].start_row,
+      end_row = marks[1].end_row,
+      virt = marks[1].virt,
+      hl = marks[1].hl,
+    })
+    assert.same({ '  [c1] ' .. string.rep('あ', 45) }, thread_at(marks, 3))
   end)
 
   it('複数行 range コメントは先頭〜末尾行跨ぎの下線', function()
@@ -298,9 +337,11 @@ describe('diffbuffer コメント extmark 表示', function()
     })
     local buf = render()
     local marks = comment_marks(buf)
-    -- 開始行 3 (0-based) に 2 本の下線、virt text は 1 본 だけ 💬 2
+    -- 開始行 3 (0-based) に 2 本の下線、virt text は 1 本だけ 💬 2、thread は 2 件
     assert.equals(2, count_starting(marks, 3))
     assert.equals(' 💬 2', virt_at(marks, 3))
+    local th2 = thread_at(marks, 3)
+    assert.same({ '  [c1] one', ' ', '  [c2] two spanning' }, th2)
     assert.equals(4, max_end_row(marks, 3)) -- 2 件目の range 2..3 = row 4..5 (0-based 3..4)
   end)
 
@@ -314,7 +355,41 @@ describe('diffbuffer コメント extmark 表示', function()
     })
     state.session.comments[1].state = 'outdated'
     local buf = render()
-    assert.equals(' ⚠ outdated: kept', virt_at(comment_marks(buf), 4))
+    local marks = comment_marks(buf)
+    assert.equals(' 💬 1 (⚠1)', virt_at(marks, 4))
+    assert.equals('⚠ [c1] kept', thread_at(marks, 4)[1])
+  end)
+
+  it('thread は 10 行で打ち切り、全文は i 窓へ導線を残す', function()
+    local long = {}
+    for i = 1, 13 do
+      long[#long + 1] = 'line' .. i
+    end
+    comment_model.add(state.session.comments, {
+      file = 'a.lua',
+      line = 3,
+      body = table.concat(long, '\n'),
+      anchor = vim.NIL,
+      created_at = 1,
+    })
+    local buf = render()
+    local th = thread_at(comment_marks(buf), 4)
+    assert.equals('  [c1] line1', th[1])
+    assert.equals('       line10', th[10])
+    assert.equals('       … (i で全文)', th[11])
+    assert.equals(11, #th)
+  end)
+
+  it('複数行本文は continuation 行にインデントを揃える', function()
+    comment_model.add(state.session.comments, {
+      file = 'a.lua',
+      line = 3,
+      body = 'first\nsecond',
+      anchor = vim.NIL,
+      created_at = 1,
+    })
+    local buf = render()
+    assert.same({ '  [c1] first', '       second' }, thread_at(comment_marks(buf), 4))
   end)
 
   it('複数グループの件数表示に outdated 数を含める (💬 N (⚠M))', function()
@@ -361,8 +436,9 @@ describe('diffbuffer コメント extmark 表示', function()
       state.session.comments[2].state = 'outdated'
       local buf = render()
       local marks = comment_marks(buf)
-      -- 本文 extmark ではなくファイルヘッダ行 (row 0) の virt text 一覧
-      assert.equals(' ⚠ outdated: gone | also gone', virt_at(marks, 0))
+      -- new 側行に居ない outdated はファイルヘッダ行 (row 0) に集約 (カウント eol + thread 一覧)
+      assert.equals(' ⚠ 2 outdated (prompt 除外中)', virt_at(marks, 0))
+      assert.same({ '⚠ [c1] gone', ' ', '⚠ [c2] also gone' }, thread_at(marks, 0))
     end
   )
 
