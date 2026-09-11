@@ -123,7 +123,7 @@ describe('list.render_sidebar', function()
     for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
       lhs[m.lhs] = true
     end
-    for _, key in ipairs { '<CR>', 'o', 'x', 'q' } do
+    for _, key in ipairs { '<CR>', 'o', 'x', 'q', '/' } do
       assert.is_true(lhs[key] == true, 'missing mapping: ' .. key)
     end
   end)
@@ -160,7 +160,7 @@ describe('list.render_sidebar', function()
     function()
       local session = session_stub { files = {} }
       local buf = list.render_sidebar(session, { file_stub('a.lua', 'M', 1, 0) })
-      assert_rhs_callable(buf, { '<CR>', 'o', 'x', 'q' })
+      assert_rhs_callable(buf, { '<CR>', 'o', 'x', 'q', '/' })
     end
   )
 

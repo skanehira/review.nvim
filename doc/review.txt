@@ -116,6 +116,7 @@ KEYMAPS						*review-keymaps*
 			open_diff      = '<CR>',
 			open_file      = 'o',
 			toggle_viewed  = 'x',
+			filter         = '/',    -- |review-keymaps-sidebar|
 			close          = 'q',
 		},
 		sessionlist = {               -- :Review list の一覧
@@ -164,6 +165,10 @@ DIFF バッファ					*review-keymaps-diff*
 	o		そのファイルの実ファイルを開く (diff の o と
 			同じ規則)
 	x		viewed 切替
+	/		一覧を絞り込む。入力 = paths の大文字小文字無視の
+			部分一致で再描画。空入力で解除、Esc で現状維持。
+			絞り込み中は <CR>/o/x/]d/[d も一致集合内だけを
+			辿る (winbar に一致数と filter が出る)
 	q		セッションを閉じる (diff の q と同じ)
 
 セッション一覧 (:Review list)			*review-keymaps-sessionlist* *review-list*

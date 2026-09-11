@@ -1724,3 +1724,117 @@ describe('open_file_current の worktree / 削除行 (o)', function()
     end
   )
 end)
+
+describe('sidebar 絞り込み (`/`)', function()
+  use_env()
+
+  local inputs
+
+  before_each(function()
+    inputs = {}
+    vim.ui.input = function(opts, cb)
+      inputs[#inputs + 1] = opts
+      -- 同期発火 (use_env の input stub と同型)。filter_sidebar は vim.ui.input の
+      -- cb を即呼ぶ前提で状態を更新する。
+      cb(inputs.result)
+    end
+  end)
+  after_each(function()
+    vim.ui.input = REAL_INPUT
+  end)
+
+  local function sidebar_lines()
+    local buf = vim.fn.bufnr 'review://sidebar/main--feature'
+    if buf < 0 then
+      return nil
+    end
+    return vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  end
+
+  it('絞り込み後は一致ファイルのみ表示し、winbar に filter を出す', function()
+    start_done('main', 'feature')
+    inputs.result = 'a.lua'
+    session_handler.filter_sidebar()
+    vim.wait(200, function()
+      return #sidebar_lines() == 1
+    end)
+    assert.same({ 'M a.lua +1 -0' }, sidebar_lines())
+    assert.equals(
+      'main..feature · 1 file · 0 comments · filter=a.lua',
+      vim.b[vim.fn.bufnr 'review://sidebar/main--feature'].review_winbar
+    )
+  end)
+
+  it('空入力で解除 (全行戻る・winbar から filter 消える)', function()
+    start_done('main', 'feature')
+    inputs.result = 'a.lua'
+    session_handler.filter_sidebar()
+    vim.wait(200, function()
+      return #sidebar_lines() == 1
+    end)
+    inputs.result = ''
+    session_handler.filter_sidebar()
+    vim.wait(200, function()
+      return #sidebar_lines() == 2
+    end)
+    assert.equals(2, #sidebar_lines())
+    assert.equals(
+      'main..feature · 2 files · 0 comments',
+      vim.b[vim.fn.bufnr 'review://sidebar/main--feature'].review_winbar
+    )
+  end)
+
+  it('キャンセル (nil) は現在の絞り込みを維持する', function()
+    start_done('main', 'feature')
+    inputs.result = 'a.lua'
+    session_handler.filter_sidebar()
+    vim.wait(200, function()
+      return #sidebar_lines() == 1
+    end)
+    inputs.result = nil
+    session_handler.filter_sidebar()
+    vim.wait(200)
+    assert.same({ 'M a.lua +1 -0' }, sidebar_lines())
+  end)
+
+  it(']d は絞り込み後の並びを進む (非一致ファイルを跨がない)', function()
+    start_done('main', 'feature')
+    inputs.result = 'b.lua'
+    session_handler.filter_sidebar()
+    vim.wait(200, function()
+      return #sidebar_lines() == 1
+    end)
+    -- 右ペインは開始時 sorted 先頭 (a.lua) のまま = 現在位置に無関係に
+    -- ]d は一致集合 (b.lua のみ) の次へ = b.lua を開く
+    session_handler.next_file()
+    assert.equals(
+      'review://diff/main--feature/b.lua',
+      vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(vim.api.nvim_get_current_win()))
+    )
+    vim.cmd 'buffer review://sidebar/main--feature'
+  end)
+
+  it('一致 0 件は 0 行一覧 + 解除案内の winbar (閉じない)', function()
+    start_done('main', 'feature')
+    inputs.result = 'zzz'
+    session_handler.filter_sidebar()
+    vim.wait(200, function()
+      return sidebar_lines() ~= nil and #sidebar_lines() >= 1
+    end)
+    local lines = sidebar_lines()
+    -- nvim の空 buffer 契約 (最低 1 空行) = 絞り込み 0 件は空行 1 本 + winbar 案内
+    assert.equals(1, #lines)
+    assert.equals('', lines[1])
+    assert.equals(
+      'main..feature · 0 files · 0 comments · filter=zzz (空入力で解除)',
+      vim.b[vim.fn.bufnr 'review://sidebar/main--feature'].review_winbar
+    )
+  end)
+
+  it('active 不在では入力を開かない (無音 safe)', function()
+    inputs.result = 'x'
+    session_handler.filter_sidebar()
+    assert.equals(0, #inputs)
+    assert.equals(0, #state.notifications)
+  end)
+end)

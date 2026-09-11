@@ -50,7 +50,10 @@ end
 
 --- session と parse 済み File 一覧を sidebar に描画する。
 --- 1 行 `<status> <path> +<a> -<d>`、パス昇順、viewed は行頭に `[✓]`。
-function M.render_sidebar(session, files)
+--- opts = { filter = string|nil } (絞り込み語。winbar に載せるだけ = 行フィルタ
+--- は呼び出し側 (handlers) が適用済みの files を渡す責任)。
+function M.render_sidebar(session, files, opts)
+  opts = opts or {}
   local sorted = {}
   for _, file in ipairs(files) do
     sorted[#sorted + 1] = file
@@ -72,17 +75,20 @@ function M.render_sidebar(session, files)
     )
     rows[#lines] = file.path
   end
-  chrome.bar(
-    buf,
-    ('%s..%s · %d %s · %d %s'):format(
-      session.base or '',
-      session.head or '',
-      #lines,
-      #lines == 1 and 'file' or 'files',
-      #(session.comments or {}),
-      #(session.comments or {}) == 1 and 'comment' or 'comments'
-    )
+  local bar = ('%s..%s · %d %s · %d %s'):format(
+    session.base or '',
+    session.head or '',
+    #lines,
+    #lines == 1 and 'file' or 'files',
+    #(session.comments or {}),
+    #(session.comments or {}) == 1 and 'comment' or 'comments'
   )
+  if opts.filter ~= nil and opts.filter ~= '' then
+    -- 一致 0 なら「閉じた?」と誤解されないよう解除手順をその場に出す
+    bar = bar
+      .. (' · filter=%s%s'):format(opts.filter, #lines == 0 and ' (空入力で解除)' or '')
+  end
+  chrome.bar(buf, bar)
   local k = config.get().keymaps.sidebar
   return paint(buf, lines, { kind = 'sidebar', session_id = session.id }, rows, {
     { k.open_diff, "require('review.handlers.session').open_selected_file()" },
@@ -90,6 +96,7 @@ function M.render_sidebar(session, files)
     -- fileview直呼びではなく handlers 経由に統一し、削除ファイル不可通知を共有する。
     { k.open_file, "require('review.handlers.session').open_file_current()" },
     { k.toggle_viewed, "require('review.handlers.session').toggle_viewed_current()" },
+    { k.filter, "require('review.handlers.session').filter_sidebar()" },
     { k.close, "require('review.handlers.session').close_by_key()" },
   })
 end

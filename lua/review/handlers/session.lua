@@ -33,9 +33,11 @@ end
 -- active = { session, files_by_path, file_order, sidebar_buf, sidebar_win,
 --            diff_win, diff_bufs = { [path] = bufnr } }
 local active = nil
+local sidebar_filter = nil -- sidebar 絞り込み (view state、session JSON に載せない)
 
 function M._reset()
   active = nil
+  sidebar_filter = nil
 end
 
 --- 起動中のセッション (UI が開いているもの)。無ければ nil (INV-1 で高々 1)。
@@ -319,6 +321,7 @@ local function detach()
   end
   local current = active
   active = nil
+  sidebar_filter = nil
   close_buffer(current.sidebar_buf)
   for _, buf in pairs(current.diff_bufs) do
     close_buffer(buf)
@@ -439,12 +442,45 @@ local function close_with_worktree(cb, after_remove)
 end
 
 --- sidebar を現在のセッション状態から再描画し、元の window に載せ直す。
+-- sidebar 絞り込みの可視 files。render 側と ]d/[d の進む順が必ず同じ集合を
+-- 向くよう、可視一覧はこの 1 関数からのみ供給する (filter は view state で
+-- session JSON に載せない — 復元・開き直し後は全一覧が正しい)。
+local function visible_files()
+  if sidebar_filter == nil or sidebar_filter == '' then
+    return active.file_order_sorted
+  end
+  local needle = sidebar_filter:lower()
+  local out = {}
+  for _, e in ipairs(active.file_order_sorted) do
+    if e.path:lower():find(needle, 1, true) ~= nil then
+      out[#out + 1] = e
+    end
+  end
+  return out
+end
+
 local function refresh_sidebar()
-  active.sidebar_buf = ui_list.render_sidebar(active.session, active.file_order_sorted)
+  active.sidebar_buf =
+    ui_list.render_sidebar(active.session, visible_files(), { filter = sidebar_filter })
   if vim.api.nvim_win_is_valid(active.sidebar_win) then
     vim.api.nvim_win_set_buf(active.sidebar_win, active.sidebar_buf)
     ui_chrome.window(active.sidebar_win)
   end
+end
+
+--- `/`: sidebar 一覧を絞り込む。空入力 = 解除、キャンセル (Esc) = 現状維持。
+--- 一致 0 件でも一覧は開いたまま (winbar に解除手順を出す)。
+function M.filter_sidebar()
+  if active == nil then
+    return
+  end
+  vim.ui.input({ prompt = 'review filter: ' }, function(text)
+    if text == nil then
+      return
+    end
+    sidebar_filter = (text == '') and nil or text
+    refresh_sidebar()
+  end)
 end
 
 -- diff 役の窓を「有効 + 内容が diff らしい」に揃える。<C-w>o / :q で窓が側に
@@ -572,7 +608,8 @@ local function sweep_empty_wins()
 end
 
 local function open_session_ui()
-  active.sidebar_buf = ui_list.render_sidebar(active.session, active.file_order_sorted)
+  active.sidebar_buf =
+    ui_list.render_sidebar(active.session, active.file_order_sorted, { filter = sidebar_filter })
   local sw = vim.api.nvim_get_current_win()
   -- 先に vsplit して diff 役の窓 ([No Name] のまま) を確保し、その後に sidebar を
   -- 流し込む。set_buf から先に入れると vsplit の新窓が sidebar buf を継承して
@@ -674,6 +711,8 @@ local function begin_session(args, files, existing, worktree)
     return a.path < b.path
   end)
 
+  -- 開き直し = 全一覧が正しい (前回の絞り込みを持ち込まない)
+  sidebar_filter = nil
   active = {
     session = session,
     files_by_path = files_by_path,
@@ -1166,14 +1205,14 @@ local function step_file(delta)
     return
   end
   local order = {}
-  for _, e in ipairs(active.file_order_sorted) do
+  for _, e in ipairs(visible_files()) do
     order[#order + 1] = e.path
   end
   if #order == 0 then
     return
   end
   local cur = current_diff_path()
-  local idx = 1
+  local idx = 0
   for i, p in ipairs(order) do
     if p == cur then
       idx = i
@@ -1215,7 +1254,8 @@ function M.focus_sidebar()
   -- sidebar buf は scratch (bufhidden=wipe) で、表示窓が閉じられると消える
   -- (only / :bdelete 経由)。その場合は状態から描き直して作り直す。
   if active.sidebar_buf == nil or not vim.api.nvim_buf_is_valid(active.sidebar_buf) then
-    active.sidebar_buf = ui_list.render_sidebar(active.session, active.file_order_sorted)
+    active.sidebar_buf =
+      ui_list.render_sidebar(active.session, visible_files(), { filter = sidebar_filter })
     active.sidebar_win = nil
   end
   local sw = nil

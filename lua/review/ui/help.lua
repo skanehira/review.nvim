@@ -35,6 +35,7 @@ local SECTIONS = {
       { 'open_diff', 'そのファイルの diff へ移動' },
       { 'open_file', 'そのファイルの実ファイルを開く' },
       { 'toggle_viewed', 'viewed 切替' },
+      { 'filter', '一覧を絞り込む (空入力で解除)' },
       { 'close', 'セッションを閉じる' },
     },
   },

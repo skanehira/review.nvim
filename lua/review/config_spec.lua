@@ -33,6 +33,7 @@ describe('config.get', function()
           open_file = 'o',
           toggle_viewed = 'x',
           close = 'q',
+          filter = '/',
         },
         sessionlist = {
           open = '<CR>',
@@ -74,6 +75,7 @@ describe('config.get', function()
           open_file = 'o',
           toggle_viewed = 'x',
           close = 'q',
+          filter = '/',
         },
         sessionlist = {
           open = '<CR>',

@@ -68,7 +68,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 | diff       | `]d` / `[d`                        | 次 / 前のファイル (一覧順。端は無動作) |
 | diff       | `S`                               | 変更一覧へ移動                       |
 | diff       | `i`                               | カーソル行のコメント全文を閲覧        |
-| 変更一覧   | `<CR>` / `o` / `x` / `q`          | diff 表示 / 実ファイル / viewed 切替 |
+| 変更一覧   | `<CR>` / `o` / `x` / `/` / `q`    | diff 表示 / 実ファイル / viewed 切替 / 絞り込み |
 | セッション一覧 | `<CR>` / `q` / `d`            | 開く / 閉じる / 削除                 |
 
 すべて buffer-local で `setup` の `keymaps` から変更可能 (設定キー名と既定値は `:h review-keymaps`)。例:

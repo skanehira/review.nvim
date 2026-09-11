@@ -28,6 +28,7 @@ M.defaults = {
       open_file = 'o',
       toggle_viewed = 'x',
       close = 'q',
+      filter = '/',
     },
     sessionlist = {
       open = '<CR>',

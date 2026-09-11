@@ -134,6 +134,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | sidebar (変更ファイル一覧) | `<Enter>` | そのファイルの diff へ移動 |
 | sidebar | `o` | そのファイルの実ファイルを開く (diff の `o` と同じ規則) |
 | sidebar | `x` | viewed 切替 |
+| sidebar | `/` | 一覧を絞り込む (大文字小文字無視の path 部分一致で再描画。空入力 = 解除、キャンセル = 現状維持。`<Enter>`/`o`/`x` と `]d`/`[d` は絞り込み後の集合だけを辿る。view state で session JSON には載せない) |
 | sidebar | `q` | `:Review close` 相当 (diff の `q` と同じ) |
 | sessionlist (`:Review list` のバッファ) | `<Enter>` | 選択セッションを開く (closed → open。worktree 要否は pr-worktree の作成判断で再開時に再作成) |
 | sessionlist | `d` | 選択セッションを削除 (`:Review delete` と同一の確認フロー) |
