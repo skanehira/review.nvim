@@ -22,16 +22,16 @@
 1. cwd が git repo 内なら repo top を解決し、その repo の `status=open` セッションを scan
 2. 1 件以上あれば notify: `review.nvim: <slug> のレビューが続けられます (:Review で復元)` (複数なら個数と代表 slug)。自動で窓は開かない
 3. worktree 残骸の掃除は pr-worktree「異常終了からの回復」が同じ scan を読んで実行する
-4. 復元手順の UI 構築では diff 窓が側に失われている場合 (一覧窓だけを残して閉じられた等) は sidebar 隣へ vsplit 再建してから描画する。黙ってどの窓にも見えない状態にしない (UX review F1/F18)。`:Review list` 経由でも `:Review` 経由でも同じ `resume_session` を通る
+4. 復元手順の UI 構築ではレビュー専有 tab を新規に作る (`:tabclose` 等で窓だけ失われた場合は、レビュー tab の直接消滅経路 (TabClosed: diff-review「レビュー tab の消滅経路」) が open 維持 + save で拾っており、close とは区別される。`:Review list` 経由でも `:Review` 経由でも同じ `resume_session` を通る
 
 **復元 `:Review` (引数なし)**:
 
 - open セッション 1 件 → 即復元。複数 → vim.ui.select (slug + base..head + コメント数)。該当 0 件 → 新規開始ガイダンス通知 (`:Review start で開始`)
-- 復元手順: active セッションがあれば確認後に save → close してから開始 (INV-1。diff-review「開始と既存セッションの継承」と同じ規則) → load → (base/head が force push・ブランチ削除等で解決不能なら WARN 通知で開かない。セッションはそのまま保存される) → diff を再取得・再パース → anchor 検証でコメントの位置と state を更新 → UI → worktree を pr-worktree の作成判断で解決 (既存ディレクトリがあれば再利用、無ければ作成/再作成) → status=open で save
+- 復元手順: active セッションがあれば確認後に save → close してから開始 (INV-1。diff-review「開始と既存セッションの継承」と同じ規則) → load → (base/head が force push・ブランチ削除等で解決不能なら WARN 通知で開かない。セッションはそのまま保存される) → **head 解決フロー再評価** (diff-review — switch 提案 / scratch 縮退の分岐は復元時も同じ) → diff を再取得 (`git diff <base>` 作業ツリー基準)・再パース → anchor 検証でコメントの位置と state を更新 → UI (3 窓開通) → worktree を pr-worktree の作成判断で解決 (mode=pr のみ。既存ディレクトリがあれば再利用、無ければ作成/再作成) → status=open で save
 
-**anchor 検証 (復元時の位置整合)**: 差分は再取得されるため行番号は変わる。コメントごとに (a) 保存行番号の行テキスト == `anchor.line` → active 維持、(b) 同一ファイルの保存行番号 ±20 行以内に `anchor.line` と一致 → active にして保持行番号を補正、(c) 見つからない → `state=outdated`。outdated でも `line` / `end_line` の値は書き換えない (保存値のまま保持)。表示上、その行が new 側差分に存在しない場合は当該ファイルの diff バッファ ヘッダ行に `⚠ outdated: <抜粋>` の virt text で一覧表示する。補正・outdated 化の結果は復元時に save して次回以降の検証を省く
+**anchor 検証 (復元・リフレッシュ時の位置整合)**: 差分は再取得されるため行番号は変わる。検証の正本テキスト源は直近の core/diff パーサ結果 (add/context 可視行の text_map) で、復元と BufWritePost リフレッシュで同一経路を使う。コメントごとに (a) 保存行番号の行テキスト == `anchor.line` → active 維持、(b) 同一ファイルの保存行番号 ±20 行以内に `anchor.line` と一致 → active にして保持行番号を補正、(c) 見つからない → `state=outdated`。outdated でも `line` / `end_line` の値は書き換えない (保存値のまま保持)。位置を解けず new 側に痕跡のない outdated は当該ファイル head バッファ 1 行目の virt_lines_above に集約表示する (diff-review「コメント表示」。head 窓が告知 scratch のファイル = deleted/binary 告知窓の outdated は集約先がないので panel winbar 末尾 `⚠N` と除外 INFO で可視化)。補正・outdated 化の結果は復元時に save して次回以降の検証を省く
 
-**`:Review list`**: 当該 repo の保存済みセッション全件を scratch split window (filetype `review-list`) に一覧表示 (slug / status / mode / base..head / コメント数 / 更新時刻 = **ローカル時刻 + %Z tz 表記** — 固定 UTC は JST ユーザーに誤読された、UX review F17)。キーは DESIGN.md「デフォルトキーマップ」の sessionlist 行 (`<Enter>` で開く = 復元手順を実行、closed → open。`d` = `:Review delete` と同一の確認フローで削除)。repo path 消失のセッションは grey 表示で `<Enter>` 不可。
+**`:Review list`**: 当該 repo の保存済みセッション全件を scratch split window (filetype `review-list`) に一覧表示 (slug / status / mode / base..head / コメント数 / 更新時刻 = **ローカル時刻 + %Z tz 表記**)。キーは DESIGN.md「デフォルトキーマップ」の sessionlist 行 (`<Enter>` で開く = 復元手順を実行、closed → open。`d` = `:Review delete` と同一の確認フローで削除)。repo path 消失のセッションは grey 表示で `<Enter>` 不可。
 
 ## 実装の配置
 
@@ -43,16 +43,17 @@
 | anchor 検証の純粋ロジック (行補正 / outdated 判定。handlers 間の循環 require を避けるため core に置く。検証は restore_spec) | core | `lua/review/core/anchor.lua` |
 | 復元フロー (diff 再取得と anchor 検証の調停) | handlers | `lua/review/handlers/restore.lua` |
 | `:Review list` / `:Review delete` のフロー (delete は close 掃除の再利用) | handlers | `lua/review/handlers/sessions_list.lua`, `lua/review/handlers/session.lua` (delete 拡張) |
-| VimEnter フック登録 | facade | `lua/review/init.lua` (setup 内) |
+| 起動 VimEnter scan 登録 | entry | `plugin/review.lua` (setup 省略でも走る。「継続通知」の可否は scan 実行時に config を読む) |
 
 ## エッジケースの決定
 
 - セッションの一意性は refs 組 = slug が決める (1 組 1 セッション)。分岐は `<base>--<head>`、PR は `pr-<n>` なので両モード間で衝突しない。ref 名由来で稀にある別 refs 組との slug 衝突は、新規作成を拒否し既存セッションを案内して解決する (`:Review delete` で削除可)。同一 refs 組の再開始は新規ではなく継承 (diff-review「開始と既存セッションの継承」)
 - repo があるべき path に無い (移動・削除済み): load 不能を通知し、そのセッションは list に grey 表示 (開けない旨)。掃除しない (ユーザーの判断待ち)
-- 差分が復元時にまるごと消滅 (rebase / squash で再取得した base 間 diff が空): 開くことを拒否せず、UI を開く (diff バッファは「変更なし」表示、全コメントを outdated として、通常時と同じく当該ファイルのバッファヘッダ行の `⚠ outdated: <抜粋>` virt text に一覧表示)。プロンプトは outdated 除外で実質空になる (ai-prompt)。ユーザーは確認の上 `:Review close` / `:Review delete` する
+- 差分が復元時にまるごと消滅 (rebase / squash で再取得した base 間 diff が空): 開くことを拒否せず、UI を開く。**files=0 の開通は panel 空一覧 + base/head 窓に「変更なし」プレースホルダ scratch を張り、全コメント outdated としてプレースホルダ 1 行目の virt_lines_above に集約一覧** (位置を解けない outdated の集約先が無いファイル — deleted/binary 告知窓の分と合わせて panel winbar 末尾 `⚠N` に出す)。プロンプトは outdated 除外で実質空になる (ai-prompt)。ユーザーは確認の上 `:Review close` / `:Review delete` する
 - write 失敗後の UI: コメント作成はメモリ上で成功扱い。WARN を 1 回出し、次の成功 save まで失敗状態を維持 (INV-4 の留保と同じ Exception)
 - 破損データは `.corrupt` サフィックスで正常経路から隔離し、自動削除はしない (片付けは手動)
 - 複数 nvim インスタンスが同一セッションを open すると最後が勝つ (last-write-wins)。ロックは持たない (v1 の明確な決定として記録)
+- extmark はバッファ状態ではなく runtime 装飾なので保存しない。プロセス異常終了時の実ファイルへの張痕残骸は 0 (バッファがプロセス死滅で消える) し、復元 open 時に状態から再装飾する。明示 clear は close 経路 (pr-worktree 終了手順 2) とレビュー tab 直接消滅 (TabClosed — 契約の正本: diff-review「レビュー tab の消滅経路」) の両方で走る
 
 ## テスト方針
 

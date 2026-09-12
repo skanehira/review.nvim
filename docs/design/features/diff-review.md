@@ -1,88 +1,124 @@
 # diff-review (ブランチ差分レビューとコメント)
 
 - 種別: 機能設計書
-- 対象 UC: なし (タスク説明から起こした。MUST 1)
+- 対象 UC: なし (タスク説明から起こした。MUST 1・3)
 
 ## 何を作るか
 
-2 つの git ref (base..head) の diff を Neovim 内の 2 ペイン UI (変更ファイル一覧 sidebar + unified diff バッファ) で開き、カーソル / visual-line で行指定してコメントを作成・編集・削除する。レビュー開始からコメント蓄積までの核。永続化の「書く」処理自体は store/ に委譲し、ここでは保存のトリガ (INV-4) までを保証する。
+base と head 側状態 (branch = 現在のチェックアウトの作業ツリー / PR = 自前 worktree) の diff を、Neovim 内の**専有 tabpage に file panel + base 窓 + head 窓の 3 ペイン**で開き、head 窓でカーソル / visual-line によるコメントの作成・編集・削除をする。head 窓は**実ファイルバッファ (:edit)** であり、編集可・LSP が効いたまま差分を追える。差分の表示は Neovim 標準の窓 diff、コメント表示は head バッファへの extmark。レビュー開始からコメント蓄積までの核。永続化の「書く」処理は store/ に委譲し、保存のトリガ (INV-4) までを保証する。
 
 ## 入出力と振る舞い
 
 **開始** `:Review start <base> [head]`:
 
-1. `:Review start` は base 必須 (1 引数以上)。head 省略時 (2 引数目なし) は `vim.ui.input` + `completion=customlist` (branches → tags の順) で head を選択。0 引数は usage 通知で受けつけない
-2. `git diff <base> <head>` (config `diff_context` 指定時は `-U<n>`) を非同期実行 (DESIGN.md「横断規約」参照)。ref 解決不能は `E_REF` を通知して UI を開かない
-3. パース結果からセッションを組み立て、UI を開き、save を呼ぶ (persistence-restore)
+1. **`:Review start` は base 必須 (1 引数以上)**。**head 省略時は `rev-parse --abbrev-ref HEAD` (ブランチ名、detached は literal `HEAD`) を自動解決・保存** (入力 UI を出さない)。head 明示時は ref 補完 (branches → tags)。0 引数は usage 通知で受けつけない
+2. **head 解決フロー** (branch のみ。DESIGN.md 決定表): `git rev-parse <head>` と `git rev-parse HEAD` が一致 → 通常経路。不一致かつ head がローカルブランチ (`show-ref --verify refs/heads/`) かつ `git status --porcelain` 空 → [y/N] で switch 提案 (承諾 → `git switch <head>`、失敗は WARN で scratch 縮退)。それ以外 (不一致+dirty / 不一致+非ローカルブランチ / 拒否) → **scratch 縮退**を INFO 明示 («head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします»)
+3. 差分取得: 通常経路は `git diff <base>` (**作業ツリー基準の単引数形**、cwd は branch=repo / PR=worktree)。scratch 縮退は `git diff <base> <head>`。config `diff_context` 指定時は `-U<n>`。非同期実行で、ref 解決不能は `E_REF` 通知・UI を開かない
+4. パース結果からセッションを組み立て、UI を開き、save を呼ぶ (persistence-restore)
+5. diff 対象 0 ファイル: «変更なし» INFO で開かない (復元時に空になった場合は persistence-restore「差分がまるごと消滅」)
 
-**diff バッファ** (`review://diff/<session>/<file>` scratch、filetype `diff`、`wrap=off`、`foldmethod=expr` で hunk とファイル冒頭を fold 可能):
+**レイアウト (専有 tabpage 3 窓)**:
 
-| 領域 | 内容 |
-| --- | --- |
-| ヘッダ行 | `■ A lua/foo.lua +12 -3` (変更種別 = A/M/D/R、追加/削除行数) |
-| hunk 行 | `@@ ... @@` と diff 本体。`+` 行は new 側ファイル行番号を保持し、extmark の対象になる |
-| 窓装飾 (chrome) | review 窓 (diff / sidebar / list) は `config.winbar=true` (既定) で winbar に `base..head · path · +a -d · N comments` 等を出す。winbar の window-local set は global へ漏れる (実測) ため、global `winbar` には `%{get(b:,"review_winbar","")}` 式を 1 度だけ入れ、表示文字列は各レンダラが buffer-local var に持つ。ユーザーが既に winbar を設定している場合は上書きしない。`config.number=false` (既定) で review 窓の行番号を窓単位に off (global 不変。setl を `nvim_win_call` 経由で実行 — `vim.wo[w]` / `nvim_win_set_option` の local 指定も他窓経由で波及した実測あり)。**窓に buf を当てる側 (handlers の render 直後) で必ず再適用する** — 開通後も窓が差し替わる経路があり、render 時点の適用だけでは new 窓が装飾を継承しない |
-| コメント表示 | コメント対象は `+` 行とコンテキスト行 (new 側に存在する行) で、diff バッファ上の対応する行に namespace `review_comment` の extmark を置く (下線 hl `ReviewCommentLine`)。**行末 virt text は件数アイコンのみ** (`💬 N`、outdated を含む group は `💬 N (⚠M)`)。本文は**行下スレッド**として extmark の virt_lines に group 単位で全文を出す (GitHub Files changed の表示順に合わせ row-push を受け入れる代わりに、virt_lines は buffer 行を占有しないので new 側行番号写像・c/e/d/o の位置契約は不変。fold 時は自動的に非表示)。1 行 = `  [c1] 本文` (outdated は `⚠ [c1] 本文` gray、continuation 行は prefix 幅ぶんインデント、group 内コメント間は空白区切り 1 行)。長文は 10 行で `… (i で全文)` に打ち切り、全文は `i` の read-only 窓が正しい経路。**行が new 側差分から消えた outdated** (= 位置無し) はファイルヘッダ行に集約し、eol を `⚠ N outdated (prompt 除外中)` + virt_lines に本文一覧。コンテキスト行上でも位置は同一規則。`-` 行 (new 側行番号なし) には付けない。thread mark は見出し extmark と同一位置に併合する (同一 anchors の複数 extmark は取得順が不定で spec 契約にできない — 実測の教訓)。extmark の highlight は syntax より前面に出るため diff の +/- 配色と競合しても下線は視認できる |
+- `tabnew` でレビュー専有 tab を作る (ユーザーの窓・tab は触らない)。構成: **file panel (左) │ base 窓 │ head 窓** の横 3 分割。panel は `wincmd H` 寄せ・幅 `config.panel_width` (既定 35)・`winfixwidth`。**開通順序は vsplit 前に buffer を張らない現行契約の流れを踏襲**し role 導出を内容基準で行う (AGENTS/DESIGN「窓の所有」)
+- **開通時 focus は head 窓** (直後の c/e が効く位置から開始する — diffview は panel focus だが、review はコメント主経路を即座に使えることを選ぶ)
+- base/head 窓オプション (窓ローカル): `diff scrollbind cursorbind foldmethod=diff foldlevel=0 foldcolumn=1 wrap=off`。行番号は `config.number` に従う。**`diffopt` は変更しない** (global option で伝播 — DESIGN「既知の制約」)。binary 注釈窓・deleted 告知窓など窓 diff に参加しない窓は `diffoff` で退避 (`foldclosed()` が -1 になることで退避を検証できる)
+- tab 作成時に `:tcd <repo または worktree>` (tab-local cwd)。効果の対象は LSP server プロセスの spawn cwd と相対パス解決ツール。root_dir 自体はバッファパス起点の遡上で決まる (DESIGN 決定表「LSP 連携」)
+- 窓 role は id ではなく内容 + 窓変数から導く: panel = `review://sidebar/...` バッファ、base = `review://base/...`、head = `w:review_key_gate == winid` かつ表示バッファの file がセッションの期待パスと一致 (フィンガープリント照合)
+- **レビュー tab の消滅経路は 2 種類**: (a) `q` / `:Review close` = セッション close (コメント 0 件でなければ確認プロンプト付きの終了手順 — pr-worktree「セッションとレビューの終了」)。 (b) ユーザーが `:tabclose` / `:tabonly` 等で直接閉じる = TabClosed フックが検知し **save (status=open 維持) + extmark clear + active 解除 + in-flight refresh 破棄**を行い、INFO «レビュー tab を閉じました (セッションは保存済み・`:Review` で開き直し可)» を出す。tab 消滅そのものを close と解釈しない (黙ってレビュー状態を変えない)。契約化された「閉じる」操作は `q` / `:Review close` のみ
+- drift 復旧: head 窓でユーザーが `:edit` 等して役割が壊れてもレビュー操作は gate 不成立で WARN し誤発火しない。**`R` / `<Tab>` / `<S-Tab>` / `[F` / `]F` / panel `<CR>` (=open_file 共通処理) で diff ペアと gate を張り直す** (「実ファイル窓が壊れた」を事故ではなく正当操作として扱う)。panel 窓が閉じられたら `<leader>e` で左に再建し render
 
-**操作** (キーバインド既定値は DESIGN.md「API 一覧」が正本。すべて buffer-local、`silent nowait`):
+**head / base 窓の中身** (ファイル種別別の解決):
+
+| 場合 | head 窓 | base 窓 |
+| --- | --- | --- |
+| 通常経路 (head == チェックアウト) | `<repo>/<path>` を `:edit` (編集可・filetype detect・LSP attach。既にユーザーが開いていれば同一バッファを再利用) | `review://base/<session>/<path>` scratch (`git show <base>:<path>`、`bufhidden=hide`、modifiable=false、filetype detect) |
+| PR | `<worktree>/<path>` を `:edit` (tab は worktree に tcd 済み) | 同上 |
+| scratch 縮退 | `review://head/<session>/<path>` scratch (`git show <head>:<path>`、read-only) + INFO | 同上 |
+| 追加ファイル | 上記経路どおり | `review://null/<session>/<path>` (0 行 scratch、diff ペアには参加) |
+| 削除ファイル | **告知 scratch** `review://deleted/<session>/<path>` + `diffoff`。`:edit` しない (`:w` で空の新規ファイルが復活する — DESIGN「既知の制約」) | 旧内容 scratch |
+| rename | **新パス**の実ファイル/scratch | `git show <base>:<旧パス>` (旧パス自体が新規なら `review://null/...`) |
+| binary | 告知 scratch `review://binary/<session>/<path>` ×両窓共有 (`diffoff`。git パースの „Binary files differ“ を 1 行表示) | 同 buffer を共有 |
+
+- open_file(path) = 移動系の唯一経路: head/base を上記で張り、chrome 再適用、viewed=true、save、panel 再描画、コメント extmark 再適用。head が実バッファのとき内容変化があれば `:diffupdate`
+
+**コメント表示 (head バッファの extmark)**:
+
+- 対象行 = コメントの `line`〜`end_line` の範囲 (new 側行番号 = head バッファの行番号そのもの。**行写像変換は存在しない** — head 実窓では行番号が恒等で、unified バッファ時代の変換経路 (`new_line_at`) は持たない)。namespace `review_comment` の extmark 1 個に virt_text (行末 `💬 N`、outdated 混在は `💬 N (⚠M)`) と virt_lines (行下スレッド本文 `[c1] …`、10 行で `… (i で全文)`、group 内は id 行 + continuation インデント) を併合する (同一位置に複数 extmark を作ると取得順不定で spec 契約にできない)。下線 hl `ReviewCommentLine`
+- eol anchor (end_col 指定なし start col 対応) + `right_gravity=true` (boolean 指定。`gravity` 文字列は invalid) で編集時の行移動に自動追従
+- **同一バッファの全窓にスレッドが見える (仕様)**。窓単位抑止 API は実測で存在しない。セッション close / delete 時に張った全バッファの ns を明示 clear し、残骸 0 を spec で pin する
+- 位置を解けない outdated (= new 側に該当テキスト無し) は当該 head バッファ **1 行目の virt_lines_above** に集約: `⚠ N outdated (prompt 除外中)` + 本文一覧。head 窓が存在しないファイル (deleted・binary 告知窓) に紐づく outdated は panel winbar の末尾要素 `⚠N` (「窓装飾 (chrome)」参照) とプロンプト除外 INFO で可視化する
+- 再描画は常に session.comments から捨てて再構成 (バッファ側に真実を置かない — 現行契約)
+
+**リフレッシュ (未コミット反映契約)**:
+
+- head 窓で保存 (BufWritePost。同一バッファがユーザー窓から書かれたときも同じ buffer イベント) 時に自動実行: `git diff <base>` 再取得 → 再パース → **anchor 検証 (直近パース結果に対して text_map 経路 — 復元検証と同一)** → ±カウント・panel・スレッド・winbar 再適用 → `:diffupdate` → 永続化。**in-flight 中は dirty マークで 1 回まとめ** (多重 fetch しない)。失敗は WARN + 前回 parse を保持。**再取得の引数形は開始時解決と一致させる** (通常経路 = 単引数、scratch 縮退 = `<base> <head>`)。セッション close / 切替時は in-flight・dirty を無効化する (コールバックは「対象セッションがまだ active」を確認してから適用。確認できたら結果を破棄)。
+- 手動 `R` = 同一経路 (drift 復旧・他プロセスでの変更取り込みにも効く)
+- 未保存の buffer 編集は窓 diff にだけ映り、±カウント・prompt・anchor は保存済み内容基準 (二重基準は DESIGN 決定表「保存時再取得」の契約)
+- リフレッシュ時 (branch・通常経路のみ) : `session.head` (ブランチ名解決後の ref) の commit と現在の HEAD の commit が違えば INFO «セッション開始時の head と現在のチェックアウトが違います» を 1 回だけ出す (処理は続行 — 定義上、レビュー対象は「base vs 現在のチェックアウト」)。PR/縮退は比較しない (PR は worktree を `--detach` するため HEAD 比較が恒真で誤発火する)
+
+**操作** (既定キーの正本は DESIGN.md「デフォルトキーマップ」。buffer-local + window role gate、`silent nowait`。gate 不成立窓では 1 キーストロークが built-in になる副作用を help に明記):
 
 | 操作 | 起きること |
 | --- | --- |
-| `c` (normal) | 対象 range = カーソル位置の new 側行 (`-` 行 = new 側行番号が無ければ WARN で開かない)。コメント入力 float (マルチライン対応 scratch buffer、insert で開始、操作契約: Normal `<CR>` 確定 / insert `<CR>` 改行 / `q` 閉じる [本文なし=キャンセル、本文ありは閉じず続けて q で破棄] / `<C-y>` = insert 確定のエイリアス / `<Esc>` = Normal へ戻るだけで閉じない。窓 title に対象 `path:line[-end]` と確定/閉じるのヒントを常時表示。終端経路は必ず stopinsert してから窓を閉じる (残留 insert が diff バッファを傷めない — UX review F8)) を開く。確定でコメント追加 → extmark 再描画 → 即時 save |
-| `c` (visual-line) | 対象 range = 選択範囲の先頭〜末尾の new 側行 (`+` 行とコンテキスト行が対象、削除専用行を除く)。選択内に new 側行が無ければ WARN で開かない |
-| `e` | カーソル行のコメントを編集。複数ある場合は vim.ui.select で対象を選ぶ (既定 provider は番号入力の inputlist になる — ユーザー help に記載、UX review F11)。body を事前入力した float を開き、確定で更新 → save |
-| `d` | カーソル行 (range 内) のコメントを削除。arming 二重押し: 1 回目は対象を armed + WARN にして削除しない、同じコメントへ待機窓 (2 秒) 内にもう一度 d で削除確定 → save。他行移動・e での編集確定・窓経過で arming 解除される (armed は object 参照比較 + 編集確定時の明示解除。vim 筋 `dd` でも 1 件しか消えない) |
-| `y` | カーソル行 range に含まれるコメントのプロンプトをコピー (ai-prompt「出力経路」参照) |
-| `q` | `:Review close` と同じ (pr-worktree「セッションとレビューの終了」参照)。コメント 0 件なら確認なしで閉じる |
-| `<F1>` | キーバインドと操作概要の help float (`<Esc>`/`q` で閉じる) |
-| `]d` / `[d` | 一覧順 (パス昇順) の次 / 前のファイルを右ペインに開く。端は無動作 (`[c`/`]c` の hunk 移動と同感)。処理は sidebar `<Enter>` と同一 (viewed=true + save + focus は diff 窓に留まる)。ftplugin 標準の `[c`/`]c` (hunk 移動) は `filetype=diff` なのでそのまま使える |
-| `S` | focus を sidebar へ移す。一覧窓が閉じられていた場合は現 diff 窓の左に再建 (窓役割の修復は UX review F1 系と同じ内容導出) |
-| `i` | カーソル行範囲のコメント全文を read-only float で閲覧 (`ui/commentview`)。id / path:line[-end] / outdated 表示。閉じるのは `q` / `<Esc>` / `<CR>` のみ (編集は `e`) |
+| `c` (normal / visual-line) | head 窓のカーソル / '<~'> 行番号が new 側行そのもの。削除告知・binary 注釈・base 窓では WARN (確定文言の正本は DESIGN.md キー表 «この窓にはコメントを付けられません») で開かない。コメント入力 float は契約そのまま (マルチライン scratch、Normal `<CR>` 確定 / insert `<CR>` 改行 / `q` 閉じる [本文なし=キャンセル、本文ありは続けて q で破棄 arming] / `<C-y>` 確定エイリアス / `<Esc>` は Normal 復帰のみ、stopinsert 経路、title に `path:line[-end]` 常時表示) |
+| `e` / `d` / `y` / `i` | 現行契約そのまま (d は arming 二重押し、i は commentview float)。head 窓限定 |
+| `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後ファイル = open_file。端無動作、focus は head 窓に留まる |
+| `<leader>e` / `<leader>b` | panel focus (閉じていれば再建) / panel 表示トグル (閉じても tab とレビュー窓は残る) |
+| `R` | リフレッシュ (上記) + 窓の役割 drift の復旧 |
+| `o` | そのファイルの実ファイルを**レビュー tab の外** (前行儀の tab) で開く — diff ペアを壊さず通常編集文脈へ出る。scratch 縮退時は「現在のチェックアウトの実ファイル」である旨を INFO 添えて開く (存在しなければ git show read-only scratch fallback)。削除ファイルは WARN |
+| `q` | `:Review close` 相当 (pr-worktree「セッションとレビューの終了」)。tab を閉じる。ユーザー窓・開いたままの実ファイルバッファ (modified を含む) は消さない |
+| `<F1>` | help float (現行のまま) |
+| `[c` / `]c` / fold 鍵 | マップしない — Neovim 標準 (窓 diff の hunk 移動。filetype 非依存で効く) |
 
-**sidebar** (左 30 桁、scratch、filetype `review-list` — syntax は持たず buffer-local キーマップと hl group の適用先。キーは DESIGN.md「デフォルトキーマップ」参照):
+**file panel** (`review://sidebar/<session>`、filetype `review-list`。キーは DESIGN 表):
 
-| 操作 | 起きること |
-| --- | --- |
-| 表示 | 1 ファイル 1 行 `<status> <path> +<a> -<d>`、パス昇順。viewed のファイルは行頭に `[✓]`。`<Enter>` → 右ペインをそのファイルの diff バッファに差し替え (ファイル先頭へスクロール) + **focus を diff 窓へ移動** (直後の c/e が効く位置に立つ — UX review F12) + viewed を true にして save。右ペイン窓が側に閉じられていた場合は sidebar 隣へ vsplit 再建する (無反応にしない — UX review F1/F18)。差分はファイルごとに別バッファ (複数ファイルを 1 バッファへ連結しない — fold と行番号管理が単純になるため) |
-| `x` | viewed 切替 → save |
-| `/` | vim.ui.input で絞り込み語を受け取り、path 大文字小文字無視の部分一致で一覧を再描画 (空入力 = 解除、Esc = 現状維持、一致 0 件は空一覧 + winbar に解除手順)。絞り込みは view state (session JSON に載せない / 開き直し・close で解除)。`<Enter>`/`o`/`x` の行紐付けと `]d`/`[d` の file step は同じ可視集合を辿る (現在 diff が集合外なら `]d` は先頭候補を開く) |
-| `o` | そのファイルの実ファイル開く (pr-worktree「実ファイル参照」参照)。削除ファイルは不可と通知 |
-| `q` | diff と同じくセッション終了 |
+- tree 表示 (既定): ヘッダ行 `Changes (N)` と `Showing changes for: <base>..<head 表示名 (作業ツリー) >`、続いてパスツリー。ディレクトリは折りたたみ可 (既定展開。collapsed は view state)、**単一 child 連鎖は連結表示** (`a/b/c/`)。**dir 行は末尾に `/` を付けファイルと同じ行フォーマット帯で識別する** (同名のファイルと dir が同時差分に出るケースの区別規則)。dir 行の status は子の集約 (全子同一記号ならそのまま、種類混在は `*` — 単独 status `M` と衝突させない)、file 行は `<status> <icon?> <basename> +<a> -<d>` + 親パス grey サフィックス。viewed  ファイルは行頭 `[✓]`。**devicons は存在自動検出** (無ければアイコンなしのテキスト表示。ランタイム依存ゼロは崩さない)
+- list 表示 (`i` でトグル): フルパス 1 行の現行フラット形式。filter・viewed は tree と同じ集合で働く
+- 選択追従: panel のカーソル移動だけでは diff を切り替えない (diffview 動作)。`<CR>` / `o` / `l` が open_file。逆に open_file 時は panel カーソルを追従スクロールさせる (**選択行 hl `ReviewPanelFile`+`cursorline` 窓有効** — 相互ハイライト)
+- hl group: `ReviewPanelFile` / `ReviewPanelDir` / `ReviewPanelStatus` / `ReviewPanelMeta` (差分行の着色は窓 diff が Neovim 標準 Diff* を直接使う — DESIGN「命名」)
+- `/` 絞り込み・`x` viewed・`R`・`q`・`<Tab>`/`<S-Tab>`/`[F`/`]F` は DESIGN 表の動作。絞り込み・collapsed・listing style は view state (session JSON に載せない)
 
-セッション開始時、右ペインには一覧の先頭ファイルの diff を開く。
+**セッション開始時の初期開き**: 一覧先頭ファイルの open_file (focus は head 窓)。files が空の開通 (復元時に差分がまるごと消滅) は open_file の代わりに「変更なし」プレースホルダ scratch を base/head 窓へ張り、outdated 集約もそこへ出す (persistence-restore「差分がまるごと消滅」)。
 
-**開始と既存セッションの継承**: 保存済みセッション (open / closed を問わない) と同一 refs 組の `:Review start` / `:Review pr` は**継承**とする — 確認後に既存セッションを load (comments と viewed を引き継ぎ、anchor 検証を通す) して UI を開く。既存を消す上書き開始はできず、まっさらにしたい場合は先に `:Review delete` (persistence-restore「1 組 1 セッション」)。別の refs 組のセッションが active な状態で開始する場合は、確認後に現セッションを save → close してから新規開始する (INV-1)。別 refs 組が active でも開始対象の同一 refs 組に保存済みセッションがある場合は継承が勝つ — close と継承は 1 回の確認に統合し (閉じて継承するかどうか)、やっぱり上書き開始の択は無い。
+**窓装飾 (chrome)**: winbar 文字列 — head 窓 `base..<head> · path · +a -d · N comments`、base 窓 `base · path (git show)`、panel `base..head · N files · M comments [· filter=…] [· ⚠N]` (`⚠N` = 位置を解けず集約先 (head 窓) さえない outdated — deleted/binary 告知窓のファイル — の件数、0 件なら非表示)。機構: `'winbar'` は global-only option なので global 式 `%{get(w:,"review_winbar","")}` を 1 度だけ入れ、表示文字列は**窓変数 `w:review_winbar` のみ**に持つ (b: 変数は実ファイルバッファ経由でユーザー窓・他 tab の winbar に漏れるため使わない — 窓単位が正。ユーザーが既に winbar を設定している場合は上書きしない)。render 直後の handlers 側 `chrome.window()` 再適用と `config.number` の窓単位 off は現行契約そのまま
+
+**開始と既存セッションの継承**: 現行契約そのまま (同一 refs 組は継承 / 別 refs 組は save→close / 上書き開始なし — INV-1)。復元・開き直しも head 解決フローを毎回再評価する (session JSON の mode/base/head は変わらない)。
 
 ## 実装の配置
 
 | 処理 | 層 | 実装先ファイル |
 | --- | --- | --- |
-| diff 出力のパース (ファイル/hunk/行種別/new 側行番号写像) | core | `lua/review/core/diff.lua` (+ `_spec`) |
-| git diff / ref 一覧の実行 | adapters | `lua/review/git/diff.lua`, `lua/review/git/ref.lua` |
-| コメントの追加・編集・削除・行検索モデル | core | `lua/review/core/comment.lua` (+ `_spec`) |
-| セッション開始・切替の調整 | handlers | `lua/review/handlers/session.lua` |
-| 操作フローと float 入力 | handlers | `lua/review/handlers/comments.lua` |
-| diff バッファ描画・extmark・fold | ui | `lua/review/ui/diffbuffer.lua` |
-| sidebar 一覧 | ui | `lua/review/ui/list.lua` |
-| マルチライン float 入力 | ui | `lua/review/ui/input.lua` |
-| `o` の実ファイル参照 (worktree なし = `git show` read-only。worktree 分岐は #6。sidebar / diff とも `handlers/session.open_file_current` 経由) | ui | `lua/review/ui/fileview.lua` (+ `_spec`) |
-| help float | ui | `lua/review/ui/help.lua` |
-| highlight 定義 | ui | `lua/review/ui/highlight.lua` |
+| diff 出力パース (ファイル一覧・±数・new 側行番号・anchor 検証の text_map 源) | core | `lua/review/core/diff.lua` (+ `_spec`) — 単引数形でも動く (既存パーサ踏襲) |
+| git diff 実行 (単引数 + cwd) | adapters | `lua/review/git/diff.lua` (引数組み立て改訂) |
+| rev-parse / show-ref / switch | adapters | `lua/review/git/ref.lua` (拡張)、`lua/review/git/repo.lua` (switch、新規 + `_spec`) |
+| 開始・head 解決 (switch 提案/scratch 縮退)・レイアウト・open_file・リフレッシュ調停・close | handlers | `lua/review/handlers/session.lua` |
+| 操作フローと float 入力 | handlers | `lua/review/handlers/comments.lua` (行取得が恒等になっても API 形は維持 — scratch 縮退窓と共通) |
+| 3 窓レイアウト・role 導出・drift 復旧・tcd・tab 開閉 | ui | `lua/review/ui/windows.lua` (新規 + `_spec`) |
+| window role gate + buffer-local キー install/uninstall (衝突検出スキップ含む) | ui | `lua/review/ui/keygate.lua` (新規 + `_spec`) |
+| base / head / null / deleted / binary 窓の中身 (git show 充填・filetype detect) | ui | `lua/review/ui/scratchwin.lua` (新規) |
+| コメント extmark 再適用・ns クリーンアップ収集 | ui | `lua/review/ui/commentmarks.lua` (新規 — 現行 diffbuffer のスレッド部を移す) |
+| file panel 描画・相互追従 | ui | `lua/review/ui/filepanel.lua` (新規 + `_spec`) |
+| ツリーモデル (純ロジック: path→node、連結、集約、fold 集合) | ui (純) | `lua/review/ui/treelist.lua` (新規 + `_spec`) |
+| 現行 `ui/diffbuffer.lua` | — | **削除** (unified 描画の撤廃。fold/virt_text 経験は commentmarks へ) |
+| セッション一覧 (変更なし) | ui | `lua/review/ui/list.lua` (sidebar 分を filepanel へ移し sessionlist のみ) |
+| 現行 `ui/fileview.lua` | — | 縮小 (`o` の前行儀 tab open + 削除ファイル git show fallback) |
 
 ## エッジケースの決定
 
-- diff 対象 0 ファイル (base と head が同一ツリー等): 開始時は「変更なし」を通知してセッションを開かない。エラーではなくレビュー対象なしの正常な結果として扱う (復元時に空になった場合は persistence-restore「差分がまるごと消滅」の規則で開く)
-- 削除ファイルへのコメント: new 側 `+` 行が存在しないので行選択できず構造的に不可。ファイル削除そのものへの指摘コメントは v1 対象外
-- rename (`diff --git a/x b/y` に similarity index を伴う形): 変更後の新パス 1 ファイルとしてパースし、旧パスとの対応表示はしない
-- binary ファイル: hunk 本体なしのヘッダのみ (「Binary files differ」行) でコメント不可として表示する
-- hunk ヘッダの行数 0 (`@@ -0,0 +0,0 @@` 相当の空ファイル新規): 行数 0 の hunk を許容し、new 側行番号を持たないものとして扱う (行番号変換ロジックは 0 行数 hunk でも範囲外行番号を生成しない)
-- 入力 float の離脱経路: `<Esc>` は窓を閉じず Normal へ戻るだけ (入力を失わない)。`q` は本文が空のときのみ閉じる (キャンセル)。本文ありの `q` は閉じず WARN し、同じ本文のまま discard window (2 秒) 内にもう一度 `q` で入力を破棄して閉じる (二重押しによる誤破棄の防止。本文が変われば arming は自動的にやり直し)。`:q` 等での窓離脱は従来どおりキャンセル扱い
-- visual selection が削除専用行 (new 側行番号なし) だけを含む: WARN で拒否
-- 右ペインのファイル切替: 描画を捨ててセッションの状態 (files と comments) から再構成する。唯一の真実は状態側にあり、バッファ側に値を持たない
+- 未追跡ファイル: `git diff` 出力に出ないためレビュー対象にならない (`git add` 前の新ファイルは不可。DESIGN「既知の制約」)
+- 削除ファイル・binary: head 窓が告知 scratch のファイルにはコメント不可 (WARN)。削除そのものへの指摘コメントは v1 対象外 (現行決定)
+- rename: 新パス 1 ファイルとして扱い、旧パスとの対応表示はしない。base 窓だけ旧パスの中身 (`git show` で解決不能 = 旧パス自体が新規の場合は `review://null/<session>/<path>`)
+- hunk 行数 0 (`@@ -0,0 +0,0 @@` 相当): パース側契約そのまま (新側行番号を持たない)。窓 diff 表示には影響しない
+- scratch 縮退 + 別プロセス checkout 変更: LSP が attach しない・diff が開いた時点固定 — INFO 済みなので仕様
+- ユーザーがレビュー中に裏で switch/checkout: 次のリフレッシュ時に現在チェックアウト内容がレビュー対象になる (定義)。head 解決の commit 比較で不一致を検出し INFO 1 回 (定義は「リフレッシュ」節が正本)
+- 0 行数 hunk・差分消滅・入力 float 離脱経路・visual 選択が new 側行なし・arming 解除条件: 現行契約の趣旨そのまま (行写像が恒等になっても「new 側に存在しない行への c は不可 — WARN」は成立。存在行範囲のみ作成可)
+- 開通順序競合 (vsplit 継承 drift) と空窓回収: 専有 tab のためユーザー窓誤回収の心配は消えるが、tab 内に作らなかったはずの窓 (float 破片・error 窓) が残ったら閉じる回収は続ける
 
 ## テスト方針
 
-- 単体 (core/diff): 実 git で生成した生出力フィクスチャ (multi-hunk / rename / binary / 新規 / 削除 / 0 行数 hunk / 前後ファイルの連なり) をパースし、各 `+`/コンテキスト行の new 側行番号が完全一致で検証する (表示位置だけ照らすテストは行番号漂移を検出できない)
-- 単体 (core/comment): CRUD、id 採番 (max+1)、カーソル行検索、range 正規化 (末尾 > 先頭の修正)
-- 単体 (handlers): git 注入スタブでの開始フロー、active セッション排他と切替時の save 呼び出し、CRUD 直後の save トリガ
-- E2E (golden path、scripts/e2e.sh 経由): fixture repo で `:Review start main feature` → diff バッファに hunk が出る → `c` でコメント作成 (キーシーケンス投入) → extmark と virt text が出る → sidebar で別ファイルへ `<Enter>` → 閉じて再度開くとコメントが残っている (persistence-restore と同一シナリオを共有)
+- 単体 (core/diff):生出力フィクスチャパースは現行維持。単引数 `git diff <base>` 出力形状での回帰を追加
+- 単体 (git リポジトリ実 FS): `git/repo.lua` switch 成功/失敗、`git/diff.lua` cwd 指定 (worktree) の引数組み立て (`_set_system` 応答キューで呼び出し順 pin)
+- 単体 (handlers/session): head 解決フローの全分岐 (一致 / 不一致+clean+branch+承諾 / 拒否 / dirty / 非ブランチ — `ui.input` スタブ + rev-parse キュー)、open_file の種別別張り分け (実バッファ / scratch / null / deleted)、リフレッシュ in-flight まとめ・失敗保持・save 契約 (INV-4)、drift 復旧経路 (window role 再導出)、close の tab 消滅 + extmark 残骸 0 (`tabpage が消え、張った buf の get_extmarks が空`)
+- 単体 (ui): windows.lua (panel│base│head 配置・tcd・winfixwidth)、keygate (衝突検出スキップ・install/uninstall 残骸・gate 発火/不発火マトリクス)、treelist (連結・集約・fold 集合・list/tree 切替の純関数)、filepanel (viewed/表示行・選択追従 scroll)
+- E2E (golden path): temp repo `main`/`feature` で `:Review start main` → 専有 tab 3 窓・head 窓 buf 実パス==repo 内・窓 opts・**tcd==repo** → head 窓 `c` でコメント (打鍵は `:normal`) → 実ファイルの extmark・panel 行・winbar 件数 assert → 編集 `:w` → ±カウント増(panel) とリフレッシュ assert → `<Tab>` 次ファイル → 閉じて (q) tab 消滅・ns 残骸 0 → 再起動 `:Review` 復元→コメント位置同一。縮退シナリオ (`:Review start main other` + n スタブ) は両窓 scratch assert。switch シナリオ (y) は switch 後 repo の content==head であること。PR シナリオは worktree + tcd==worktree + `o` が worktree 基準パス
+- 実 PTY 契約 (tmux + `--remote-expr`、手順を commit message): 同一ファイルの 2 窓 (review 窓 + ユーザー窓) でキーが review 窓のみ発火・ユーザー窓 built-in、insert-mode 残留 (F8)、fold 時のスレッド非表示の画面確認
