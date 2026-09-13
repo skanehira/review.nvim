@@ -1,6 +1,7 @@
 -- ui/fileview: `o` の実ファイル参照 (diff-review / pr-worktree「実ファイル参照」)。
 -- worktree あり = `<worktree>/<path>` の実ファイルを :e のように開く (編集可。
--- 編集内容はレビューの diff には反映されない — pr-worktree.md)。
+-- 編集内容は保存 = BufWritePost でレビューに反映される (未保存編集は表示のみ)。
+-- 契約は diff-review「リフレッシュ (未コミット反映契約)」。
 -- worktree なし = `git show <head>:<path>` の read-only scratch。
 local chrome = require 'review.ui.chrome'
 local cli = require 'review.git.cli'

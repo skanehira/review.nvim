@@ -208,6 +208,14 @@ SESSION 状態と復旧				*review-sessions*
 			「続けられます」通知 (:Review で復元 / worktree
 			残骸は起動 scan が掃除)
 
+	保存時自動反映	 保存した差分は自動でレビューに反映される。
+			レビュー対象ファイルを保存 (どの窓の :w でも可)
+			すると差分を再取得し、±カウント・コメント位置
+			(anchor 補正 / outdated)・:Review prompt が
+			直近保存基準で更新される。未保存のバッファ編集は
+			表示にだけ映り、カウントと prompt には入らない。
+			再取得の失敗は WARN 通知で前の表示とコメントを保持する
+
 outdated 認定 (差分の揺れで対象行を特定できないコメント) は diff 上で
 行末に `(⚠N)`、スレッドを gray + `⚠` で示し (:h review-display)、
 `:Review prompt` の既定出力から除外される。本文は失わず closed 前の JSON に

@@ -10,6 +10,9 @@
 # 本文・行位置・viewed が元の状態と一致することを assert。
 # phase3: :Review start <base> 1 引数 -> head 省略 = rev-parse --abbrev-ref HEAD
 # による自動採用・保存 (入力 UI なし) を実 git で pin (issue #14 の開始契約)。
+# phase5: 編集 :write -> BufWritePost 自動リフレッシュで panel ±カウントが
+# 変わる最小シナリオ (issue #15 未コミット反映契約)。新規 XDG data dir で
+# 開始確認を踏ませずに走る。
 # E2E は clipboard provider 無しで走る (クリップボード非依存、"0 レジスタ比較のみ)。
 #
 # 契約: 毎回 mktemp の一意ディレクトリに fixture repo と XDG_DATA_HOME を作り、
@@ -157,6 +160,27 @@ grep -q 'E2E-C2 delete_ids=main--e2e-del' "$OUT4" || {
   exit 1
 }
 
+# --- phase 5: 保存時リフレッシュ (編集 :w -> ±カウント自動更新) --------------
+# 新規 XDG data dir (保存セッション 0 -> 継承確認なし) で main..feature を開始し、
+# b.lua を編集保存 -> sidebar の +2 -1 が +3 -1 になるまで wait_for。E2E-R1 が
+# 陽性マーカー (unit の応答キューでは観測できない「実 git + 実 BufWritePost」の
+# 接線を pin する)。
+D_REFRESH="$WORK/d-refresh"
+mkdir -p "$D_REFRESH"
+OUT5=$(mktemp "$WORK/phase5.out.XXXXXX")
+if ! ( cd "$REPO" && XDG_DATA_HOME="$D_REFRESH" REVIEW_E2E_LOG="$LOG" \
+    nvim --headless --noplugin -u "$REPO_ROOT/tests/e2e_init.lua" \
+    -c "luafile $REPO_ROOT/tests/e2e/phase5.lua" ) >"$OUT5" 2>&1; then
+  cat "$OUT5" >&2
+  echo "e2e: phase 5 nvim 終了コード非ゼロ" >&2
+  exit 1
+fi
+cat "$OUT5" | tee -a "$WORK/e2e-report.txt"
+grep -q 'E2E-R1 counts=updated' "$OUT5" || {
+  echo 'e2e: 保存後の自動リフレッシュで ±カウントが変わらない (E2E-R1 欠落)' >&2
+  exit 1
+}
+
 # --- PR mode (issue #6: worktree / gh スタブ + 実 git) --------------------
 # pr-worktree.md「テスト方針」E2E + DoD シナリオ 1〜5。gh は PATH スタブ、
 # origin はローカル bare (refs/pull/7/head を置く = fork PR 模擬)。
@@ -294,4 +318,4 @@ if git -C "$REPO_PR" rev-parse --verify -q review-nvim/pr-7 >/dev/null; then
 fi
 [ ! -f "$(JSON_OF "$D_PR5")" ] || { echo 'e2e: delete 後にセッション JSON が残っている' >&2; exit 1; }
 
-echo "e2e: OK — golden path line=$L1 + PR worktree (o 実ファイル / close 掃除 / crash 回復 / --force 確認 / delete dir+ref)"
+echo "e2e: OK — golden path line=$L1 + 保存時リフレッシュ (E2E-R1) + PR worktree (o 実ファイル / close 掃除 / crash 回復 / --force 確認 / delete dir+ref)"
