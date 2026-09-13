@@ -2194,3 +2194,439 @@ describe('sidebar 絞り込み (`/`)', function()
     assert.equals(0, #state.notifications)
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- 保存時リフレッシュ (diff-review.md「リフレッシュ (未コミット反映契約)」)。
+-- BufWritePost -> `git diff <base>` 再取得 -> 再パース -> anchor 検証 ->
+-- ±カウント・panel・winbar 再適用 -> :diffupdate -> 永続化。in-flight まとめ /
+-- 失敗保持 / close・切替時の active guard を応答キューで pin する。
+-- ---------------------------------------------------------------------------
+
+-- 保存後の作業ツリーを模擬する 2 回目の差分: a.lua は +2 増で line2 が行 4 へ
+-- 後退 (anchor ±20 補正の対象)。c.lua が新規出現、b.lua は差分から消滅
+-- (outdated 化 + files の消失ファイル保持)。a.lua の ±は +1 -> +2 に動く。
+local RAW_DIFF_V2 = table.concat({
+  'diff --git a/a.lua b/a.lua',
+  'index 1111111..2222222 100644',
+  '--- a/a.lua',
+  '+++ b/a.lua',
+  '@@ -1 +1,4 @@',
+  ' line1',
+  '+insA',
+  '+insB',
+  ' line2',
+  'diff --git a/c.lua b/c.lua',
+  'new file mode 100644',
+  'index 0000000..4444444',
+  '--- /dev/null',
+  '+++ b/c.lua',
+  '@@ -0,0 +1 @@',
+  '+c1',
+  '',
+}, '\n')
+
+-- install_git の `git diff` のみ on_exit を遅延発火するスタブ (DESIGN「既知の
+-- 制約」: 既定注入スタブは同期なので in-flight まとめ / close 中解決の順序契約
+-- は遅延スタブでなければ観測できない)。deferred に応答を 1 呼べる。
+local function install_git_deferred_diff(responses)
+  state.git_calls = {}
+  state.git_opts = {}
+  state.deferred = nil
+  state.diff_calls = 0
+  cli._set_system(function(cmd, opts, on_exit)
+    local idx = #state.git_calls + 1
+    table.insert(state.git_calls, cmd)
+    state.git_opts[idx] = opts
+    if cmd[2] == 'diff' then
+      state.diff_calls = state.diff_calls + 1
+      -- 解決コール内で次の deferred が登録される (追い fetch)。自分の分だけを
+      -- 掃除する (後発を nil で潰さない)。
+      local wrap
+      wrap = function(res)
+        on_exit(res)
+        if state.deferred == wrap then
+          state.deferred = nil
+        end
+      end
+      state.deferred = wrap
+      return
+    end
+    if responses[idx] == nil then
+      error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
+    end
+    on_exit(responses[idx](cmd, opts))
+  end)
+  cli._set_executable(function()
+    return 1
+  end)
+end
+
+-- 保存されたセッションファイル実体の fake バッファ (review:// 以外の名前が
+-- auto refresh の会員条件)。BufWritePost は exec_autocmds で発火させる
+-- (headless で :w 実書き込みより決定的。契約の本体は「buffer イベント」)。
+local function session_file_buf(path)
+  local name = REPO_TOP .. '/' .. path
+  local buf = vim.fn.bufnr(name)
+  if buf ~= -1 and vim.api.nvim_buf_is_valid(buf) then
+    return buf
+  end
+  buf = vim.api.nvim_create_buf(false, false)
+  vim.api.nvim_buf_set_name(buf, name)
+  return buf
+end
+
+local function fire_buf_write_post(buf)
+  vim.api.nvim_exec_autocmds('BufWritePost', { buffer = buf, modeline = false })
+end
+
+-- 開始済みセッションにコメントを 2 件植えて save (a.lua は補正対象、
+-- b.lua はリフレッシュで痕跡消失 -> outdated 対象)。
+local function seed_two_comments()
+  session_handler.active().comments = {
+    {
+      id = 'c1',
+      file = 'a.lua',
+      line = 2,
+      end_line = 2,
+      body = 'shift me',
+      anchor = { before = 'line1', line = 'line2', after = vim.NIL },
+      state = 'active',
+      created_at = 100,
+    },
+    {
+      id = 'c2',
+      file = 'b.lua',
+      line = 1,
+      end_line = 1,
+      body = 'gone',
+      anchor = { before = vim.NIL, line = 'b1', after = vim.NIL },
+      state = 'active',
+      created_at = 101,
+    },
+  }
+  session_handler.commit_comment_change() -- INV-4 save (リフレッシュ前の基準状態)
+end
+
+describe(
+  '保存時リフレッシュ (diff-review「リフレッシュ (未コミット反映契約)」)',
+  function()
+    use_env()
+    after_each(function()
+      session_handler._set_diffupdate(nil)
+      -- 疑似 repo-top バッファは tab と無関係に生きるので明示掃除
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        local name = vim.api.nvim_buf_get_name(buf)
+        if vim.api.nvim_buf_is_valid(buf) and name:sub(1, #REPO_TOP) == REPO_TOP then
+          pcall(vim.api.nvim_buf_delete, buf, { force = true })
+        end
+      end
+    end)
+
+    it(
+      'BufWritePost -> git 再取得 -> parse -> anchor 検証 -> save の順 (±カウント・panel・winbar 更新)',
+      function()
+        start_done('main', 'feature')
+        seed_two_comments()
+
+        install_git {
+          function()
+            return diff_ok(RAW_DIFF_V2)
+          end,
+          -- head commit 比較 (通常経路は一致 = INFO なし)
+          RP_HEAD_MATCH[1],
+          RP_HEAD_MATCH[2],
+        }
+        fire_buf_write_post(session_file_buf 'a.lua')
+
+        -- 応答キューの呼び出し順が仕様の一部 (DESIGN「development」)。差分再取得は
+        -- head 解決と一致する単引数形 (作業ツリー基準)、その後 commit 比較。
+        assert.same({ 'git', 'diff', 'main' }, state.git_calls[1])
+        assert.same({ 'git', 'rev-parse', '--verify', 'feature' }, state.git_calls[2])
+        assert.same({ 'git', 'rev-parse', '--verify', 'HEAD' }, state.git_calls[3])
+        assert.equals(3, #state.git_calls)
+        assert.equals(0, #state.notifications)
+
+        -- 再パース -> anchor 検証 -> save の順序はディスク JSON の補正で観測
+        -- (INV-4: 永続化はメモリ状態ではなくディスクで判定)。
+        local saved = load_saved()
+        assert.same({
+          {
+            id = 'c1',
+            file = 'a.lua',
+            line = 4, -- 'line2' が new 側行 4 へ移動、±20 内補正
+            end_line = 4,
+            body = 'shift me',
+            anchor = { before = 'line1', line = 'line2', after = vim.NIL },
+            state = 'active',
+            created_at = 100,
+          },
+          {
+            id = 'c2',
+            file = 'b.lua',
+            line = 1, -- outdated でも保存値のまま保持
+            end_line = 1,
+            body = 'gone',
+            anchor = { before = vim.NIL, line = 'b1', after = vim.NIL },
+            state = 'outdated',
+            created_at = 101,
+          },
+        }, saved.comments)
+        assert.same({
+          ['a.lua'] = { viewed = false },
+          ['b.lua'] = { viewed = false },
+          ['c.lua'] = { viewed = false },
+        }, saved.files)
+
+        -- ±カウント・panel 再適用 (b.lua は消失ファイルとしてコメント保持側に残る)
+        assert.same(
+          { 'M a.lua +2 -0', 'M b.lua +0 -0', 'A c.lua +1 -0' },
+          vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
+        )
+        -- winbar / (threads は diff バッファの extmark として render 側で再適用)
+        assert.equals(
+          'main..feature · a.lua · +2 -0 · 1 comment',
+          vim.b[vim.fn.bufnr(DIFF_A_NAME)].review_winbar
+        )
+      end
+    )
+
+    it(
+      'in-flight 中の保存は dirty まとめ (再取得 1 本のまま)、完了後の追い fetch は 1 回だけ',
+      function()
+        start_done('main', 'feature')
+        install_git_deferred_diff {
+          nil, -- diff #1 (deferred: placeholder)
+          RP_HEAD_MATCH[1],
+          RP_HEAD_MATCH[2],
+          nil, -- diff #2 (追い fetch: deferred)
+          RP_HEAD_MATCH[1],
+          RP_HEAD_MATCH[2],
+        }
+
+        session_handler.refresh() -- #1 発射
+        fire_buf_write_post(session_file_buf 'a.lua') -- in-flight 中 -> dirty
+        fire_buf_write_post(session_file_buf 'a.lua') -- 2 回目の保存もまとめ
+
+        assert.equals(1, state.diff_calls) -- 多重 fetch しない
+        assert.is_true(state.deferred ~= nil)
+
+        state.deferred(diff_ok(RAW_DIFF_V2)) -- #1 解決 -> apply -> dirty -> 追い 1 本
+
+        assert.equals(2, state.diff_calls)
+        assert.is_true(state.deferred ~= nil)
+
+        state.deferred(diff_ok(RAW_DIFF_V2)) -- 追い fetch 解決 -> ここで完了
+
+        assert.equals(2, state.diff_calls)
+        -- 適用は 1 回まとめの最終状態で完了 (b.lua はコメントのない消失ファイル =
+        -- 一覧からも落ちる。補正詳細は BufWritePost 側のテストで pin)。
+        assert.same(
+          { 'M a.lua +2 -0', 'A c.lua +1 -0' },
+          vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
+        )
+        assert.equals(0, #state.notifications)
+      end
+    )
+
+    it(
+      '再取得失敗は WARN + 前回 parse 保持 (ディスクも panel も無変更)',
+      function()
+        start_done('main', 'feature')
+        seed_two_comments()
+        local before_saved = load_saved()
+        local before_sidebar = vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
+
+        install_git {
+          function()
+            -- 実 git と同じ shape (fatal 主行 + usage 続き)
+            return {
+              code = 128,
+              stdout = '',
+              stderr = "fatal: bad revision 'main'\nusage: git diff [<options>]\n",
+            }
+          end,
+        }
+        fire_buf_write_post(session_file_buf 'a.lua')
+
+        assert.same({ 'git', 'diff', 'main' }, state.git_calls[1])
+        assert.equals(1, #state.git_calls) -- 失敗後は commit 比較も追い fetch も走らない
+        assert.same({
+          msg = 'review.nvim: 差分の再取得に失敗しました。現在の表示とコメントを保持します: '
+            .. "レビュー対象 ref が解決できません: 'main'。存在するブランチ/コミットを"
+            .. '指定してください (start の base/head 引数は <Tab> で補完できます)',
+          level = vim.log.levels.WARN,
+        }, state.notifications[1])
+        assert.equals(1, #state.notifications)
+        assert.same(before_saved, load_saved())
+        local after_sidebar = vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
+        assert.same(before_sidebar, after_sidebar)
+      end
+    )
+
+    it(
+      'close 最中に in-flight が解決しても適用しない (active guard: disk も UI も触らない)',
+      function()
+        start_done('main', 'feature')
+        install_git_deferred_diff { nil }
+        session_handler.refresh()
+        fire_buf_write_post(session_file_buf 'a.lua') -- dirty も設定されるが無効化対象
+        assert.equals(1, state.diff_calls)
+
+        session_handler.close() -- コメント 0 件 = 無確認で閉じる (in-flight/dirty 無効化)
+        assert.is_nil(session_handler.active())
+
+        state.deferred(diff_ok(RAW_DIFF_V2)) -- 解決: 対象セッションはもう active でない
+
+        assert.equals(1, state.diff_calls) -- 結果破棄 = 追い fetch も走らない
+        assert.equals('closed', load_saved().status)
+        assert.same(
+          { ['a.lua'] = { viewed = false }, ['b.lua'] = { viewed = false } },
+          load_saved().files -- c.lua 再パース結果が書き戻されていない
+        )
+        assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME)) -- 再描画で窓も復活しない
+        assert.equals(0, #state.notifications)
+      end
+    )
+
+    it(
+      'リフレッシュの再取得は scratch 縮退セッションで <base> <head> 2 引数形 (開始時解決と一致)',
+      function()
+        install_git {
+          top_ok,
+          RP_HEAD_MISMATCH[1],
+          RP_HEAD_MISMATCH[2],
+          showref_ok,
+          status_clean,
+          function()
+            return diff_ok(RAW_DIFF_A_B)
+          end,
+        }
+        state.input_answer = 'n' -- switch 提案を拒否 = 縮退解で開始
+        session_handler.start { base = 'main', head = 'feature' }
+
+        install_git {
+          function()
+            return diff_ok(RAW_DIFF_V2)
+          end,
+        }
+        session_handler.refresh()
+
+        assert.same({ 'git', 'diff', 'main', 'feature' }, state.git_calls[1])
+        -- 縮退は作業ツリーを見ないので head commit 比較も走らない (1 本だけ)
+        assert.equals(1, #state.git_calls)
+        assert.same(DEGRADED_MSG, state.notifications[1])
+        assert.equals(1, #state.notifications)
+      end
+    )
+
+    it(
+      'リフレッシュの再取得は pr で cwd=worktree の単引数形 (開始時解決と一致・HEAD 比較なし)',
+      function()
+        started_with_worktree()
+
+        install_git {
+          function()
+            return diff_ok(RAW_DIFF_V2)
+          end,
+        }
+        session_handler.refresh()
+
+        assert.same({ 'git', 'diff', 'main' }, state.git_calls[1])
+        assert.equals(wt_path(), state.git_opts[1].cwd)
+        -- PR は worktree を --detach するため HEAD 比較は恒真 (誤発火) -> 呼ばない
+        assert.equals(1, #state.git_calls)
+        assert.equals(0, #state.notifications)
+      end
+    )
+
+    it(
+      'head と現在の HEAD の commit 違いを INFO 1 回 (処理は続行)、告知後は比較打ち切り',
+      function()
+        start_done('main', 'feature')
+
+        -- #1: commit 一致 -> INFO なし (比較の 2 rev-parse は走る)
+        install_git {
+          function()
+            return diff_ok(RAW_DIFF_V2)
+          end,
+          RP_HEAD_MATCH[1],
+          RP_HEAD_MATCH[2],
+        }
+        session_handler.refresh()
+        assert.same({ 'git', 'rev-parse', '--verify', 'feature' }, state.git_calls[2])
+        assert.same({ 'git', 'rev-parse', '--verify', 'HEAD' }, state.git_calls[3])
+        assert.equals(0, #state.notifications)
+
+        -- #2: head=OTHER / HEAD=SAME -> 不一致 INFO 1 回 + 適用は進む (定義は
+        -- base vs 現在のチェックアウトであり処理を止めない)
+        install_git {
+          function()
+            return diff_ok(RAW_DIFF_V2)
+          end,
+          function()
+            return { code = 0, stdout = OTHER_SHA .. '\n', stderr = '' }
+          end,
+          RP_HEAD_MATCH[2],
+        }
+        session_handler.refresh()
+        assert.same({
+          msg = 'review.nvim: セッション開始時の head と現在のチェックアウトが違います',
+          level = vim.log.levels.INFO,
+        }, state.notifications[1])
+        assert.equals(1, #state.notifications)
+        assert.same(
+          { 'M a.lua +2 -0', 'A c.lua +1 -0' },
+          vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
+        )
+
+        -- #3: 告知済み -> rev-parse 比較は以後走らない (save ごとに同じ告知を出さ
+        -- ない。余剰呼び出しは stub が error で弾く)
+        install_git {
+          function()
+            return diff_ok(RAW_DIFF_V2)
+          end,
+        }
+        session_handler.refresh()
+        assert.equals(1, #state.git_calls)
+        assert.equals(1, #state.notifications)
+      end
+    )
+
+    it(
+      ':diffupdate はセッション実ファイルの &diff 窓だけに発火 (セッション外のユーザー diff 窓は触らない)',
+      function()
+        local fired = {}
+        started_with_worktree()
+        session_handler._set_diffupdate(function(win)
+          fired[#fired + 1] = vim.api.nvim_win_get_buf(win)
+        end)
+
+        -- worktree 実ファイル (= 将来 head 窓が張る対象と同じ path 契約) を &diff で見る窓
+        local abuf = vim.api.nvim_create_buf(false, false)
+        vim.api.nvim_buf_set_name(abuf, wt_path() .. '/a.lua')
+        vim.cmd 'vsplit'
+        vim.api.nvim_win_set_buf(0, abuf)
+        vim.api.nvim_win_set_option(0, 'diff', true)
+        -- ユーザー自分の別ツリーの diff 窓 (セッション会員外)
+        local obuf = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_buf_set_name(obuf, '/tmp/review-spec-outside/x.lua')
+        vim.cmd 'vsplit'
+        vim.api.nvim_win_set_buf(0, obuf)
+        vim.api.nvim_win_set_option(0, 'diff', true)
+
+        -- 会員 &diff 窓のバッファへ BufWritePost -> 再取得適用後に :diffupdate が
+        -- 発火する窓は「会員 &diff 窓」だけ (ユーザー窓・scratch 窓は不発火)。
+        install_git {
+          function()
+            return diff_ok(RAW_DIFF_V2)
+          end,
+        }
+        vim.api.nvim_exec_autocmds('BufWritePost', { buffer = abuf, modeline = false })
+
+        assert.same({ abuf }, fired)
+
+        pcall(vim.api.nvim_buf_delete, obuf, { force = true })
+      end
+    )
+  end
+)

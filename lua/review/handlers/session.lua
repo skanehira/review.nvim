@@ -31,14 +31,26 @@ function M._set_now(fn)
   now = fn or os.time
 end
 
--- active = { session, files_by_path, file_order, sidebar_buf, sidebar_win,
---            diff_win, diff_bufs = { [path] = bufnr } }
+-- active = { session, files_by_path, file_order, degraded, head_info_shown,
+--            sidebar_buf, sidebar_win, diff_win, diff_bufs = { [path] = bufnr } }
 local active = nil
 local sidebar_filter = nil -- sidebar 絞り込み (view state、session JSON に載せない)
+
+-- リフレッシュ in-flight まとめ (diff-review「リフレッシュ」): git diff 同時 1 本。
+-- in-flight 中は二重発火せず dirty マークだけ立て、完了後に追い fetch 1 回。
+-- close / 切替 (detach) で active とともに無効化する。
+local refresh_inflight = false
+local refresh_dirty = false
+
+local function reset_refresh_state()
+  refresh_inflight = false
+  refresh_dirty = false
+end
 
 function M._reset()
   active = nil
   sidebar_filter = nil
+  reset_refresh_state()
 end
 
 --- 起動中のセッション (UI が開いているもの)。無ければ nil (INV-1 で高々 1)。
@@ -315,6 +327,9 @@ local function detach()
   local current = active
   active = nil
   sidebar_filter = nil
+  -- close / 切替時の in-flight・dirty 無効化 (リフレッシュ契約)。解決済み
+  -- コールバック側の破棄は active 同一性比較 (refresh の guard) が担う。
+  reset_refresh_state()
   close_buffer(current.sidebar_buf)
   for _, buf in pairs(current.diff_bufs) do
     close_buffer(buf)
@@ -623,46 +638,28 @@ local function open_session_ui()
   sweep_empty_wins()
 end
 
--- files_by_path から sidebar 用の並びを作る (parse の出現順 = file_order)。
--- args = { repo, id, mode, base, head, pr, info? } (pr-worktree.md「PR 解決」3 の
--- 開始時に handler が組み立てる)。worktree は解決済み値 (記録 | vim.NIL) を受ける。
-local function begin_session(args, files, existing, worktree)
+-- 直近 parse (new 側) 差分 files からファイル状態を組み替える: files_by_path /
+-- file_order / session.files (viewed とコメント由来の消失ファイルを保持) /
+-- sidebar 昇順一覧。anchor 検証と「差分がまるごと消滅 -> 全コメント outdated」は
+-- text_map 経路ここだけ (persistence-restore「anchor 検証」= 復元とリフレッシュで
+-- 同一。開始 / 復元 / リフレッシュの 3 経路で規則を重複させない)。
+-- session.files を更新し、(files_by_path, file_order, sorted) を返す。
+local function build_file_state(session, files)
   local files_by_path = {}
   local file_order = {}
   for _, file in ipairs(files) do
     files_by_path[file.path] = file
     file_order[#file_order + 1] = file.path
   end
-
-  local session = existing
-  if session == nil then
-    session = {
-      id = args.id,
-      repo = args.repo,
-      mode = args.mode,
-      base = args.base,
-      head = args.head,
-      pr = args.pr or vim.NIL,
-      worktree = vim.NIL,
-      status = 'open',
-      files = {},
-      comments = {},
-      created_at = now(),
-    }
-  else
-    anchor.verify(session.comments, files_by_path)
-    if #files == 0 then
-      -- 「差分がまるごと消滅」復元: 再取得差分が 0 ファイルなら anchor 照合の
-      -- 余地が無いので全コメントを outdated 化する (persistence-restore.md。
-      -- anchor 欠損で検証スキップの active を残さない)。
-      for _, comment in ipairs(session.comments) do
-        comment.state = 'outdated'
-      end
+  anchor.verify(session.comments, files_by_path)
+  if #files == 0 then
+    -- 「差分がまるごと消滅」: 再取得差分が 0 ファイルなら anchor 照合の余地が
+    -- 無いので全コメントを outdated 化する (persistence-restore.md。anchor 欠損
+    -- で検証スキップの active を残さない)。
+    for _, comment in ipairs(session.comments) do
+      comment.state = 'outdated'
     end
   end
-  session.status = 'open'
-  -- 作成判断の解を毎回上書き (crash 後の記録陳腐化を許さない — pr-worktree.md 異常終了回復)。
-  session.worktree = worktree
 
   -- files = 差分に出る全ファイル + コメントを持つ消失ファイル (outdated 表示先)。
   local old_files = session.files or {}
@@ -703,14 +700,48 @@ local function begin_session(args, files, existing, worktree)
   table.sort(sorted, function(a, b)
     return a.path < b.path
   end)
+  return files_by_path, file_order, sorted
+end
+
+-- args = { repo, id, mode, base, head, pr, info?, degraded? } (pr-worktree.md
+-- 「PR 解決」3 の開始時に handler が組み立てる)。worktree は解決済み値
+-- (記録 | vim.NIL) を受ける。degraded = head 解決の scratch 縮退解 (リフレッシュの
+-- 再取得引数形を開始時解決と一致させるため active に保持する。session JSON には
+-- 載せない — 復元時に head 解決フローを毎回再評価する)。
+local function begin_session(args, files, existing, worktree)
+  local session = existing
+  if session == nil then
+    session = {
+      id = args.id,
+      repo = args.repo,
+      mode = args.mode,
+      base = args.base,
+      head = args.head,
+      pr = args.pr or vim.NIL,
+      worktree = vim.NIL,
+      status = 'open',
+      files = {},
+      comments = {},
+      created_at = now(),
+    }
+  end
+  session.status = 'open'
+  -- 作成判断の解を毎回上書き (crash 後の記録陳腐化を許さない — pr-worktree.md 異常終了回復)。
+  session.worktree = worktree
+
+  local files_by_path, file_order, sorted = build_file_state(session, files)
 
   -- 開き直し = 全一覧が正しい (前回の絞り込みを持ち込まない)
   sidebar_filter = nil
+  reset_refresh_state()
   active = {
     session = session,
     files_by_path = files_by_path,
     file_order = file_order,
     file_order_sorted = sorted,
+    degraded = args.degraded == true,
+    -- リフレッシュ時 head commit 比較の INFO を 1 回に抑えるラッチ (セッション別)
+    head_info_shown = false,
     sidebar_buf = nil,
     sidebar_win = nil,
     diff_win = nil,
@@ -936,7 +967,17 @@ local function fetch_and_begin(args, existing)
       end
       return
     end
-    begin_session(args, res.data.files, existing, res.data.worktree)
+    begin_session({
+      repo = args.repo,
+      id = args.id,
+      mode = args.mode,
+      base = args.base,
+      head = args.head,
+      pr = args.pr,
+      info = args.info,
+      -- リフレッシュの再取得引数形を開始時解決に一致させる解 (active に保持)
+      degraded = res.data.degraded == true,
+    }, res.data.files, existing, res.data.worktree)
   end)
 end
 
@@ -1276,8 +1317,9 @@ end
 --- anchor 検証 -> files map 再構築 -> UI -> open save)。worktree の解決は
 --- fetch_prepared 側で済んでいるため、解 (記録 | vim.NIL) を受ける。
 --- 復元時の head 解決 (switch 提案 / scratch 縮退) も fetch_prepared が走る
---- (DESIGN.md 決定表「起動時復元」)。
-function M.resume_into(session, files, worktree)
+--- (DESIGN.md 決定表「起動時復元」)。degraded = その解で決まった縮退フラグ
+--- (リフレッシュの再取得引数形を開始時解決に一致させる)。
+function M.resume_into(session, files, worktree, degraded)
   begin_session({
     repo = session.repo,
     id = session.id,
@@ -1285,6 +1327,7 @@ function M.resume_into(session, files, worktree)
     base = session.base,
     head = session.head,
     pr = session.pr,
+    degraded = degraded == true,
   }, files, session, worktree)
 end
 
@@ -1472,5 +1515,202 @@ function M.toggle_viewed_current()
   persist()
   refresh_sidebar()
 end
+
+-- ============================================================================
+-- リフレッシュ (未コミット反映契約, docs/design/features/diff-review.md
+-- 「リフレッシュ」/ DESIGN 決定表「保存時再取得」)
+-- ============================================================================
+
+-- 窓 diff は `:w` 単体で再計算されない (DESIGN「既知の制約」huge-file-window-diff-
+-- perf 実測) ため、再取得適用後に &diff の実ファイル窓へ :diffupdate を明示発火
+-- する。窓 scan と呼ぶ側が契約で、実発火は注入可能 (spec は窓 diff の再計算自体で
+-- なく「対象窓への発火」を pin する。3 窓レイアウト導入前は該当窓は通常 0 個)。
+local function default_diffupdate(win)
+  vim.api.nvim_win_call(win, function()
+    pcall(vim.cmd, 'diffupdate')
+  end)
+end
+
+local diffupdate = default_diffupdate
+
+function M._set_diffupdate(fn)
+  diffupdate = fn or default_diffupdate
+end
+
+--- バッファがセッションレビュー対象ファイルの実体 (repo / worktree 配下の
+-- レビュー対象 path) なら repo 相対パス、そうでなければ nil を返す。
+-- review:// scratch・セッション外・対象外ファイルは全部 nil。realpath を両側に
+-- かます (macOS /var のシンボリックリンク等の系差)。存在しないパス (unit の fake top) は
+-- 素の正規化文字列に倒す。
+local function session_file_of(current, bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return nil
+  end
+  local name = vim.api.nvim_buf_get_name(bufnr)
+  if name == '' or name:match '^review://' ~= nil then
+    return nil
+  end
+  local full = vim.fn.fnamemodify(name, ':p')
+  local real = vim.uv.fs_realpath(full)
+  if real ~= nil then
+    full = real
+  end
+  local roots = { current.session.repo }
+  local wt = worktree_of(current.session)
+  if wt ~= nil then
+    roots[#roots + 1] = wt.path
+  end
+  for _, root in ipairs(roots) do
+    local r = vim.uv.fs_realpath(root) or vim.fn.fnamemodify(root, ':p')
+    r = (r:gsub('/+$', ''))
+    if full:sub(1, #r + 1) == r .. '/' then
+      local rel = full:sub(#r + 2)
+      if current.files_by_path[rel] ~= nil then
+        return rel
+      end
+    end
+  end
+  return nil
+end
+
+-- 再取得結果を active に適用する (diff-review「リフレッシュ」の順序: 再パース ->
+-- anchor 検証 -> ±カウント・panel・スレッド・winbar 再適用 -> :diffupdate -> 永続化)。
+-- 開いている diff は状態から捨てて再構成 (commit_comment_change と同じ契約)。
+local function apply_refresh(current, files)
+  local session = current.session
+  local files_by_path, file_order, sorted = build_file_state(session, files)
+  current.files_by_path = files_by_path
+  current.file_order = file_order
+  current.file_order_sorted = sorted
+  for path, buf in pairs(current.diff_bufs) do
+    if vim.api.nvim_buf_is_valid(buf) and #vim.fn.win_findbuf(buf) > 0 then
+      if path == ui_diffbuffer.NO_DIFF_PATH then
+        ui_diffbuffer.render_no_changes(session)
+      else
+        ui_diffbuffer.render(session, current.files_by_path[path] or {
+          path = path,
+          status = 'M',
+          binary = false,
+          added = 0,
+          deleted = 0,
+          hunks = {},
+          vanished = true,
+        }, {})
+      end
+    end
+  end
+  refresh_sidebar()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if
+      vim.api.nvim_win_is_valid(win)
+      and vim.api.nvim_get_option_value('diff', { win = win })
+      and session_file_of(current, vim.api.nvim_win_get_buf(win)) ~= nil
+    then
+      diffupdate(win)
+    end
+  end
+  persist()
+end
+
+-- session.head と 現在の HEAD の commit 違いを 1 回だけ INFO する (diff-review
+-- 「リフレッシュ」4。処理は続行 — 定義上レビュー対象は base vs 現在のチェックアウト)。
+-- branch の通常経路のみ: PR は worktree を --detach するため比較が恒真で誤発火、
+-- scratch 縮退は再取得が作業ツリーを見ないので意味がない。告知済み (head_info_shown)
+-- は以後の比較を打ち切る — 同じ告知を保存ごとに繰り返さない (INFO は「1 回だけ」)。
+local HEAD_SWITCH_INFO =
+  'セッション開始時の head と現在のチェックアウトが違います'
+
+local function notify_head_switch_once(current)
+  if current.head_info_shown or current.degraded or current.session.mode ~= 'branch' then
+    return
+  end
+  git_ref.rev_parse({ ref = current.session.head, cwd = current.session.repo }, function(h)
+    -- 比較中 close/切替 = 破棄。解決できない ref を不一致とは断定しない。
+    if active ~= current or not h.ok then
+      return
+    end
+    git_ref.rev_parse({ ref = 'HEAD', cwd = current.session.repo }, function(cur)
+      if active ~= current or not cur.ok then
+        return
+      end
+      if cur.data ~= h.data then
+        current.head_info_shown = true
+        vim.notify('review.nvim: ' .. HEAD_SWITCH_INFO, vim.log.levels.INFO)
+      end
+    end)
+  end)
+end
+
+--- `R` / BufWritePost 共通のリフレッシュ調停 (キー登録は別 issue。ハンドラ直接
+--- 呼出で起動できることが契約)。`git diff` 再取得は開始時 head 解に一致する
+--- 引数形 (通常 = 作業ツリー基準の単引数 / scratch 縮退 = `<base> <head>` /
+--- pr = cwd worktree の単引数) -> 再パース -> anchor 検証 -> ±カウント・panel・
+--- スレッド・winbar 再適用 -> :diffupdate -> 永続化。
+--- in-flight 中の再入は fetch を増やさず dirty マークだけ (完了後追い fetch 1 回、
+--- 多重取得しない)。失敗は WARN + 前回 parse 保持 (ディスク・UI・コメント無変更)。
+--- close / 切替後はコールバックが active 同一性で結果を破棄する (call 前に確定)。
+function M.refresh()
+  if active == nil then
+    return
+  end
+  if refresh_inflight then
+    refresh_dirty = true
+    return
+  end
+  local current = active
+  local session = current.session
+  local cwd = session.repo
+  local head = nil
+  if session.mode == 'pr' then
+    cwd = worktree_of(session).path
+  elseif current.degraded then
+    head = session.head
+  end
+  refresh_inflight = true
+  git_diff.fetch({ base = session.base, head = head, cwd = cwd }, function(res)
+    if active ~= current then
+      -- close / 切替後の解決: 結果を破棄 (無効化済みの in-flight/dirty を触らない)
+      return
+    end
+    refresh_inflight = false
+    local follow = refresh_dirty
+    refresh_dirty = false
+    if not res.ok then
+      local reason = res.code == result.codes.E_REF and usermsg.git_ref_error(res.error)
+        or res.error
+      notify_warn(
+        ('差分の再取得に失敗しました。現在の表示とコメントを保持します: %s'):format(
+          reason
+        )
+      )
+      if follow then
+        M.refresh() -- まとめられた保存分の再取得は試みる (失敗時のみ再度 WARN)
+      end
+      return
+    end
+    apply_refresh(current, res.data.files)
+    notify_head_switch_once(current)
+    if follow then
+      M.refresh()
+    end
+  end)
+end
+
+-- BufWritePost 自動リフレッシュ (diff-review「リフレッシュ」1)。head 窓での保存も、
+-- 同一バッファがユーザー窓から書かれたときも同じ buffer イベントなのでグローバル
+-- 登録し、コールバックで active とセッション会員を判定して弾く (非レビュー中の
+-- 保存は何もしない = ユーザー操作への影響ゼロ)。
+vim.api.nvim_create_autocmd('BufWritePost', {
+  desc = 'review.nvim: 保存した差分の自動リフレッシュ',
+  callback = function(ev)
+    if active == nil then
+      return
+    end
+    if session_file_of(active, ev.buf) == nil then
+      return
+    end
+    M.refresh()
+  end,
+})
 
 return M

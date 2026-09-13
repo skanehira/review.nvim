@@ -54,7 +54,9 @@ local function fetch_and_resume(session)
       notify_warn(res.error)
       return
     end
-    session_handler.resume_into(session, res.data.files, res.data.worktree)
+    -- degraded = head 解決の縮退解。リフレッシュの再取得引数形を開始時解決に
+    -- 一致させるため active に引き渡す (diff-review「リフレッシュ」)。
+    session_handler.resume_into(session, res.data.files, res.data.worktree, res.data.degraded)
   end)
 end
 
