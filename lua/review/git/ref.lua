@@ -187,4 +187,21 @@ function M.remotes(opts, cb)
   end)
 end
 
+--- cb(result) result.data = `git show <ref>:<path>` の stdout 行配列 (base /
+--- 縮退 head scratch の充填に使う。ファイル 1 個の全文なので末尾改行で増えた
+--- 空最終行は落とす)。ref/path 解決不能は失敗結果 (E_REF)。
+function M.show_text(opts, cb)
+  run({ 'show', (opts.ref or '') .. ':' .. (opts.path or '') }, opts, function(res)
+    if not res.ok then
+      cb(res)
+      return
+    end
+    local lines = vim.split(res.data.stdout or '', '\n', { plain = true })
+    if #lines > 0 and lines[#lines] == '' then
+      table.remove(lines)
+    end
+    cb(result.ok(lines))
+  end)
+end
+
 return M

@@ -6,11 +6,10 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 
 ## 特徴
 
-- ブランチ間 / コミット間の差分を 2 ペイン表示 (変更ファイル一覧 + unified diff) し、行指定でコメントを作成・編集・削除
+- 差分は専有 tabpage の 3 窓 (file panel │ base │ head) の**窓 diff** で確認。head 窓は実ファイルなので編集も LSP も効いたままレビューできる。file panel はトグル可
 - ブランチレビューは head を worktree にしない (現在のチェックアウトの作業ツリーが対象)。`head 省略 = 現在のブランチを自動採用`
 - コメント・viewed 状態をセッションとして自動保存。再起動後に `:Review` で復元 (`stdpath("data")` 配下に JSON、Neovim が異常終了しても起動時に検出して通知)
-- 保存した差分は自動でレビューに反映。レビュー対象のファイルを保存 (`:w`) すると差分を再取得し、±カウント・コメント位置 (anchor)・プロンプトが直近保存基準で更新される。未保存のバッファ編集は表示にだけ映る
-- `:Review pr <番号|URL>` で gh 連携。head を worktree に展開し、`o` でその行の実ファイルを開ける (差分内容と同一の実ファイルなので AI への input としてそのまま読ませられる)
+- `:Review pr <番号|URL>` で gh 連携。head を worktree に展開し、レビュー tab はその worktree に tcd される (head 窓 = worktree 内の実ファイル。レビュー終了時に worktree はクリーンアップされる)
 - コメントを `@path#L<行>` 形式のプロンプトとしてクリップボード / レジスタへコピー
 - ランタイム依存ゼロ (Neovim 標準 API のみ)
 
@@ -37,7 +36,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 
 マネージャを使わず `rtp` に直接足す場合は、clone 先の `doc/` に対して `:helptags <repo>/doc` を 1 回実行すると `:h review` が引けるようになります。
 
-`setup()` は省略可能 (既定値で動作 — 起動時のセッション復元通知・worktree 残骸掃除も設定なしで動きます)。設定項目 (`git_bin` / `gh_bin` / `diff_context` / `auto_notify_resume` / `keymaps` / `highlight` / `winbar` / `number`) は `:h review-setup` を参照。
+`setup()` は省略可能 (既定値で動作 — 起動時のセッション復元通知・worktree 残骸掃除も設定なしで動きます)。設定項目 (`git_bin` / `gh_bin` / `diff_context` / `auto_notify_resume` / `panel_width` / `keymaps` / `highlight` / `winbar` / `number`) は `:h review-setup` を参照。
 
 ## 使い方
 
@@ -48,8 +47,6 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 :Review start main              " head 省略 = 現在のブランチを自動採用・保存
                                 " (ブランチ名は <Tab> で branches -> tags 順に補完)
                                 " 作業ツリー基準なので未コミット変更もレビュー対象
-                                " レビュー対象ファイルを :w すると差分を自動再取得
-                                " (カウント・プロンプトは保存済み内容基準)
                                 " :Review delete の <id> と :Review pr の番号も <Tab> で補完
                                 " 同一 refs 組の保存済みセッションがある場合は
                                 " 「継承して comments/viewed を引き継ぐか」の [y/N] 確認が出る
@@ -64,26 +61,27 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 
 ### キーマップ
 
-| 場所       | キー                              | 動作                                 |
-| ---------- | --------------------------------- | ------------------------------------ |
-| diff       | `c` (normal / visual-line)        | コメント作成 (visual は範囲)         |
-| diff       | `e` / `d`                         | コメント編集 / 削除 (d は確認の二重押し) |
-| diff       | `y`                               | カーソル行コメントのプロンプトを yank |
-| diff       | `o`                               | その行の実ファイルを開く             |
-| diff       | `q` / `<F1>`                      | セッション終了 / help                |
-| diff       | `]d` / `[d`                        | 次 / 前のファイル (一覧順。端は無動作) |
-| diff       | `S`                               | 変更一覧へ移動                       |
-| diff       | `i`                               | カーソル行のコメント全文を閲覧        |
-| 変更一覧   | `<CR>` / `o` / `x` / `/` / `q`    | diff 表示 / 実ファイル / viewed 切替 / 絞り込み |
-| セッション一覧 | `<CR>` / `q` / `d`            | 開く / 閉じる / 削除                 |
+| 場所                | キー                              | 動作                                 |
+| ------------------- | --------------------------------- | ------------------------------------ |
+| レビュー窓 (head/base) | `c` (normal / visual-line)     | コメント作成 (visual は範囲。head 窓のみ) |
+| レビュー窓          | `e` / `d`                         | コメント編集 / 削除 (d は確認の二重押し) |
+| レビュー窓          | `y`                               | カーソル行コメントのプロンプトを yank |
+| レビュー窓          | `o`                               | そのファイルの実ファイルを別 tab で開く |
+| レビュー窓          | `q` / `<F1>`                      | セッション終了 / help                |
+| レビュー窓          | `]d` / `[d`                        | 次 / 前のファイル (一覧順。端は無動作) |
+| レビュー窓          | `S` / `<leader>e`                 | file panel へ移動                    |
+| レビュー窓          | `<leader>b`                       | file panel 表示トグル                |
+| レビュー窓          | `i`                               | カーソル行のコメント全文を閲覧        |
+| file panel          | `<CR>` / `o` / `x` / `/` / `q`    | head/base に開く / 実ファイル / viewed 切替 / 絞り込み |
+| セッション一覧      | `<CR>` / `q` / `d`                | 開く / 閉じる / 削除                 |
 
-すべて buffer-local で `setup` の `keymaps` から変更可能 (設定キー名と既定値は `:h review-keymaps`)。例:
+すべて buffer-local で `setup` の `keymaps` から変更可能 (設定キー名と既定値は `:h review-keymaps`)。レビュー窓のキーは押した時点の窓 role を照合して発火するので、ユーザーが自分の窓で同じ実ファイルを見ていてもレビュー操作は誤発火しません (gate を通らない窓では 1 キーストロークが built-in 動作に戻ります)。例:
 
 ```lua
 require('review').setup({ keymaps = { diff = { add_comment = 'gc' } } })
 ```
 
-diff バッファは `wrap=off` + `foldmethod=expr` で、大きい hunk は畳まれた状態で開く。`za` / `zo` / `zR` (Neovim 標準) で展開するか、`o` で実ファイルを開いて読む。hunk 間は `[c` / `]c` (diff filetype 標準)、ファイル間は `]d` / `[d` で移動する。
+head/base の 2 窓は Neovim 標準の窓 diff (`foldmethod=diff`) で、変更行は `DiffAdd` / `DiffDelete` 系の標準 highlight で色分けされます。hunk 間は `[c` / `]c` (標準)、fold は `za` / `zo` / `zR` (標準) で、レビュー側からのキーマップはありません。ファイル間は `]d` / `[d`、変更一覧は `S` / `<leader>e`、一覧のトグルは `<leader>b` で移動します。
 
 `c` / `e` で開くコメント入力ウィンドウは、本文入力中 (insert) は **`<CR>` = 改行**、`q` などで Normal に戻ったあと **`<CR>` = 確定** して閉じる。本文があるときは `q` では閉じず (誤って入力を捨てないため)、続けて `q` を押したときだけ破棄して閉じる。`<C-y>` は insert 中の確定、`<Esc>` は Normal に戻るだけで窓は閉じない。操作はウィンドウのタイトルと `<F1>` の help にも表示される。
 

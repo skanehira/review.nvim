@@ -56,26 +56,53 @@ end
 describe('list.render_sidebar', function()
   use_env()
 
-  it('sidebar buf に refs/ファイル数/コメント数の winbar 文字列が入る', function()
-    local buf = list.render_sidebar({
-      version = 1,
-      id = 'main--feature',
-      repo = '/r',
-      mode = 'branch',
-      base = 'main',
-      head = 'feature',
-      pr = vim.NIL,
-      worktree = vim.NIL,
-      status = 'open',
-      files = {},
-      comments = { { id = 'c1' } },
-      created_at = 1,
-      updated_at = 1,
-    }, {
-      { path = 'a.lua', status = 'M', binary = false, added = 1, deleted = 0 },
-    })
-    assert.equals('main..feature · 1 file · 1 comment', vim.b[buf].review_winbar)
-  end)
+  it(
+    'sidebar の winbar 文字列は窓側経路 (b: に置かず sidebar_winbar が返す)',
+    function()
+      local session = {
+        version = 1,
+        id = 'main--feature',
+        repo = '/r',
+        mode = 'branch',
+        base = 'main',
+        head = 'feature',
+        pr = vim.NIL,
+        worktree = vim.NIL,
+        status = 'open',
+        files = {},
+        comments = { { id = 'c1' } },
+        created_at = 1,
+        updated_at = 1,
+      }
+      local files = { { path = 'a.lua', status = 'M', binary = false, added = 1, deleted = 0 } }
+      local buf = list.render_sidebar(session, files)
+      assert.equals('main..feature · 1 file · 1 comment', list.sidebar_winbar(session, files))
+      -- b:review_winbar は実ファイル窓経由でユーザー窓へ漏れるため使わない (chrome 決定)
+      assert.is_nil(vim.b[buf].review_winbar)
+    end
+  )
+
+  it(
+    'sidebar_winbar は opts.hidden_outdated>0 のとき末尾に · ⚠N、0/省略では非表示',
+    function()
+      local session = session_stub { comments = { { id = 'c1' } } }
+      local files = { file_stub('a.lua', 'M', 1, 0) }
+      assert.equals('main..feature · 1 file · 1 comment', list.sidebar_winbar(session, files))
+      assert.equals(
+        'main..feature · 1 file · 1 comment',
+        list.sidebar_winbar(session, files, { hidden_outdated = 0 })
+      )
+      assert.equals(
+        'main..feature · 1 file · 1 comment · ⚠2',
+        list.sidebar_winbar(session, files, { hidden_outdated = 2 })
+      )
+      -- filter と併記 (contract の順序: ... · filter=… · ⚠N)
+      assert.equals(
+        'main..feature · 1 file · 1 comment · filter=a · ⚠1',
+        list.sidebar_winbar(session, files, { filter = 'a', hidden_outdated = 1 })
+      )
+    end
+  )
 
   it('パス昇順・`<status> <path> +a -d` 表示で viewed は行頭に [✓]', function()
     local session = session_stub {
@@ -178,7 +205,8 @@ describe('list.render_sessionlist', function()
       session_stub { id = 'a--b', base = 'a', head = 'b', updated_at = 1 },
       session_stub { id = 'c--d', base = 'c', head = 'd', updated_at = 1 },
     }
-    assert.equals('review.nvim · 2 sessions', vim.b[buf].review_winbar)
+    assert.equals('review.nvim · 2 sessions', list.sessionlist_winbar { 1, 2 })
+    assert.is_nil(vim.b[buf].review_winbar)
   end)
 
   it(

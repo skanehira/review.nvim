@@ -3,8 +3,8 @@
 --   (1) "0 / + / * レジスタへのコピーと provider 無し退路 (WARN)
 --   (2) active 不在 E_NOT_ACTIVE・0 件 / 全件 outdated の INFO 拒否・除外件数 INFO
 --   (3) y の見出しなし本文と outdated 既定除外
--- セッションは git スタブで実開始する (comments_spec と同じ土俵。UI 実バッファ経由で
--- カーソル行 -> new 側行 -> コメント検索の実経路を通す)。
+-- セッションは git スタブで実開始する (comments_spec と同じ土俵。head 実ファイル窓の
+-- 恒等行 (buffer 行 = new 側行) からカーソル行 -> コメント検索の実経路を通す)。
 local cli = require 'review.git.cli'
 local comments_handler = require 'review.handlers.comments'
 local config = require 'review.config'
@@ -12,12 +12,13 @@ local paths = require 'review.store.paths'
 local prompt_handler = require 'review.handlers.prompt'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
-
-local REPO_TOP = '/spec/repo-top'
-local SLUG = 'main--feature'
-local DIFF_A_NAME = 'review://diff/' .. SLUG .. '/a.lua'
+local ui_windows = require 'review.ui.windows'
 
 local SENTINEL = 'SENTINEL-MUST-NOT-BE-CLOBBERED'
+
+-- head (作業ツリー) の a.lua = new 側 5 行。head 実ファイル窓は :edit 相当の
+-- 実在ファイル経路なのでディスク実在が前提 (恒等行の源)。
+local HEAD_TEXT = table.concat({ 'one', 'two', 'three', 'four', 'six' }, '\n') .. '\n'
 
 local RAW_DIFF = table.concat({
   'diff --git a/a.lua b/a.lua',
@@ -35,6 +36,7 @@ local RAW_DIFF = table.concat({
 }, '\n')
 
 local REAL_NOTIFY = vim.notify
+local REAL_INPUT = vim.ui.input
 
 local state = {}
 
@@ -44,6 +46,12 @@ local function use_env()
     state = { notifications = {} }
     state.dir = vim.fn.tempname()
     vim.fn.mkdir(state.dir, 'p')
+    state.repo = vim.fs.joinpath(state.dir, 'repo')
+    vim.fn.mkdir(state.repo, 'p')
+    state.repo = vim.uv.fs_realpath(state.repo) or state.repo
+    local f = io.open(vim.fs.joinpath(state.repo, 'a.lua'), 'w')
+    f:write(HEAD_TEXT)
+    f:close()
     paths._set_data_dir(state.dir)
     store._set_now(function()
       return 4321
@@ -58,7 +66,10 @@ local function use_env()
     session_handler._reset()
     cli._set_system(function(cmd, _opts, on_exit)
       if cmd[2] == 'rev-parse' then
-        on_exit { code = 0, stdout = REPO_TOP .. '\n', stderr = '' }
+        on_exit { code = 0, stdout = state.repo .. '\n', stderr = '' }
+      elseif cmd[2] == 'show' then
+        -- base scratch 充填 (git show main:a.lua)
+        on_exit { code = 0, stdout = 'one\nfive deleted\nsix\n', stderr = '' }
       else
         on_exit { code = 0, stdout = RAW_DIFF, stderr = '' }
       end
@@ -70,6 +81,11 @@ local function use_env()
     vim.notify = function(msg, level)
       table.insert(state.notifications, { msg = msg, level = level })
     end
+    -- 3 窓 UI と review:// buf はプロセス共有 (comments_spec / session_spec と同型)。
+    if ui_windows.state() ~= nil then
+      ui_windows.close()
+    end
+    ui_windows.reset()
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
         vim.api.nvim_buf_delete(buf, { force = true })
@@ -103,28 +119,38 @@ local function use_env()
     state.tab = vim.api.nvim_get_current_tabpage()
     session_handler.start { base = 'main', head = 'feature' }
     state.session = session_handler.active()
-    -- worktree 無しブランチセッション (作成判断 skip = head==HEAD かつ porcelain 空) の
-    -- shape に揃える。この fixture の git stub は status --porcelain にも RAW_DIFF を
-    -- 返すため作成判断が「必要」に転び、自前 worktree 記録が入ってパス規則が絶対 path
-    -- 分岐へ化ける (#6 の worktree 作成判断入り込み後のあおり)。
-    -- この spec 群の意図は整形・コピー経路・provider 検出 (ai-prompt.md「パスの規則」の
-    -- repo 相対分岐) で、絶対 path 分岐は ctx マッピング describe と core/prompt_spec
-    -- が pin 済み。相対 @path の検証経路を壊さないため worktree を明示的に空にする。
-    state.session.worktree = vim.NIL
-    state.diff_buf = vim.fn.bufnr(DIFF_A_NAME)
-    state.diff_win = vim.fn.win_findbuf(state.diff_buf)[1]
-    vim.api.nvim_set_current_win(state.diff_win)
-    -- row3=' one'(new1) row4='+two'(2) row5='+three'(3) row6=' four'(4)
-    -- row7='-five'(del) row8=' six'(5)
+    -- head==HEAD 一致の通常経路 (作成判断は mode=pr のみで branch は worktree なし)。
+    -- head 実ファイル窓 (専有 tab 開通後 focus == head 窓)。恒等行: buffer 行 N =
+    -- new 側行 N (1 one / 2 two / 3 three / 4 four / 5 six)。
+    state.head_buf = vim.fn.bufnr(vim.fs.joinpath(state.repo, 'a.lua'))
+    state.head_win = ui_windows.win 'head'
+    vim.api.nvim_set_current_win(state.head_win)
   end)
   after_each(function()
+    -- close はコメントあり確認として vim.ui.input を引く (headless の既定 provider は
+    -- 無限待ちになるため 'y' 応答に戻してから閉じる)。
+    vim.ui.input = function(_, cb)
+      cb 'y'
+    end
+    session_handler.close()
+    vim.ui.input = REAL_INPUT
+    if ui_windows.state() ~= nil then
+      ui_windows.close()
+    end
+    ui_windows.reset()
     if vim.api.nvim_tabpage_is_valid(state.tab) then
       vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
+      pcall(vim.cmd, 'tabclose!')
+    end
+    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+      if vim.api.nvim_tabpage_is_valid(tab) then
+        vim.api.nvim_set_current_tabpage(tab)
+        pcall(vim.cmd, 'tabclose!')
+      end
     end
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
       end
     end
     vim.notify = REAL_NOTIFY
@@ -448,12 +474,13 @@ describe('y キー (カーソル行 range のコメントを yank)', function()
   use_env()
 
   local function focus_row(row)
-    vim.api.nvim_win_set_cursor(state.diff_win, { row, 0 })
+    vim.api.nvim_set_current_win(state.head_win)
+    vim.api.nvim_win_set_cursor(state.head_win, { row, 0 })
   end
 
   it('y: 見出しなしで @path#L.. と本文を "0 に入れる', function()
     seed { comment('c1', 'a.lua', 2, 3, 'use map') }
-    focus_row(5) -- '+three' = new 3 (range の内側)
+    focus_row(3) -- 恒等行 'three' = new 3 (range 2-3 の内側)
 
     comments_handler.yank_current()
 
@@ -467,7 +494,7 @@ describe('y キー (カーソル行 range のコメントを yank)', function()
 
   it('y: カーソル行のコメントが全件 outdated ならコピーせず INFO', function()
     seed { comment('c1', 'a.lua', 2, 3, 'stale', 'outdated') }
-    focus_row(4)
+    focus_row(2)
 
     comments_handler.yank_current()
 
@@ -483,7 +510,7 @@ describe('y キー (カーソル行 range のコメントを yank)', function()
       comment('c1', 'a.lua', 2, 3, 'multi'),
       comment('c2', 'a.lua', 2, 2, 'stale', 'outdated'),
     }
-    focus_row(4)
+    focus_row(2)
 
     comments_handler.yank_current()
 
@@ -495,7 +522,7 @@ describe('y キー (カーソル行 range のコメントを yank)', function()
   end)
 
   it('y: コメントが無い行では既存の WARN で "0 を触れない', function()
-    focus_row(8) -- ' six' = new 5、コメント無し
+    focus_row(5) -- 恒等行 'six' = new 5、コメント無し
 
     comments_handler.yank_current()
 

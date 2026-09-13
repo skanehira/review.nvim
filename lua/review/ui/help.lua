@@ -6,33 +6,39 @@ local config = require 'review.config'
 
 local M = {}
 
--- 表示する (config キー, 説明)。Diff review「操作」表の範囲コメント含む説明。
+-- 表示する (config キー, 説明)。DESIGN.md「デフォルトキーマップ」の review 窓 /
+-- file panel / sessionlist の全キーを載せる (説明も「head 窓のみ」等の窓条件まで)。
 local SECTIONS = {
   {
-    title = 'diff バッファ',
+    title = 'レビュー窓 (head / base)',
     keymap = 'diff',
     rows = {
-      { 'add_comment', '作成コメント (visual-line で範囲指定)' },
-      { 'edit_comment', 'カーソル行のコメントを編集' },
+      { 'add_comment', '作成コメント (visual-line で範囲指定・head 窓のみ)' },
+      { 'edit_comment', 'カーソル行のコメントを編集 (head 窓のみ)' },
       {
         'delete_comment',
         'カーソル行のコメントを削除 (arming: 同じ行でもう一度 d)',
       },
       { 'yank_prompt', 'カーソル行のコメントのプロンプトを yank' },
-      { 'open_file', 'その行の実ファイルを開く' },
-      { 'close', 'セッションを閉じる' },
+      { 'open_file', 'そのファイルの実ファイルを別 tab で開く' },
+      { 'close', 'セッションを閉じる (レビュー tab を閉じる)' },
       { 'help', 'このヘルプ' },
       { 'next_file', '次のファイルへ (端では無動作)' },
       { 'prev_file', '前のファイルへ (端では無動作)' },
-      { 'focus_sidebar', 'sidebar (変更ファイル一覧) へ移動' },
+      { 'focus_sidebar', 'file panel (変更ファイル一覧) へ移動' },
+      { 'focus_panel', 'file panel へ移動 (S と同一処理)' },
+      {
+        'toggle_panel',
+        'file panel の表示トグル (閉じても tab とレビュー窓は残る)',
+      },
       { 'view_comments', 'カーソル行のコメントを閲覧 (read-only)' },
     },
   },
   {
-    title = 'sidebar (変更ファイル一覧)',
+    title = 'file panel (変更ファイル一覧)',
     keymap = 'sidebar',
     rows = {
-      { 'open_diff', 'そのファイルの diff へ移動' },
+      { 'open_diff', 'そのファイルを head/base 窓に開く' },
       { 'open_file', 'そのファイルの実ファイルを開く' },
       { 'toggle_viewed', 'viewed 切替' },
       { 'filter', '一覧を絞り込む (空入力で解除)' },

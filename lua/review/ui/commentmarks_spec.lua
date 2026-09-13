@@ -242,61 +242,74 @@ describe('commentmarks.apply: outdated 集約', function()
   end)
 end)
 
-describe('commentmarks.apply: 打ち切り / continuation / outdated 本文 / path 限定', function()
-  use_bufs()
+describe(
+  'commentmarks.apply: 打ち切り / continuation / outdated 本文 / path 限定',
+  function()
+    use_bufs()
 
-  local function head_virt_lines(buf)
-    for _, m in ipairs(marks(buf)) do
-      if m[4].virt_text ~= nil then
-        return m[4].virt_lines or {}, m[4].virt_text[1][1]
+    local function head_virt_lines(buf)
+      for _, m in ipairs(marks(buf)) do
+        if m[4].virt_text ~= nil then
+          return m[4].virt_lines or {}, m[4].virt_text[1][1]
+        end
       end
+      return nil, nil
     end
-    return nil, nil
-  end
 
-  it('本文は 10 行で打ち切り、11 行目に i 全文 float への導線を残す', function()
-    local long = {}
-    for i = 1, 13 do
-      long[#long + 1] = 'line' .. i
-    end
-    local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/trunc.lua')
-    commentmarks.apply(session_of { comment { body = table.concat(long, '\n') } }, buf, 'a.lua')
-    local vl = head_virt_lines(buf)
-    assert.equals(11, #vl, '10 行 + 導線 1 行で無い: ' .. tostring(#vl))
-    assert.equals('  [c1] line1', vl[1][1][1])
-    assert.equals('       line10', vl[10][1][1])
-    assert.equals('       … (i で全文)', vl[11][1][1])
-  end)
+    it(
+      '本文は 10 行で打ち切り、11 行目に i 全文 float への導線を残す',
+      function()
+        local long = {}
+        for i = 1, 13 do
+          long[#long + 1] = 'line' .. i
+        end
+        local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/trunc.lua')
+        commentmarks.apply(session_of { comment { body = table.concat(long, '\n') } }, buf, 'a.lua')
+        local vl = head_virt_lines(buf)
+        assert.equals(11, #vl, '10 行 + 導線 1 行で無い: ' .. tostring(#vl))
+        assert.equals('  [c1] line1', vl[1][1][1])
+        assert.equals('       line10', vl[10][1][1])
+        assert.equals('       … (i で全文)', vl[11][1][1])
+      end
+    )
 
-  it('複数行本文の continuation 行は id 接頭辞の分インデントを揃える', function()
-    local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/cont.lua')
-    commentmarks.apply(session_of { comment { body = 'first\nsecond' } }, buf, 'a.lua')
-    local vl = head_virt_lines(buf)
-    assert.same({ '  [c1] first', '       second' }, { vl[1][1][1], vl[2][1][1] })
-  end)
+    it(
+      '複数行本文の continuation 行は id 接頭辞の分インデントを揃える',
+      function()
+        local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/cont.lua')
+        commentmarks.apply(session_of { comment { body = 'first\nsecond' } }, buf, 'a.lua')
+        local vl = head_virt_lines(buf)
+        assert.same({ '  [c1] first', '       second' }, { vl[1][1][1], vl[2][1][1] })
+      end
+    )
 
-  it(
-    'outdated でも行が可視なら本文先頭 ⚠ + ReviewCommentOutdated / 件数 (⚠M)',
-    function()
-      local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/ov.lua')
+    it(
+      'outdated でも行が可視なら本文先頭 ⚠ + ReviewCommentOutdated / 件数 (⚠M)',
+      function()
+        local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/ov.lua')
+        commentmarks.apply(
+          session_of { comment { state = 'outdated', body = 'kept' } },
+          buf,
+          'a.lua'
+        )
+        local vl, vt = head_virt_lines(buf)
+        assert.equals(' 💬 1 (⚠1)', vt)
+        assert.equals('⚠ [c1] kept', vl[1][1][1])
+        assert.equals('ReviewCommentOutdated', vl[1][1][2])
+      end
+    )
+
+    it('他ファイルのコメントは張らない (path フィルタ)', function()
+      local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/pf.lua')
       commentmarks.apply(
-        session_of { comment { state = 'outdated', body = 'kept' } },
+        session_of { comment { file = 'other.lua', body = 'elsewhere' } },
         buf,
         'a.lua'
       )
-      local vl, vt = head_virt_lines(buf)
-      assert.equals(' 💬 1 (⚠1)', vt)
-      assert.equals('⚠ [c1] kept', vl[1][1][1])
-      assert.equals('ReviewCommentOutdated', vl[1][1][2])
-    end
-  )
-
-  it('他ファイルのコメントは張らない (path フィルタ)', function()
-    local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/pf.lua')
-    commentmarks.apply(session_of { comment { file = 'other.lua', body = 'elsewhere' } }, buf, 'a.lua')
-    assert.equals(0, #marks(buf))
-  end)
-end)
+      assert.equals(0, #marks(buf))
+    end)
+  end
+)
 
 describe('commentmarks.clear_tracked: close 収集と残骸 0', function()
   use_bufs()

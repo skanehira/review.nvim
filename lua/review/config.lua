@@ -9,6 +9,8 @@ M.defaults = {
   gh_bin = 'gh',
   -- diff_context 未指定 (nil) は git 既定 (3) に従う。既定テーブルには置かない。
   auto_notify_resume = true,
+  -- file panel (左窓) の幅 (DESIGN.md「API 一覧」config / diff-review「レイアウト」)
+  panel_width = 35,
   keymaps = {
     diff = {
       add_comment = 'c',
@@ -21,6 +23,10 @@ M.defaults = {
       next_file = ']d',
       prev_file = '[d',
       focus_sidebar = 'S',
+      -- file panel へ focus (S と同一処理。S の廃止は移動キー置換 issue で) と
+      -- panel 表示トグル (閉じても tab とレビュー窓は残る)
+      focus_panel = '<leader>e',
+      toggle_panel = '<leader>b',
       view_comments = 'i',
     },
     sidebar = {

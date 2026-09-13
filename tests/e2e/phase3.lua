@@ -6,6 +6,8 @@
 -- head 解決フローの switch 提案 / scratch 縮退の分岐は unit (session_spec の
 -- 応答キュー) で pin 済み。ここでは「自動採用が実 git で動く」接線のみを検証する。
 
+local windows = require 'review.ui.windows'
+
 local function fail(why)
   print('E2E-FAIL: ' .. why)
   vim.cmd 'cquit!'
@@ -24,6 +26,19 @@ local function git(args)
   end
 end
 
+-- 比較は symlink 解決後の実パスで行う (macOS /var -> /private/var)。
+-- gsub の多値戻りを実関数に直接渡さない (余分な second result が引数になる)。
+local function realpath(p)
+  local s = (p or ''):gsub('[\r\n]+$', '')
+  return vim.uv.fs_realpath(s) or s
+end
+
+local function top_level()
+  return realpath(
+    vim.system({ 'git', 'rev-parse', '--show-toplevel' }, { text = true }):wait(10000).stdout
+  )
+end
+
 local function run()
   git { 'checkout', '-q', 'hotfix' }
 
@@ -32,9 +47,13 @@ local function run()
   wait_for(function()
     return vim.fn.bufexists 'review://sidebar/main--hotfix' == 1
   end, 'head 自動採用後の session 開始 (sidebar main--hotfix)')
-  local dbuf = vim.fn.bufnr 'review://diff/main--hotfix/a.lua'
-  if dbuf == -1 then
-    fail 'head 自動採用後の先頭ファイル diff が無い'
+  -- 初期開き = 一覧先頭ファイルの open_file: head 窓は実ファイル (hotfix の a.lua)
+  wait_for(function()
+    return windows.state() ~= nil and windows.win 'head' ~= nil
+  end, 'hotfix レビュー 3 窓')
+  local head = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(windows.win 'head'))
+  if head ~= realpath(vim.fs.joinpath(top_level(), 'a.lua')) then
+    fail('head 自動採用後の head 窓が実ファイルでない: ' .. head)
   end
 
   -- 保存された head は自動解決されたブランチ名 (DESIGN「データスキーマ」head 保存表現)

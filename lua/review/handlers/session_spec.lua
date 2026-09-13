@@ -1,15 +1,19 @@
--- handlers/session: セッション開始 / 終了 / 削除と active 排他 (INV-1)、
--- UI open / sidebar <CR> / x の save トリガ (INV-4)。
--- git 注入スタブ (git/cli_spec と同期 on_exit パターン) で開始フローを同期駆動し、
--- save は paths._set_data_dir 注入の tmpdir へ実ファイルを書いて検証する。
+-- handlers/session: セッション開始 / 終了 / 削除と active 排他 (INV-1)、専有 tab
+-- 3 窓 UI open / panel 操作 / ]d [d / viewed / tab 消滅経路の save トリガ (INV-4)、
+-- head 解決フロー、pr worktree の作成・掃除・直列化 (pr-worktree.md)、絞り込み。
+-- git 注入スタブ (git/cli_spec と同期 on_exit パターン) で開始〜窓張付を同期駆動し、
+-- save は paths._set_data_dir 注入の tmpdir へ実ファイルを書いて検証する (INV-4 =
+-- ディスク判定)。head 実ファイル窓の経路 (:edit 相当) はディスク実在が前提なので
+-- repo を実ファイル付きで用意する (旧 unified 自发描画からの設計変更、diff-review.md)。
 local cli = require 'review.git.cli'
 local config = require 'review.config'
 local paths = require 'review.store.paths'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
+local ui_windows = require 'review.ui.windows'
 
-local REPO_TOP = '/spec/repo-top'
 local SLUG = 'main--feature'
+local SIDEBAR_NAME = 'review://sidebar/' .. SLUG
 
 local RAW_DIFF_A_B = table.concat({
   'diff --git a/a.lua b/a.lua',
@@ -29,13 +33,28 @@ local RAW_DIFF_A_B = table.concat({
   '',
 }, '\n')
 
-local SIDEBAR_NAME = 'review://sidebar/' .. SLUG
-local DIFF_A_NAME = 'review://diff/' .. SLUG .. '/a.lua'
+-- c.lua 削除 + bin.dat binary を含む差分 (窓張り分けの分岐テスト用)。
+local RAW_DIFF_DEL_BIN = table.concat({
+  'diff --git a/bin.dat b/bin.dat',
+  'index 111..222 100644',
+  'Binary files a/bin.dat and b/bin.dat differ',
+  'diff --git a/c.lua b/c.lua',
+  'deleted file mode 100644',
+  'index 333..000',
+  '--- a/c.lua',
+  '+++ /dev/null',
+  '@@ -1,2 +0,0 @@',
+  '-line1',
+  '-line2',
+  '',
+}, '\n')
 
 local state = {}
 
 -- cli._set_system 注入: 実行順に responses[idx] を同期 for on_exit を呼ぶ。
--- state.git_opts[idx] には vim.system opts を並列記録し、cwd 契約を pin できるようにする。
+-- state.git_opts[idx] には vim.system opts を並列記録し、cwd 契約を pin できるように
+-- する。show は既定応答 (base / 縮退 head scratch 充填) を用意し、open_file 由来の
+-- git show が応答不足で error にならないようにする (明示列挙も可能)。
 local function install_git(responses)
   state.git_calls = {}
   state.git_opts = {}
@@ -43,10 +62,46 @@ local function install_git(responses)
     local idx = #state.git_calls + 1
     table.insert(state.git_calls, cmd)
     state.git_opts[idx] = opts
-    if responses[idx] == nil then
-      error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
+    if responses[idx] ~= nil then
+      on_exit(responses[idx](cmd, opts))
+      return
     end
-    on_exit(responses[idx](cmd, opts))
+    if cmd[2] == 'show' then
+      on_exit { code = 0, stdout = 'base content\n', stderr = '' }
+      return
+    end
+    error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
+  end)
+  cli._set_executable(function()
+    return 1
+  end)
+end
+
+-- install_git の worktree remove 非同期版。'git worktree remove' に限って
+-- on_exit を state.deferred に捕捉して呼ばない (実 vim.system は非同期。
+-- install_git の同期 on_exit では区別できない「remove 完了前/後」の順序を pin する)。
+-- responses の remove のスロットは手前へ返るため読まれない (placeholder で可)。
+local function install_git_deferred_remove(responses)
+  state.git_calls = {}
+  state.git_opts = {}
+  state.deferred = nil
+  cli._set_system(function(cmd, opts, on_exit)
+    local idx = #state.git_calls + 1
+    table.insert(state.git_calls, cmd)
+    state.git_opts[idx] = opts
+    if cmd[2] == 'worktree' and cmd[3] == 'remove' then
+      state.deferred = on_exit
+      return
+    end
+    if responses[idx] ~= nil then
+      on_exit(responses[idx](cmd, opts))
+      return
+    end
+    if cmd[2] == 'show' then
+      on_exit { code = 0, stdout = 'base content\n', stderr = '' }
+      return
+    end
+    error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
   end)
   cli._set_executable(function()
     return 1
@@ -54,7 +109,7 @@ local function install_git(responses)
 end
 
 local top_ok = function()
-  return { code = 0, stdout = REPO_TOP .. '\n', stderr = '' }
+  return { code = 0, stdout = state.repo .. '\n', stderr = '' }
 end
 
 local diff_ok = function(stdout)
@@ -62,18 +117,18 @@ local diff_ok = function(stdout)
 end
 
 local function load_saved(id)
-  return store.load(REPO_TOP, id or SLUG).data
+  return store.load(state.repo, id or SLUG).data
 end
 
 local function json_path(id)
-  return paths.session_file(REPO_TOP, id or SLUG)
+  return paths.session_file(state.repo, id or SLUG)
 end
 
 local function existing_stub(overrides)
   local s = {
     version = 1,
     id = SLUG,
-    repo = REPO_TOP,
+    repo = state.repo,
     mode = 'branch',
     base = 'main',
     head = 'feature',
@@ -91,11 +146,122 @@ local function existing_stub(overrides)
   return s
 end
 
+-- paths.worktree_path は注入済み data dir を使うので require 時でなく呼ぶ時に計算。
+local function wt_path(slug)
+  return paths.worktree_path(state.repo, slug or SLUG)
+end
+
+local function git_fail(msg)
+  return function()
+    return { code = 255, stdout = '', stderr = msg }
+  end
+end
+
+local function add_cmd(ref, slug)
+  return { 'git', 'worktree', 'add', '--detach', wt_path(slug), ref or 'feature' }
+end
+
+local function list_cmd()
+  return { 'git', 'worktree', 'list', '--porcelain' }
+end
+
+-- 応答の選択肢を 1 回目順に 1 件ずつ返す入力スタブ (delete+force の 2 確認用)。
+local function answer_queue(answers)
+  local idx = 0
+  vim.ui.input = function(opts, cb)
+    idx = idx + 1
+    table.insert(state.inputs, opts)
+    cb(answers[idx])
+  end
+end
+
+local function has_call(prefix)
+  for _, cmd in ipairs(state.git_calls) do
+    if table.concat(cmd, ' '):sub(1, #prefix) == prefix then
+      return true
+    end
+  end
+  return false
+end
+
+local function has_worktree_call()
+  for _, cmd in ipairs(state.git_calls) do
+    if cmd[2] == 'worktree' then
+      return true
+    end
+  end
+  return false
+end
+
 -- plenary busted は describe 外のフックを持たないため helper 経由で登録する。
 -- vim 組み込み関数はプロセス単一なので real 参照は require 時に 1 回捕捉する
 -- (before_each ごとに見ると spy が入れ子になり after_each の復旧先が壊れる)。
 local REAL_NOTIFY = vim.notify
 local REAL_INPUT = vim.ui.input
+
+local function review_tab()
+  local st = ui_windows.state()
+  return st and st.tab or nil
+end
+
+local function tab_index(t)
+  for i, tab in ipairs(vim.api.nvim_list_tabpages()) do
+    if tab == t then
+      return i
+    end
+  end
+  return nil
+end
+
+local function head_buf_name()
+  local w = ui_windows.win 'head'
+  return w ~= nil and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)) or nil
+end
+
+local function base_buf_name()
+  local w = ui_windows.win 'base'
+  return w ~= nil and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)) or nil
+end
+
+-- active セッションへコメントを 1 件注入し commit_comment_change (INV-4 save +
+-- 表示再構成) まで通す (handlers/comments の UI 往復を待たない最小注入。
+-- file / line は開始時 head 実ファイル a.lua の解ける位置)。
+local function inject_comment(body, file, line)
+  local sess = session_handler.active()
+  sess.comments[#sess.comments + 1] = {
+    id = 'c' .. (#sess.comments + 1),
+    file = file or 'a.lua',
+    line = line or 2,
+    end_line = line or 2,
+    body = body,
+    anchor = { before = 'line1', line = 'line2', after = vim.NIL },
+    state = 'active',
+    created_at = 100,
+  }
+  session_handler.commit_comment_change()
+end
+
+local function inject_comment_at(line, body)
+  inject_comment(body, 'a.lua', line)
+end
+
+-- 位置を解けない outdated (state=outdated 確定) を 1 件注入し commit_comment_change
+-- (save + 表示再構成) まで通す。集約先 head 窓の無いファイル (告知 / 差分消失) の
+-- panel winbar ⚠N 検証用 (persistence-restore「anchor 検証」)。
+local function inject_outdated(body, file)
+  local sess = session_handler.active()
+  sess.comments[#sess.comments + 1] = {
+    id = 'c' .. (#sess.comments + 1),
+    file = file,
+    line = 2,
+    end_line = 2,
+    body = body,
+    anchor = { before = vim.NIL, line = 'ghost text', after = vim.NIL },
+    state = 'outdated',
+    created_at = 100,
+  }
+  session_handler.commit_comment_change()
+end
 
 local function use_env()
   before_each(function()
@@ -103,6 +269,16 @@ local function use_env()
     state = { notifications = {}, inputs = {}, input_answer = 'y' }
     state.dir = vim.fn.tempname()
     vim.fn.mkdir(state.dir, 'p')
+    -- head 実ファイル窓の経路 (:edit 相当) はディスク実在が前提なので repo を作る
+    local raw = vim.fs.joinpath(state.dir, 'repo')
+    vim.fn.mkdir(raw, 'p')
+    for _, n in ipairs { 'a.lua', 'b.lua', 'c.lua', 'bin.dat' } do
+      local f = io.open(vim.fs.joinpath(raw, n), 'w')
+      f:write 'line1\nline2\n'
+      f:close()
+    end
+    state.repo = vim.uv.fs_realpath(raw) or raw
+    state.cwd0 = vim.uv.cwd()
     paths._set_data_dir(state.dir)
     store._set_now(function()
       return 4321
@@ -119,21 +295,41 @@ local function use_env()
       table.insert(state.inputs, opts)
       cb(state.input_answer)
     end
-    session_handler._reset()
-    -- review://* バッファは nvim インスタンス全局の単一リソース (同名再利用)。
-    -- 前テスト残り を掃除しないと別テストの UI と混線する。
+    -- review://* とレビュー tab は nvim プロセス共有。前テスト残りを掃除して
+    -- 隔離 tab を現在の tab にする (同名再利用の混線防止)。
+    if ui_windows.state() ~= nil then
+      ui_windows.close()
+    end
+    ui_windows.reset()
+    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+      if vim.api.nvim_tabpage_is_valid(tab) then
+        vim.api.nvim_set_current_tabpage(tab)
+        pcall(vim.cmd, 'tabclose!')
+      end
+    end
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
       end
     end
     vim.cmd 'tabnew'
     state.tab = vim.api.nvim_get_current_tabpage()
   end)
   after_each(function()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
+    if ui_windows.state() ~= nil then
+      ui_windows.close()
+    end
+    ui_windows.reset()
+    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+      if vim.api.nvim_tabpage_is_valid(tab) then
+        vim.api.nvim_set_current_tabpage(tab)
+        pcall(vim.cmd, 'tabclose!')
+      end
+    end
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
+      end
     end
     vim.notify = REAL_NOTIFY
     vim.ui.input = REAL_INPUT
@@ -145,13 +341,16 @@ local function use_env()
     config.reset()
     cli._set_system(nil)
     cli._set_executable(nil)
+    -- 555 化された残骸 dir を含めて掃除できるよう権限を戻す (chmod テスト側でも
+    -- 戻すが、失敗経路の取りこぼし対策)
+    pcall(vim.fn.system, { 'chmod', '-R', '755', state.dir })
     vim.fn.delete(state.dir, 'rf')
   end)
 end
 
--- top -> head 解決 (rev-parse <head> == rev-parse HEAD の一致 = 通常経路) ->
--- `git diff <base>` (単引数・作業ツリー基準) までを完結させるレスポンス列。
+-- head / base 解決系の共通応答部品
 local SAME_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+local OTHER_SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 local RP_HEAD_MATCH = {
   function()
     return { code = 0, stdout = SAME_SHA .. '\n', stderr = '' }
@@ -160,8 +359,33 @@ local RP_HEAD_MATCH = {
     return { code = 0, stdout = SAME_SHA .. '\n', stderr = '' }
   end,
 }
+local RP_HEAD_MISMATCH = {
+  function()
+    return { code = 0, stdout = SAME_SHA .. '\n', stderr = '' }
+  end,
+  function()
+    return { code = 0, stdout = OTHER_SHA .. '\n', stderr = '' }
+  end,
+}
 
--- top -> diff メインの start を完結させる (head == 現在のチェックアウト)。
+local git_ok = function()
+  return { code = 0, stdout = '', stderr = '' }
+end
+local showref_ok = function()
+  return { code = 0, stdout = '', stderr = '' }
+end
+local showref_miss = function()
+  return { code = 1, stdout = '', stderr = '' }
+end
+local status_clean = function()
+  return { code = 0, stdout = '', stderr = '' }
+end
+local status_dirty = function()
+  return { code = 0, stdout = ' M a.lua\n', stderr = '' }
+end
+
+-- 開始を完結させる (head == 現在のチェックアウト / 先頭ファイル a.lua の
+-- base = git show 充填まで)。
 local function start_done(base, head)
   install_git {
     top_ok,
@@ -170,15 +394,42 @@ local function start_done(base, head)
     function()
       return diff_ok(RAW_DIFF_A_B)
     end,
+    function(cmd)
+      assert.same({ 'git', 'show', 'main:a.lua' }, cmd)
+      return { code = 0, stdout = 'line1\nline2\n', stderr = '' }
+    end,
   }
   return session_handler.start { base = base, head = head }
 end
 
-describe('session.start 開始フロー', function()
+-- worktree 作成判断は mode=pr のみ。pr 開始は add/再利用 -> diff (cwd=worktree、
+-- 単引数) の順 (pr-worktree.md「PR 解決」3)。handlers/pr と同じ入口 (session.begin)。
+local function begin_pr(responses, opts)
+  install_git(responses)
+  return session_handler.begin {
+    repo = state.repo,
+    id = (opts and opts.id) or SLUG,
+    mode = 'pr',
+    base = 'main',
+    head = (opts and opts.head) or 'feature',
+  }
+end
+
+-- worktree 作成済み (記録 {path=wt_path(), created_by_us=true}) のセッションを開始。
+local function started_with_worktree()
+  begin_pr {
+    git_ok, -- worktree add (stub なので dir は作られない: dir 前提の検証は各自 mkdir)
+    function()
+      return diff_ok(RAW_DIFF_A_B)
+    end,
+  }
+end
+
+describe('session.start 開始フロー (専有 tab 3 窓)', function()
   use_env()
 
   it(
-    'diff 取得 -> session save -> sidebar + 先頭ファイル diff の UI 開き -> active 化',
+    'diff -> save -> 専有 tab 3 窓 (panel 左 / base / head 実ファイル) -> active 化',
     function()
       local res = start_done('main', 'feature')
 
@@ -188,100 +439,139 @@ describe('session.start 開始フロー', function()
       assert.same({ 'git', 'rev-parse', '--verify', 'feature' }, state.git_calls[2])
       assert.same({ 'git', 'rev-parse', '--verify', 'HEAD' }, state.git_calls[3])
       assert.same({ 'git', 'diff', 'main' }, state.git_calls[4])
+      -- 一覧先頭ファイルの open_file = 移動系の唯一経路 (base = git show 充填)
+      assert.same({ 'git', 'show', 'main:a.lua' }, state.git_calls[5])
+      assert.equals(state.repo, state.git_opts[5].cwd)
 
       assert.same({
         version = 1,
         id = SLUG,
-        repo = REPO_TOP,
+        repo = state.repo,
         mode = 'branch',
         base = 'main',
         head = 'feature',
         pr = vim.NIL,
         worktree = vim.NIL,
         status = 'open',
-        files = { ['a.lua'] = { viewed = false }, ['b.lua'] = { viewed = false } },
+        -- 先頭 open_file が viewed=true (初期開きも open_file 共通処理)
+        files = { ['a.lua'] = { viewed = true }, ['b.lua'] = { viewed = false } },
         comments = {},
         created_at = 4321,
         updated_at = 4321,
       }, load_saved())
+
+      local tab = review_tab()
+      assert.is_true(tab ~= nil and vim.api.nvim_tabpage_is_valid(tab))
+      assert.is_not.equals(state.tab, tab, 'レビューは専有 tabpage で開く')
+      assert.equals(1, #vim.api.nvim_tabpage_list_wins(state.tab), 'ユーザー窓を触らない')
+      assert.equals(3, #vim.api.nvim_tabpage_list_wins(tab))
+
+      local pos = function(w)
+        return vim.fn.win_screenpos(w)[2]
+      end
+      assert.is_true(pos(ui_windows.win 'panel') < pos(ui_windows.win 'base'))
+      assert.is_true(pos(ui_windows.win 'base') < pos(ui_windows.win 'head'))
+
+      assert.equals(state.repo .. '/a.lua', head_buf_name())
+      assert.equals('review://base/' .. SLUG .. '/a.lua', base_buf_name())
+      -- base 窓 = git show <base>:<path> 充填・filetype detect (窓の中身表)
+      local base_buf = vim.fn.bufnr('review://base/' .. SLUG .. '/a.lua')
+      assert.same({ 'line1', 'line2' }, vim.api.nvim_buf_get_lines(base_buf, 0, -1, false))
+      assert.equals('lua', vim.bo[base_buf].filetype)
+      -- head 実ファイル窓 = 編集可
+      local hw = ui_windows.win 'head'
+      assert.equals(true, vim.bo[vim.api.nvim_win_get_buf(hw)].modifiable)
+      -- 開通 focus は head 窓 (直後の c/e が効く位置から開始)
+      assert.equals(hw, vim.api.nvim_get_current_win())
+
       local sb = vim.fn.bufnr(SIDEBAR_NAME)
       assert.not_equals(-1, sb)
+      -- 先頭 open_file が viewed=true なので行頭に [✓]
       assert.same(
-        { 'M a.lua +1 -0', 'A b.lua +1 -0' },
+        { '[✓] M a.lua +1 -0', 'A b.lua +1 -0' },
         vim.api.nvim_buf_get_lines(sb, 0, -1, false)
       )
-      assert.not_equals(-1, vim.fn.bufnr(DIFF_A_NAME))
       assert.equals(0, #state.notifications)
       assert.equals(SLUG, session_handler.active().id)
     end
   )
 
-  -- sidebar=左 / diff=右 は設計 (diff-review「sidebar 左 30 桁」) 契約。vsplit は
-  -- splitleft/splitright オプションで結果反転するため、明示的な位置指定を pin する。
-  it('レイアウトは splitright=false でも sidebar 左 / diff 右', function()
-    vim.o.splitright = false
+  it(
+    '開通時にレビュー tab を repo へ tcd する (ユーザー tab には漏れない)',
+    function()
+      start_done('main', 'feature')
+      assert.equals(state.repo, vim.fn.getcwd(-1, 0))
+      vim.api.nvim_set_current_tabpage(state.tab)
+      assert.equals(state.cwd0, vim.fn.getcwd(-1, 0))
+    end
+  )
+
+  it('head/base 窓の opts (窓 diff / scrollbind / cursorbind / fold / wrap=off)', function()
     start_done('main', 'feature')
-    local sb = vim.fn.win_findbuf(vim.fn.bufnr(SIDEBAR_NAME))[1]
-    local db = vim.fn.win_findbuf(vim.fn.bufnr(DIFF_A_NAME))[1]
-    assert.is_true(vim.fn.win_screenpos(sb)[2] < vim.fn.win_screenpos(db)[2])
+    for _, role in ipairs { 'base', 'head' } do
+      local w = ui_windows.win(role)
+      assert.equals(true, vim.wo[w].diff)
+      assert.equals(true, vim.wo[w].scrollbind)
+      assert.equals(true, vim.wo[w].cursorbind)
+      assert.equals('diff', vim.wo[w].foldmethod)
+      assert.equals(false, vim.wo[w].wrap)
+    end
   end)
 
-  it('レイアウトは splitright=true でも sidebar 左 / diff 右', function()
+  it('panel 窓幅は config.panel_width (既定 35) + winfixwidth', function()
+    start_done('main', 'feature')
+    local pw = ui_windows.win 'panel'
+    assert.equals(35, vim.api.nvim_win_get_width(pw))
+    assert.equals(true, vim.wo[pw].winfixwidth)
+  end)
+
+  it('splitright が false でも panel 左 / base / head 右', function()
+    vim.o.splitright = false
+    start_done('main', 'feature')
+    local pos = function(w)
+      return vim.fn.win_screenpos(w)[2]
+    end
+    assert.is_true(pos(ui_windows.win 'panel') < pos(ui_windows.win 'base'))
+    assert.is_true(pos(ui_windows.win 'base') < pos(ui_windows.win 'head'))
+  end)
+
+  it('splitright が true でも panel 左 / base / head 右', function()
     vim.o.splitright = true
     start_done('main', 'feature')
-    local sb = vim.fn.win_findbuf(vim.fn.bufnr(SIDEBAR_NAME))[1]
-    local db = vim.fn.win_findbuf(vim.fn.bufnr(DIFF_A_NAME))[1]
-    assert.is_true(vim.fn.win_screenpos(sb)[2] < vim.fn.win_screenpos(db)[2])
+    local pos = function(w)
+      return vim.fn.win_screenpos(w)[2]
+    end
+    assert.is_true(pos(ui_windows.win 'panel') < pos(ui_windows.win 'base'))
+    assert.is_true(pos(ui_windows.win 'base') < pos(ui_windows.win 'head'))
   end)
 
-  it('diff 窓再建時も sidebar 左 / diff 右の位置に戻る', function()
-    vim.o.splitright = false
-    start_done('main', 'feature')
-    local dbuf = vim.fn.bufnr(DIFF_A_NAME)
-    vim.api.nvim_win_close(vim.fn.win_findbuf(dbuf)[1], true)
-    local sb = vim.fn.win_findbuf(vim.fn.bufnr(SIDEBAR_NAME))[1]
-    vim.api.nvim_set_current_win(sb)
-    vim.api.nvim_win_set_cursor(sb, { 2, 0 })
-    session_handler.open_selected_file() -- b.lua で再建経路
-    local new_dbuf = vim.fn.bufnr('review://diff/' .. SLUG .. '/b.lua')
-    local dwin = vim.fn.win_findbuf(new_dbuf)[1]
-    assert.is_true(vim.fn.win_screenpos(sb)[2] < vim.fn.win_screenpos(dwin)[2])
-  end)
-
-  it('開通時に chrome が効く (winbar 式入・窓 number off・winbar 内容)', function()
-    vim.o.winbar = ''
-    vim.o.number = true -- レビュー開始直前まで番号表示が有効な環境から開始する
-    start_done('main', 'feature')
-    local dbuf = vim.api.nvim_get_current_buf()
-    assert.equals('main..feature · a.lua · +1 -0 · 0 comments', vim.b[dbuf].review_winbar)
-    assert.equals(
-      'main..feature · 2 files · 0 comments',
-      vim.b[vim.fn.bufnr(SIDEBAR_NAME)].review_winbar
-    )
-    assert.is_true(vim.o.winbar:find('review_winbar', 1, true) ~= nil, vim.o.winbar)
-    local dw = vim.api.nvim_get_current_win()
-    assert.equals(false, vim.api.nvim_get_option_value('number', { win = dw }))
-    -- sidebar 窓も chrome 済み (両窓が対象 = 他窓 contract)
-    local sw = vim.fn.win_findbuf(vim.fn.bufnr(SIDEBAR_NAME))[1]
-    assert.equals(false, vim.api.nvim_get_option_value('number', { win = sw }))
-    -- tab 開始時点の窓 (レビュー外) は number のまま = 窓ローカル操作の保証
-    vim.o.winbar = ''
-  end)
-
-  it('開通時、余剰の空 [No Name] 窓を回収してレビュー 2 窓に戻す', function()
-    -- list 経由再開などで空窓が残る症状 (UX review F1) への収束保証
-    vim.cmd 'vsplit' -- 中身なしの空窓を先に置く
-    start_done('main', 'feature')
-    assert.equals(2, #vim.api.nvim_tabpage_list_wins(state.tab))
-  end)
-
-  it('開通時は内容のあるユーザー窓を回収しない', function()
-    vim.cmd 'vsplit'
-    vim.api.nvim_buf_set_lines(vim.api.nvim_get_current_buf(), 0, -1, false, { 'note' })
-    vim.cmd 'wincmd h'
-    start_done('main', 'feature')
-    assert.equals(3, #vim.api.nvim_tabpage_list_wins(state.tab))
-  end)
+  it(
+    '開通時に chrome が効く (global winbar 式 / 窓 number off / w:review_winbar)',
+    function()
+      vim.o.winbar = ''
+      vim.o.number = true -- レビュー開始直前まで番号表示が有効な環境から開始する
+      start_done('main', 'feature')
+      local hw, bw, pw = ui_windows.win 'head', ui_windows.win 'base', ui_windows.win 'panel'
+      assert.equals('main..feature · a.lua · +1 -0 · 0 comments', vim.w[hw].review_winbar)
+      assert.equals('base · a.lua (git show)', vim.w[bw].review_winbar)
+      assert.equals('main..feature · 2 files · 0 comments', vim.w[pw].review_winbar)
+      assert.equals('%{get(w:,"review_winbar","")}', vim.o.winbar)
+      -- b: 変数は実ファイル窓経由でユーザー窓へ漏れるため使わない (chrome 決定)
+      assert.is_nil(vim.b[vim.fn.bufnr(SIDEBAR_NAME)].review_winbar)
+      assert.equals(false, vim.api.nvim_get_option_value('number', { win = hw }))
+      assert.equals(false, vim.api.nvim_get_option_value('number', { win = pw }))
+      -- ユーザー tab の窓は number のまま = 窓ローカル操作の保証
+      vim.api.nvim_set_current_tabpage(state.tab)
+      assert.equals(
+        true,
+        vim.api.nvim_get_option_value(
+          'number',
+          { win = vim.api.nvim_tabpage_list_wins(state.tab)[1] }
+        )
+      )
+      vim.o.winbar = ''
+    end
+  )
 
   it(
     'ref 解決不能 (diff exit 128) は WARN 通知で UI を開かず save もしない',
@@ -305,7 +595,9 @@ describe('session.start 開始フロー', function()
       session_handler.start { base = 'main', head = 'nope' }
 
       -- 存在しない ref に switch 提案も縮退 INFO も出さない (提案対象は解決可能な
-      -- ローカルブランチだけ — INV-3)
+      -- ローカルブランチだけ — INV-3)。rev-parse <head> 失敗で short-circuit ->
+      -- 縮退 2 引数形の diff 本体が E_REF を出す。
+      assert.same({ 'git', 'rev-parse', '--verify', 'nope' }, state.git_calls[2])
       assert.same({ 'git', 'diff', 'main', 'nope' }, state.git_calls[3])
       assert.equals(0, #state.inputs)
       -- 生 stderr 丸出しでなく「名前 + 次の行動」を伝える (UX review F4)
@@ -314,7 +606,6 @@ describe('session.start 開始フロー', function()
           .. '指定してください (start の base/head 引数は <Tab> で補完できます)',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
-      -- 未知の git エラーは翻訳せず原文を通す (情報 loss 防止)
       assert.not_equals(nil, state.notifications[1].msg:find("'nope'", 1, true))
       assert.equals(1, #state.notifications)
       assert.is_nil(load_saved())
@@ -336,7 +627,6 @@ describe('session.start 開始フロー', function()
       }
       local res = session_handler.start { base = 'main', head = 'feature' }
 
-      -- git を伴う操作の戻り値は「ディスパッチを受け付けた」ことを表す (DESIGN.md API 一覧)。
       assert.equals(true, res.ok)
       assert.same({
         msg = 'review.nvim: 変更なし (main..feature): レビュー対象がありません',
@@ -367,7 +657,6 @@ describe('session.start 開始フロー', function()
 
       assert.equals(true, res.ok)
       assert.same({ 'git', 'rev-parse', '--abbrev-ref', 'HEAD' }, state.git_calls[2])
-      -- 自動解決したブランチ名で保存され、head==HEAD 一致なので作業ツリー基準の単引数形
       assert.equals('feature', load_saved().head)
       assert.same({ 'git', 'diff', 'main' }, state.git_calls[5])
       assert.equals(0, #state.inputs)
@@ -392,7 +681,6 @@ describe('session.start 開始フロー', function()
 
       session_handler.start { base = 'main' }
 
-      -- 保存された "HEAD" は復元時にブランチ名として再評価できる (DESIGN「データスキーマ」)
       assert.equals('HEAD', load_saved('main--HEAD').head)
       assert.equals('main--HEAD', session_handler.active().id)
       assert.same({ 'git', 'diff', 'main' }, state.git_calls[5])
@@ -415,42 +703,298 @@ describe('session.start 開始フロー', function()
 end)
 
 -- ---------------------------------------------------------------------------
--- head 解決フロー (diff-review.md「開始」2 / DESIGN 決定表「head が現在の HEAD
--- と違うとき」)。rev-parse 一致 = 通常経路 / 不一致 + ローカルブランチ + clean
--- = switch 提案 [y/N] / 拒否・dirty・非ローカルブランチ・switch 失敗 = 縮退。
+-- head / base 窓の中身 (diff-review 表)。scratch 縮退 / 削除 / binary の張り分け。
 -- ---------------------------------------------------------------------------
 
-local OTHER_SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+describe('head / base 窓の中身分岐 (窓張り分け表)', function()
+  use_env()
 
--- 不一致状態 (head と HEAD が別コミット) の rev-parse 応答ペア。
-local RP_HEAD_MISMATCH = {
-  function()
-    return { code = 0, stdout = SAME_SHA .. '\n', stderr = '' }
-  end,
-  function()
-    return { code = 0, stdout = OTHER_SHA .. '\n', stderr = '' }
-  end,
-}
+  it(
+    'scratch 縮退 (switch 拒否): 両窓 scratch + head 窓は git show <head>:<path> 充填',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MISMATCH[1],
+        RP_HEAD_MISMATCH[2],
+        showref_ok,
+        status_clean,
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+      state.input_answer = 'n'
 
-local git_ok = function()
-  return { code = 0, stdout = '', stderr = '' }
-end
+      session_handler.start { base = 'main', head = 'feature' }
 
-local showref_ok = function()
-  return { code = 0, stdout = '', stderr = '' }
-end
+      assert.equals('review://base/' .. SLUG .. '/a.lua', base_buf_name())
+      assert.equals('review://head/' .. SLUG .. '/a.lua', head_buf_name())
+      local head_buf = vim.fn.bufnr('review://head/' .. SLUG .. '/a.lua')
+      assert.same({ 'git', 'show', 'feature:a.lua' }, state.git_calls[8])
+      assert.equals(state.repo, state.git_opts[8].cwd)
+      assert.same({ 'base content' }, vim.api.nvim_buf_get_lines(head_buf, 0, -1, false))
+      assert.equals('lua', vim.bo[head_buf].filetype)
+      assert.equals('hide', vim.bo[head_buf].bufhidden)
+    end
+  )
 
-local showref_miss = function()
-  return { code = 1, stdout = '', stderr = '' }
-end
+  it(
+    '削除ファイル: head 窓は告知 scratch + diffoff (base は窓 diff 継続)、base 窓は git show',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(RAW_DIFF_DEL_BIN)
+        end,
+      }
+      session_handler.start { base = 'main', head = 'feature' }
 
-local status_clean = function()
-  return { code = 0, stdout = '', stderr = '' }
-end
+      -- 一覧先頭 = bin.dat (パス昇順) -> ]d で c.lua へ
+      assert.equals('review://binary/' .. SLUG .. '/bin.dat', head_buf_name())
+      session_handler.next_file() -- c.lua
 
-local status_dirty = function()
-  return { code = 0, stdout = ' M a.lua\n', stderr = '' }
-end
+      assert.equals('review://deleted/' .. SLUG .. '/c.lua', head_buf_name())
+      assert.equals('review://base/' .. SLUG .. '/c.lua', base_buf_name())
+      local head_buf = vim.fn.bufnr('review://deleted/' .. SLUG .. '/c.lua')
+      local lines = vim.api.nvim_buf_get_lines(head_buf, 0, -1, false)
+      assert.equals(1, #lines)
+      assert.is_true(lines[1]:find('deleted', 1, true) ~= nil)
+      -- diffoff=head: 告知窓だけ窓 diff から抜け、base 窓は窓 diff を継続
+      assert.equals(false, vim.wo[ui_windows.win 'head'].diff)
+      assert.equals(true, vim.wo[ui_windows.win 'base'].diff)
+      -- git show 充填は base 窓のみ (head 実ファイル編集事故を作らない)
+      assert.is_true(has_call 'git show main:c.lua')
+      assert.is_false(has_call 'git show feature:c.lua')
+    end
+  )
+
+  it(
+    'binary: base/head 同一の告知 scratch を共有し両窓 diffoff・git show 0 件',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(RAW_DIFF_DEL_BIN)
+        end,
+      }
+      session_handler.start { base = 'main', head = 'feature' }
+
+      local name = 'review://binary/' .. SLUG .. '/bin.dat'
+      assert.equals(name, head_buf_name())
+      assert.equals(name, base_buf_name())
+      local buf = vim.fn.bufnr(name)
+      assert.equals(2, #vim.fn.win_findbuf(buf))
+      assert.same({ 'Binary files differ' }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+      assert.equals(false, vim.wo[ui_windows.win 'base'].diff)
+      assert.equals(false, vim.wo[ui_windows.win 'head'].diff)
+      -- 窓 diff に参加しない告知窓なので git show を呼ばない
+      assert.is_false(has_call 'git show')
+    end
+  )
+
+  it(
+    '追加ファイル (A): base 窓は review://null scratch (git show を呼ばない)',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+      session_handler.start { base = 'main', head = 'feature' }
+      session_handler.next_file() -- b.lua (A)
+
+      assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
+      assert.equals(state.repo .. '/b.lua', head_buf_name())
+      assert.is_false(has_call 'git show main:b.lua')
+    end
+  )
+
+  -- 再利用分岐 (diff-review「head / base 窓の中身» «既にユーザーが開いていれば
+  -- 同一バッファを再利用») でも_review キーの張込は必須 (head 窓で c/e/d/y/i/o/q が
+  -- 効かないと開始導線が壊れる)。b.lua (未既在 = bufadd 生成側) と対で張込を pin。
+  local function gate_installed(buf)
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+      if
+        m.lhs == 'c'
+        and type(m.rhs) == 'string'
+        and m.rhs:find('review.ui.keygate', 1, true) ~= nil
+      then
+        return true
+      end
+    end
+    return false
+  end
+
+  it(
+    '開始前に :edit 済みの実ファイル: head 窓で再利用され、再利用側にもレビューキーが張られる',
+    function()
+      vim.cmd('edit ' .. vim.fn.fnameescape(state.repo .. '/a.lua'))
+      start_done('main', 'feature')
+
+      local reused = vim.fn.bufnr(state.repo .. '/a.lua')
+      assert.equals(
+        reused,
+        vim.api.nvim_win_get_buf(ui_windows.win 'head'),
+        '既在の実ファイル buf が head 窓で再利用される (窓の中身表)'
+      )
+      assert.is_true(
+        gate_installed(reused),
+        '再利用分岐でレビューキーが張られていない (c が head 窓で発火しない)'
+      )
+
+      -- 対照: 未既在の b.lua (bufadd 側) も同一の open_file 導線で張られている
+      session_handler.next_file()
+      assert.equals(state.repo .. '/b.lua', head_buf_name())
+      assert.is_true(
+        gate_installed(vim.api.nvim_win_get_buf(ui_windows.win 'head')),
+        '対照の b.lua にもキーが無く、比較自体が壊れている'
+      )
+    end
+  )
+
+  it(
+    '復元時 差分まるごと消滅 + outdated comments: 3 窓を開き「変更なし」placeholder に集約',
+    function()
+      local existing = existing_stub {
+        status = 'open',
+        files = { ['a.lua'] = { viewed = true } },
+        comments = {
+          {
+            id = 'c1',
+            file = 'a.lua',
+            line = 2,
+            end_line = 2,
+            body = 'ghost',
+            anchor = { before = vim.NIL, line = 'gone', after = vim.NIL },
+            state = 'outdated',
+            created_at = 1,
+          },
+        },
+      }
+      install_git { top_ok }
+      session_handler.resume_into(existing, {}, vim.NIL, false)
+
+      assert.is_true(review_tab() ~= nil)
+      local ph = 'review://base/' .. SLUG .. '/(no-changes)'
+      assert.equals(ph, base_buf_name())
+      assert.equals(ph, head_buf_name())
+      local head_buf = vim.fn.bufnr(ph)
+      assert.same({ '変更なし' }, vim.api.nvim_buf_get_lines(head_buf, 0, -1, false))
+
+      local ns = vim.api.nvim_get_namespaces().review_comment
+      local above = nil
+      for _, m in ipairs(vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, { details = true })) do
+        if m[4].virt_lines_above then
+          above = m
+        end
+      end
+      assert.is_not_nil(above, 'placeholder の outdated 集約 mark が無い')
+      local text = ''
+      for _, chunk in ipairs(above[4].virt_lines[1] or {}) do
+        text = text .. (type(chunk[1]) == 'table' and chunk[1][1] or chunk[1])
+      end
+      assert.equals(' ⚠ 1 outdated (prompt 除外中)', text)
+    end
+  )
+
+  it(
+    '差分消滅開通でも panel 一覧は diff 由来 0 件・files map に消失ファイルを入れない',
+    function()
+      local existing = existing_stub {
+        status = 'open',
+        files = { ['a.lua'] = { viewed = true } },
+        comments = {
+          {
+            id = 'c1',
+            file = 'a.lua',
+            line = 2,
+            end_line = 2,
+            body = 'ghost',
+            anchor = { before = vim.NIL, line = 'gone', after = vim.NIL },
+            state = 'outdated',
+            created_at = 1,
+          },
+        },
+      }
+      install_git { top_ok }
+      session_handler.resume_into(existing, {}, vim.NIL, false)
+
+      -- panel 空一覧 (persistence-restore「files=0 の開通は panel 空一覧」)
+      local sb = vim.fn.bufnr(SIDEBAR_NAME)
+      assert.same({ '' }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
+      -- スキーマ: files = 差分に出る全ファイル (消失ファイルの合成行を入れない)
+      assert.same({}, load_saved().files)
+    end
+  )
+end)
+
+-- ---------------------------------------------------------------------------
+-- panel winbar の outdated 集約先なし ⚠N (diff-review「窓装飾」/ persistence-restore
+-- 「anchor 検証」— head 窓さえない outdated の可視化)
+-- ---------------------------------------------------------------------------
+
+describe('panel winbar ⚠N (集約先 head 窓の無い outdated)', function()
+  use_env()
+
+  it(
+    'binary 告知と差分消失ファイルの outdated を panel winbar 末尾 ⚠N に数える',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(RAW_DIFF_DEL_BIN)
+        end,
+      }
+      session_handler.start { base = 'main', head = 'feature' }
+      inject_outdated('on binary notice', 'bin.dat')
+      inject_outdated('on vanished file', 'gone.lua')
+
+      local pw = ui_windows.win 'panel'
+      assert.equals('main..feature · 2 files · 2 comments · ⚠2', vim.w[pw].review_winbar)
+    end
+  )
+
+  it(
+    'head 実窓がある outdated は ⚠N に入れず、head バッファ内で (⚠M) 併記にする',
+    function()
+      start_done('main', 'feature')
+      inject_comment 'resolvable thread'
+      local sess = session_handler.active()
+      sess.comments[1].state = 'outdated'
+      session_handler.commit_comment_change()
+
+      -- ⚠N 対象ではない (head 窓に集約先がある)
+      local pw = ui_windows.win 'panel'
+      assert.equals('main..feature · 2 files · 1 comment', vim.w[pw].review_winbar)
+      -- 対象行の mark に outdated 併記が立ってること (対照: 見逃さない)
+      local head_buf = vim.api.nvim_win_get_buf(ui_windows.win 'head')
+      local ns = vim.api.nvim_get_namespaces().review_comment
+      local found = nil
+      for _, m in ipairs(vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, { details = true })) do
+        local vt = ''
+        for _, chunk in ipairs(m[4].virt_text or {}) do
+          vt = vt .. (type(chunk[1]) == 'table' and chunk[1][1] or chunk[1])
+        end
+        if vt:find('(⚠1)', 1, true) ~= nil then
+          found = m
+        end
+      end
+      assert.is_not_nil(found, 'outdated 混在 (⚠1) mark が無い')
+    end
+  )
+end)
+
+-- ---------------------------------------------------------------------------
+-- head 解決フロー (diff-review.md「開始」2 / DESIGN 決定表)
+-- ---------------------------------------------------------------------------
 
 local SWITCH_OFFER = 'review.nvim: head feature は現在のチェックアウトと別のコミットです。'
   .. 'git switch で feature に切り替えてレビューしますか? [y/N]: '
@@ -460,16 +1004,6 @@ local DEGRADED_MSG = {
   level = vim.log.levels.INFO,
 }
 
-local function has_call(prefix)
-  for _, cmd in ipairs(state.git_calls) do
-    local joined = table.concat(cmd, ' ')
-    if joined:sub(1, #prefix) == prefix then
-      return true
-    end
-  end
-  return false
-end
-
 describe('head 解決フロー (branch: diff-review「開始」2)', function()
   use_env()
 
@@ -478,7 +1012,7 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
     function()
       start_done('main', 'feature')
 
-      assert.equals(4, #state.git_calls)
+      assert.equals(5, #state.git_calls)
       assert.equals(0, #state.inputs)
       assert.equals(0, #state.notifications)
       assert.same({ 'git', 'diff', 'main' }, state.git_calls[4])
@@ -509,6 +1043,8 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
       assert.same({ 'git', 'diff', 'main' }, state.git_calls[7]) -- switch 後 = 作業ツリー基準
       assert.equals(0, #state.notifications)
       assert.equals(SLUG, session_handler.active().id)
+      -- switch 後は実ファイル窓 (縮退しない)
+      assert.equals(state.repo .. '/a.lua', head_buf_name())
     end
   )
 
@@ -613,10 +1149,101 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
         { 'git', 'show-ref', '--verify', '--quiet', 'refs/heads/feature' },
         state.git_calls[4]
       )
-      assert.is_false(has_call('git -C ' .. REPO_TOP .. ' status'))
+      assert.is_false(has_call 'git status --porcelain')
       assert.equals(0, #state.inputs)
       assert.same(DEGRADED_MSG, state.notifications[1])
       assert.same({ 'git', 'diff', 'main', 'feature' }, state.git_calls[5])
+    end
+  )
+
+  it('branch は switch 拒否の縮退でも worktree 起動 0 件・記録 nil', function()
+    install_git {
+      top_ok,
+      RP_HEAD_MISMATCH[1],
+      RP_HEAD_MISMATCH[2],
+      showref_ok,
+      status_clean,
+      function()
+        return diff_ok(RAW_DIFF_A_B)
+      end,
+    }
+    state.input_answer = 'n'
+
+    session_handler.start { base = 'main', head = 'feature' }
+
+    assert.is_false(has_worktree_call())
+    assert.equals(vim.NIL, load_saved().worktree)
+  end)
+
+  it(
+    'branch は作業ツリー dirty でも worktree を作らない (縮退は head 解決フローが担う)',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MISMATCH[1],
+        RP_HEAD_MISMATCH[2],
+        showref_ok,
+        status_dirty,
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+
+      session_handler.start { base = 'main', head = 'feature' }
+
+      assert.equals(vim.NIL, load_saved().worktree)
+      assert.is_false(has_worktree_call())
+    end
+  )
+
+  it(
+    '開始時に created_by_us=true 名残を remove で掃除し、セッション記録は nil になる',
+    function()
+      local wt = wt_path()
+      vim.fn.mkdir(wt, 'p')
+      store.save(existing_stub { worktree = { path = wt, created_by_us = true } })
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+        git_ok, -- 掃除: status clean
+        git_ok, -- 掃除: remove ok
+      }
+      state.input_answer = 'y' -- 継承確認
+
+      session_handler.start { base = 'main', head = 'feature' }
+
+      assert.same({ 'git', '-C', wt, 'status', '--porcelain' }, state.git_calls[5])
+      assert.same({ 'git', 'worktree', 'remove', wt }, state.git_calls[6])
+      assert.equals(vim.NIL, load_saved().worktree)
+      assert.equals(SLUG, session_handler.active().id)
+    end
+  )
+
+  it(
+    'created_by_us=false 名残記録は掃除しない (INV-3: 自前分のみ削除)。remove 起動 0 件',
+    function()
+      local wt = wt_path()
+      store.save(existing_stub { worktree = { path = wt, created_by_us = false } })
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+      state.input_answer = 'y' -- 継承確認
+
+      session_handler.start { base = 'main', head = 'feature' }
+
+      -- top / RP x2 / diff / (open) show = 5。worktree 掃除 (status/remove) は 0 件
+      assert.equals(5, #state.git_calls)
+      assert.is_false(has_worktree_call())
+      assert.equals(vim.NIL, load_saved().worktree)
     end
   )
 end)
@@ -677,9 +1304,10 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
   )
 
   it(
-    '別 refs 組が active な開始は確認後の save -> close してから新セッション',
+    '別 refs 組が active な開始は確認後の save -> close してから新セッション (レビュー tab 張り替え)',
     function()
       start_done('main', 'feature')
+      local tab_before = review_tab()
 
       install_git {
         top_ok,
@@ -696,6 +1324,9 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       assert.equals('open', load_saved('main--hotfix').status)
       assert.equals('main--hotfix', session_handler.active().id)
       assert.equals(0, vim.fn.bufexists 'review://sidebar/main--feature')
+      -- 切替は専有 tab を閉じてから新 tab を開く (レビュー tab を増やさない)
+      assert.is_false(vim.api.nvim_tabpage_is_valid(tab_before))
+      assert.is_true(review_tab() ~= nil)
     end
   )
 
@@ -724,22 +1355,12 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
   -- 保存済みがある限り active の有無にかかわらず継承で、上書き開始はできない。
   local function prepare_feature_with_comment_then_switch()
     start_done('main', 'feature')
-    session_handler.active().comments[1] = {
-      id = 'c1',
-      file = 'a.lua',
-      line = 2,
-      end_line = 2,
-      body = 'KEEP ME',
-      anchor = { before = 'line1', line = 'line2', after = vim.NIL },
-      state = 'active',
-      created_at = 100,
-    }
-    session_handler.commit_comment_change() -- INV-4 save
-    local sb = vim.fn.bufnr(SIDEBAR_NAME)
-    local win = vim.fn.win_findbuf(sb)[1]
-    vim.api.nvim_set_current_win(win)
-    vim.api.nvim_win_set_cursor(win, { 1, 0 })
-    session_handler.toggle_viewed_current() -- a.lua viewed=true + save
+    inject_comment 'KEEP ME' -- a.lua (save + 表示再構成まで共通経路)
+    -- b.lua を viewed にする (先頭 a.lua は開始 open で既に viewed=true)
+    local panel = ui_windows.win 'panel'
+    vim.api.nvim_set_current_win(panel)
+    vim.api.nvim_win_set_cursor(panel, { 2, 0 })
+    session_handler.toggle_viewed_current()
 
     install_git {
       top_ok,
@@ -782,7 +1403,7 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       local reloaded = load_saved()
       assert.equals('open', reloaded.status)
       assert.same(saved.comments, reloaded.comments) -- 上書きされず comments がそのまま
-      assert.equals(true, reloaded.files['a.lua'].viewed)
+      assert.equals(true, reloaded.files['b.lua'].viewed)
       assert.equals('closed', load_saved('main--hotfix').status)
       assert.equals(
         '[✓] M a.lua +1 -0',
@@ -795,7 +1416,7 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
     'active 下の同一 refs 組継承確認を断ると active / ディスク無変更',
     function()
       prepare_feature_with_comment_then_switch()
-      local mtime_before = vim.uv.fs_stat(paths.session_file(REPO_TOP, SLUG)).mtime
+      local mtime_before = vim.uv.fs_stat(json_path()).mtime
       install_git {
         top_ok,
         RP_HEAD_MATCH[1],
@@ -809,7 +1430,7 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       session_handler.start { base = 'main', head = 'feature' }
 
       assert.equals('main--hotfix', session_handler.active().id)
-      assert.same(mtime_before, vim.uv.fs_stat(paths.session_file(REPO_TOP, SLUG)).mtime)
+      assert.same(mtime_before, vim.uv.fs_stat(json_path()).mtime)
       assert.equals(0, vim.fn.bufexists 'review://sidebar/main--feature')
     end
   )
@@ -829,12 +1450,12 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       assert.is_nil(session_handler.active())
-      assert.equals('a--b', store.load(REPO_TOP, 'a--b--c').data.base)
+      assert.equals('a--b', store.load(state.repo, 'a--b--c').data.base)
     end
   )
 end)
 
-describe('session.close / session.delete', function()
+describe('session.close / session.delete (q 経路 = close と tab 消滅)', function()
   use_env()
 
   it('active 0 件の close は E_NOT_ACTIVE を同期で返す', function()
@@ -847,9 +1468,14 @@ describe('session.close / session.delete', function()
   end)
 
   it(
-    'コメント 0 件は確認なしで閉じ status=closed で save / window を掃除する',
+    'コメント 0 件: 確認なしで閉じ status=closed / レビュー tab 消滅 / extmark 残骸 0',
     function()
       start_done('main', 'feature')
+      inject_comment 'first' -- extmark を張っておく (残骸 0 検証のため)
+      local tab = review_tab()
+      local head_buf = vim.api.nvim_win_get_buf(ui_windows.win 'head')
+      local ns = vim.api.nvim_get_namespaces().review_comment
+      assert.is_true(#vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, {}) > 0)
 
       session_handler.close()
 
@@ -857,8 +1483,60 @@ describe('session.close / session.delete', function()
       assert.equals(4321, load_saved().updated_at)
       assert.is_nil(session_handler.active())
       assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME))
-      assert.equals(0, vim.fn.bufexists(DIFF_A_NAME))
-      assert.equals(0, #state.inputs)
+      assert.is_false(vim.api.nvim_tabpage_is_valid(tab), 'q = レビュー tab を閉じる')
+      assert.equals(0, #vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, {}))
+      -- 実ファイルバッファ (modified を含むユーザー所有物) は消さない
+      assert.is_true(vim.api.nvim_buf_is_valid(head_buf))
+    end
+  )
+
+  it(
+    'close は再利用したユーザー既在の実バッファからもレビューキーを除く (残骸 0・バッファ自体は保持)',
+    function()
+      vim.cmd('edit ' .. vim.fn.fnameescape(state.repo .. '/a.lua'))
+      start_done('main', 'feature')
+      local reused = vim.api.nvim_win_get_buf(ui_windows.win 'head')
+      -- close 直前の正状態 (張込が no-op ならこの assert が落ちる)
+      local installed = false
+      for _, m in ipairs(vim.api.nvim_buf_get_keymap(reused, 'n')) do
+        if
+          m.lhs == 'c'
+          and type(m.rhs) == 'string'
+          and m.rhs:find('review.ui.keygate', 1, true) ~= nil
+        then
+          installed = true
+        end
+      end
+      assert.is_true(installed, '前提: close 前に張込済みでなければならない')
+
+      session_handler.close()
+
+      assert.is_true(
+        vim.api.nvim_buf_is_valid(reused),
+        'ユーザー実バッファは消さない'
+      )
+      for _, m in ipairs(vim.api.nvim_buf_get_keymap(reused, 'n')) do
+        assert.is_true(
+          type(m.rhs) ~= 'string' or m.rhs:find('review.ui.keygate', 1, true) == nil,
+          '残骸: ' .. m.lhs
+        )
+      end
+    end
+  )
+
+  it(
+    'close_by_key と tabclose の INFO が競合しない (q 経路は tab 消滅 INFO を出さない)',
+    function()
+      start_done('main', 'feature')
+      session_handler.close_by_key()
+      assert.equals('closed', load_saved().status)
+      assert.is_nil(session_handler.active())
+      for _, n in ipairs(state.notifications) do
+        assert.is_true(
+          n.msg:find('レビュー tab を閉じました', 1, true) == nil,
+          'q 経路で tab 消滅 INFO が出た: ' .. n.msg
+        )
+      end
     end
   )
 
@@ -866,26 +1544,72 @@ describe('session.close / session.delete', function()
     'コメントありの close は確認を要求する (n なら閉じず / y で status=closed)',
     function()
       start_done('main', 'feature')
-      session_handler.active().comments[1] = {
-        id = 'c1',
-        file = 'a.lua',
-        line = 2,
-        end_line = 2,
-        body = 'b',
-        anchor = vim.NIL,
-        state = 'active',
-        created_at = 1,
-      }
+      inject_comment 'keep'
 
       state.input_answer = 'n'
       session_handler.close()
       assert.equals('open', load_saved().status)
       assert.equals(SLUG, session_handler.active().id)
+      assert.is_true(review_tab() ~= nil)
 
       state.input_answer = 'y'
       session_handler.close()
       assert.equals('closed', load_saved().status)
       assert.is_nil(session_handler.active())
+    end
+  )
+
+  it(
+    'ユーザーが :tabclose で閉じる: active 解除・status=open 維持・save・INFO («開き直し可»)',
+    function()
+      start_done('main', 'feature')
+      inject_comment 'tabclosed-keep'
+      local review_t = review_tab()
+
+      vim.api.nvim_set_current_tabpage(review_t)
+      vim.cmd 'tabclose!'
+      vim.wait(300, function()
+        return session_handler.active() == nil
+      end)
+
+      assert.is_false(vim.api.nvim_tabpage_is_valid(review_t))
+      assert.is_nil(session_handler.active())
+      local saved = load_saved()
+      assert.equals(
+        'open',
+        saved.status,
+        'tab 消滅を close と解釈しない (status=open 維持)'
+      )
+      assert.equals(1, #saved.comments) -- save 済み (INV-4 + tab 消滅 save)
+      local notify = nil
+      for _, n in ipairs(state.notifications) do
+        if n.msg:find('レビュー tab を閉じました', 1, true) ~= nil then
+          notify = n
+        end
+      end
+      assert.is_not_nil(notify, 'tab 消滅 INFO が無い')
+      assert.equals(vim.log.levels.INFO, notify.level)
+      -- extmark 残骸 0 (張った head 実バッファを明示 clear — 開き直しまで残さない)
+      local head_buf = vim.fn.bufnr(state.repo .. '/a.lua')
+      local ns = vim.api.nvim_get_namespaces().review_comment
+      assert.is_true(vim.api.nvim_buf_is_valid(head_buf))
+      assert.equals(0, #vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, {}))
+    end
+  )
+
+  it(
+    'レビュー tab を閉じたまま :Review start (同一 refs) で開き直せる (placeholder でなく実窓)',
+    function()
+      start_done('main', 'feature')
+      vim.api.nvim_set_current_tabpage(review_tab())
+      vim.cmd 'tabclose!'
+      vim.wait(300, function()
+        return session_handler.active() == nil
+      end)
+      -- 開き直し = 同一 refs 組の保存済み継承 (confirm y)。git は start 相当を再実行
+      start_done('main', 'feature')
+      assert.equals(SLUG, session_handler.active().id)
+      assert.equals(state.repo .. '/a.lua', head_buf_name())
     end
   )
 
@@ -913,176 +1637,217 @@ describe('session.close / session.delete', function()
   end)
 end)
 
-describe('sidebar 操作 (viewed / 差分切替) と INV-4 save', function()
+describe('panel 操作 (open_file / viewed) と移動系', function()
   use_env()
 
+  local function focus_panel_row(row)
+    vim.api.nvim_set_current_win(ui_windows.win 'panel')
+    vim.api.nvim_win_set_cursor(0, { row, 0 })
+  end
+
   local function ex_bufname()
-    return vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+    return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(vim.api.nvim_get_current_win()))
   end
 
-  local function focus_sidebar_row(row)
-    local sb = vim.fn.bufnr(SIDEBAR_NAME)
-    local win = vim.fn.win_findbuf(sb)[1]
-    vim.api.nvim_set_current_win(win)
-    vim.api.nvim_win_set_cursor(win, { row, 0 })
-  end
+  it('<CR> で head/base をそのファイルに張り替え viewed=true + save', function()
+    start_done('main', 'feature')
+    focus_panel_row(2)
+
+    session_handler.open_selected_file()
+
+    local entry = load_saved().files['b.lua']
+    assert.equals(true, entry.viewed)
+    assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
+    assert.equals(state.repo .. '/b.lua', head_buf_name())
+  end)
 
   it(
-    '<Enter> で右ペインをそのファイルの diff に差し替え viewed=true + save',
+    '<CR> は focus を head 窓へ送る (panel に残らない。以降の c/e が効く)',
     function()
       start_done('main', 'feature')
-      focus_sidebar_row(2)
+      focus_panel_row(2)
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
 
       session_handler.open_selected_file()
 
-      assert.equals(1, vim.fn.bufexists 'review://diff/main--feature/b.lua')
-      assert.equals(true, load_saved().files['b.lua'].viewed)
+      assert.equals(ui_windows.win 'head', vim.api.nvim_get_current_win())
     end
   )
 
   it(
-    '<Enter> は focus を diff ペインへ移す (sidebar に残らない。以降の c/e が効く)',
+    '<CR> は窓役割の drift を復旧する (head 窓を閉じていても再建して張る)',
     function()
       start_done('main', 'feature')
-      focus_sidebar_row(2)
+      vim.api.nvim_win_close(ui_windows.win 'head', true)
+      focus_panel_row(2)
 
       session_handler.open_selected_file()
 
-      assert.equals(vim.fn.bufnr('review://diff/' .. SLUG .. '/b.lua'), vim.api.nvim_win_get_buf(0))
+      assert.equals(3, #vim.api.nvim_tabpage_list_wins(review_tab()))
+      assert.equals('head', ui_windows.role_of(ui_windows.win 'head'))
+      assert.equals(state.repo .. '/b.lua', head_buf_name())
     end
   )
 
-  it(
-    '<Enter> が diff 窓を閉じた単窓状態でも split 再建して diff を出す (無反応にしない)',
-    function()
-      start_done('main', 'feature')
-      -- 右ペイン (初期 a.lua の diff) を外から閉じる = <C-w>o / :q 相当
-      local dbuf = vim.fn.bufnr('review://diff/' .. SLUG .. '/a.lua')
-      vim.api.nvim_win_close(vim.fn.win_findbuf(dbuf)[1], true)
-      focus_sidebar_row(2)
+  it('head 窓 drift (他 buf を表示) でも open_file 再張付で復旧する', function()
+    start_done('main', 'feature')
+    vim.api.nvim_win_set_buf(ui_windows.win 'head', vim.api.nvim_create_buf(false, true))
+    assert.is_nil(ui_windows.role_of(ui_windows.win 'head'))
+    focus_panel_row(2)
 
-      session_handler.open_selected_file()
+    session_handler.open_selected_file()
 
-      local new_buf = vim.fn.bufnr('review://diff/' .. SLUG .. '/b.lua')
-      assert.is_true(new_buf ~= -1)
-      assert.is_true(#vim.fn.win_findbuf(new_buf) > 0)
-      assert.equals(new_buf, vim.api.nvim_win_get_buf(0))
-    end
-  )
+    assert.equals(state.repo .. '/b.lua', head_buf_name())
+    assert.equals('head', ui_windows.role_of(ui_windows.win 'head'))
+  end)
 
-  -- 実 repro (UX review F1 の真因): diff 窓の内容が sidebar buf に差し替わった
-  -- 状態 (:buffer など) で sidebar 窓を閉じると、active の win id 実体は
-  -- 「diff 役 = 実際 sidebar 表示」「sidebar 役 = 消滅」にズレる。<CR> が
-  -- 1 窓のまま diff を表示して sidebar を失う (一覧が消える = UI 不能)。
-  it(
-    '<CR> は窓役割のズレを修復する (diff 窓に sidebar が乗った単窓 -> 2 窓)',
-    function()
-      start_done('main', 'feature')
-      local sb_buf = vim.fn.bufnr(SIDEBAR_NAME)
-      local dbuf = vim.fn.bufnr(DIFF_A_NAME)
-      local dwin = vim.fn.win_findbuf(dbuf)[1]
-      local swin = nil
-      for _, w in ipairs(vim.api.nvim_tabpage_list_wins(state.tab)) do
-        if w ~= dwin then
-          swin = w
-        end
-      end
-      -- 実測 repro と同一操作: diff 窓に sidebar buf / sidebar 窓を閉じる
-      vim.api.nvim_win_set_buf(dwin, sb_buf)
-      vim.api.nvim_win_close(swin, true)
-      vim.api.nvim_win_set_cursor(dwin, { 2, 0 })
-
-      session_handler.open_selected_file()
-
-      local wins = vim.api.nvim_tabpage_list_wins(state.tab)
-      local seen_sb, seen_diff_b = false, false
-      for _, w in ipairs(wins) do
-        local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
-        if name == SIDEBAR_NAME then
-          seen_sb = true
-        elseif name == 'review://diff/' .. SLUG .. '/b.lua' then
-          seen_diff_b = true
-        end
-      end
-      assert.equals(2, #wins)
-      assert.is_true(seen_sb, 'sidebar 窓が消えたまま = 役割修復されていない')
-      assert.is_true(seen_diff_b, 'b.lua diff 窓が無い')
-    end
-  )
-
-  it(']d で次ファイルへ切り替え (viewed save / focus は diff に留まる)', function()
-    start_done('main', 'feature') -- 右ペイン = a.lua (パス昇順先頭)
+  it(']d で次ファイルへ open_file (viewed save / focus は head)', function()
+    start_done('main', 'feature') -- 先頭 a.lua
     session_handler.next_file()
 
-    assert.equals('review://diff/' .. SLUG .. '/b.lua', ex_bufname())
+    assert.equals(state.repo .. '/b.lua', ex_bufname())
     assert.equals(true, load_saved().files['b.lua'].viewed)
   end)
 
-  it('[d で前ファイルに戻る', function()
+  it('[d で前ファイルに戻る (base git show 再充填)', function()
     start_done('main', 'feature')
     session_handler.next_file()
     session_handler.prev_file()
 
-    assert.equals('review://diff/' .. SLUG .. '/a.lua', ex_bufname())
+    assert.equals(state.repo .. '/a.lua', ex_bufname())
+    assert.is_true(has_call 'git show main:a.lua')
   end)
 
   it('端では ]d/[d は無動作 (最後の次へを進まない)', function()
     start_done('main', 'feature')
     session_handler.next_file() -- b
     session_handler.next_file() -- 端 = noop
-    assert.equals('review://diff/' .. SLUG .. '/b.lua', ex_bufname())
+    assert.equals(state.repo .. '/b.lua', ex_bufname())
     session_handler.prev_file()
     session_handler.prev_file() -- 端 = noop
-    assert.equals('review://diff/' .. SLUG .. '/a.lua', ex_bufname())
-  end)
-
-  it('S で focus が sidebar へ移る', function()
-    start_done('main', 'feature')
-    session_handler.focus_sidebar()
-    assert.equals(SIDEBAR_NAME, ex_bufname())
-  end)
-
-  it('S は sidebar 窓が失われた単窓状態でも左に再建する', function()
-    start_done('main', 'feature')
-    local dw = vim.fn.win_findbuf(vim.fn.bufnr(DIFF_A_NAME))[1]
-    vim.api.nvim_set_current_win(dw)
-    vim.cmd 'only'
-    session_handler.focus_sidebar()
-
-    assert.equals(SIDEBAR_NAME, ex_bufname())
-    assert.equals(2, #vim.api.nvim_tabpage_list_wins(state.tab))
-    -- sidebar 左 / diff 右 (設計契約)
-    local sb = vim.fn.win_findbuf(vim.fn.bufnr(SIDEBAR_NAME))[1]
-    local db = vim.fn.win_findbuf(vim.fn.bufnr(DIFF_A_NAME))[1]
-    assert.is_true(vim.fn.win_screenpos(sb)[2] < vim.fn.win_screenpos(db)[2])
-  end)
-
-  it('x で viewed 切替 -> 直後に save (両方向)', function()
-    start_done('main', 'feature')
-    focus_sidebar_row(1)
-
-    session_handler.toggle_viewed_current()
-    assert.equals(true, load_saved().files['a.lua'].viewed)
-
-    session_handler.toggle_viewed_current()
-    assert.equals(false, load_saved().files['a.lua'].viewed)
+    assert.equals(state.repo .. '/a.lua', ex_bufname())
   end)
 
   it(
-    'sidebar o (keymap rhs 実行): git show <head>:<path> の read-only fileview が開く',
+    'S / <leader>e (focus_sidebar) で focus が panel へ移り、閉窓からは左再建',
+    function()
+      start_done('main', 'feature')
+      session_handler.focus_sidebar()
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+
+      vim.api.nvim_win_close(ui_windows.win 'panel', true)
+      session_handler.focus_sidebar()
+      assert.equals(3, #vim.api.nvim_tabpage_list_wins(review_tab()))
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+      assert.is_true(
+        vim.fn.win_screenpos(ui_windows.win 'panel')[2]
+          < vim.fn.win_screenpos(ui_windows.win 'base')[2]
+      )
+    end
+  )
+
+  it(
+    '<leader>b (toggle_panel): panel 窓を閉じる / 再度 open でレビュー窓を残す',
+    function()
+      start_done('main', 'feature')
+      session_handler.toggle_panel() -- hide
+      assert.is_nil(ui_windows.win 'panel')
+      assert.is_true(vim.api.nvim_win_is_valid(ui_windows.win 'head'))
+      assert.is_true(vim.api.nvim_win_is_valid(ui_windows.win 'base'))
+
+      session_handler.toggle_panel() -- show (再建 + focus)
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+      assert.equals(3, #vim.api.nvim_tabpage_list_wins(review_tab()))
+      -- 再建 panel は一覧が載っている (開いている files)
+      local sb = vim.api.nvim_win_get_buf(ui_windows.win 'panel')
+      assert.same(
+        { '[✓] M a.lua +1 -0', 'A b.lua +1 -0' },
+        vim.api.nvim_buf_get_lines(sb, 0, -1, false)
+      )
+    end
+  )
+
+  it('x で viewed 切替 -> 直後に save (両方向)', function()
+    start_done('main', 'feature') -- a.lua は開始 open で viewed=true
+    focus_panel_row(1)
+
+    session_handler.toggle_viewed_current()
+    assert.equals(false, load_saved().files['a.lua'].viewed)
+
+    session_handler.toggle_viewed_current()
+    assert.equals(true, load_saved().files['a.lua'].viewed)
+  end)
+
+  it('x 後に panel 一覧が [✓] 再描画される (付与と解除の両方向)', function()
+    start_done('main', 'feature') -- a.lua は開始 open で viewed=true -> [✓]
+    focus_panel_row(2)
+    session_handler.toggle_viewed_current()
+
+    local sb = vim.api.nvim_win_get_buf(ui_windows.win 'panel')
+    assert.same(
+      { '[✓] M a.lua +1 -0', '[✓] A b.lua +1 -0' },
+      vim.api.nvim_buf_get_lines(sb, 0, -1, false)
+    )
+
+    session_handler.toggle_viewed_current() -- 解除方向も再描画される
+    assert.same(
+      { '[✓] M a.lua +1 -0', 'A b.lua +1 -0' },
+      vim.api.nvim_buf_get_lines(sb, 0, -1, false)
+    )
+  end)
+
+  it(
+    'o (head 窓) はレビュー tab の前行儀に別 tab で実ファイルを開く (git show 0 件)',
+    function()
+      start_done('main', 'feature')
+      local review_t = review_tab()
+      local ridx = tab_index(review_t)
+      local calls_before = #state.git_calls
+      local tabs_before = #vim.api.nvim_list_tabpages()
+
+      session_handler.open_file_current()
+
+      assert.equals(tabs_before + 1, #vim.api.nvim_list_tabpages())
+      -- 前行儀: focus の新 tab はレビュー tab の左、レビュー tab は 1 つ右へshift
+      assert.equals(ridx, vim.fn.tabpagenr())
+      assert.equals(ridx + 1, tab_index(review_t))
+      assert.equals(
+        state.repo .. '/a.lua',
+        vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+      )
+      assert.equals(true, vim.bo[vim.api.nvim_get_current_buf()].modifiable)
+      assert.equals(
+        calls_before,
+        #state.git_calls,
+        'o は git show を呼ばない (checkout 実ファイル)'
+      )
+    end
+  )
+
+  it(
+    'base 窓の o も同じファイルの実ファイルへ開く («base 窓でも同じ動作»)',
+    function()
+      start_done('main', 'feature')
+      vim.api.nvim_set_current_win(ui_windows.win 'base')
+
+      session_handler.open_file_current()
+
+      assert.equals(
+        state.repo .. '/a.lua',
+        vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+      )
+    end
+  )
+
+  it(
+    'panel の o keymap rhs から同一入口で開く (dangling 検出 / 押下相当)',
     function()
       start_done('main', 'feature')
       local sb = vim.fn.bufnr(SIDEBAR_NAME)
-      local win = vim.fn.win_findbuf(sb)[1]
-      vim.api.nvim_set_current_win(win)
-      vim.api.nvim_win_set_cursor(win, { 1, 0 })
-      install_git {
-        function()
-          return { code = 0, stdout = 'line1\nline2\n', stderr = '' }
-        end,
-      }
+      vim.api.nvim_set_current_win(vim.fn.win_findbuf(sb)[1])
+      vim.api.nvim_win_set_cursor(0, { 2, 0 })
+      assert.is_true(review_tab() ~= nil)
 
-      -- list.lua が貼った rhs 文字列そのものを実行する (押下と同一経路)
       local rhs
       for _, m in ipairs(vim.api.nvim_buf_get_keymap(sb, 'n')) do
         if m.lhs == 'o' then
@@ -1090,218 +1855,172 @@ describe('sidebar 操作 (viewed / 差分切替) と INV-4 save', function()
         end
       end
       assert.is_not_nil(rhs)
-      -- 発火時と同じ対象を叩く (終端の <CR> は keymap の確定キー。vim.cmd では除去)
       vim.cmd((rhs:gsub('<CR>$', '')))
 
-      assert.same({ 'git', 'show', 'feature:a.lua' }, state.git_calls[1])
-      local fbuf = vim.fn.bufnr 'review://file/main--feature/a.lua'
-      assert.not_equals(-1, fbuf)
-      assert.same({ 'line1', 'line2' }, vim.api.nvim_buf_get_lines(fbuf, 0, -1, false))
-      assert.is_true(vim.bo[fbuf].readonly)
+      assert.equals(
+        state.repo .. '/b.lua',
+        vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+      )
     end
   )
 
-  it('q (close_by_key) は close と同じ (コメント 0 では無確認)', function()
-    start_done('main', 'feature')
-
-    session_handler.close_by_key()
-
-    assert.equals('closed', load_saved().status)
-    assert.is_nil(session_handler.active())
-    assert.equals(0, #state.inputs)
-  end)
-end)
-
--- ---------------------------------------------------------------------------
--- #6 worktree: 作成判断 (新契約: pr のみ常時作成 / branch は作らない) /
--- close / delete / o 実ファイル (pr-worktree.md 決定表 + head 解決フロー)
--- ---------------------------------------------------------------------------
-
--- paths.worktree_path は注入済み state.dir を使うので require 時でなく呼ぶ時に計算する。
-local function wt_path(slug)
-  return paths.worktree_path(REPO_TOP, slug or SLUG)
-end
-
-local function git_fail(msg)
-  return function()
-    return { code = 255, stdout = '', stderr = msg }
-  end
-end
-
-local function add_cmd(ref, slug)
-  return { 'git', 'worktree', 'add', '--detach', wt_path(slug), ref or 'feature' }
-end
-
-local function list_cmd()
-  return { 'git', 'worktree', 'list', '--porcelain' }
-end
-
--- 応答の選択肢を 1 回目順に 1 件ずつ返す入力スタブ (delete+force の 2 確認用)。
-local function answer_queue(answers)
-  local idx = 0
-  vim.ui.input = function(opts, cb)
-    idx = idx + 1
-    table.insert(state.inputs, opts)
-    cb(answers[idx])
-  end
-end
-
-local function has_worktree_call()
-  for _, cmd in ipairs(state.git_calls) do
-    if cmd[2] == 'worktree' then
-      return true
-    end
-  end
-  return false
-end
-
--- worktree 作成判断は mode=pr のみ。pr 開始は add/再利用 -> diff (cwd=worktree、
--- 単引数) の順 (pr-worktree.md「PR 解決」3)。handlers/pr と同じ入口 (session.begin)。
-local function begin_pr(responses, opts)
-  install_git(responses)
-  return session_handler.begin {
-    repo = REPO_TOP,
-    id = (opts and opts.id) or SLUG,
-    mode = 'pr',
-    base = 'main',
-    head = (opts and opts.head) or 'feature',
-  }
-end
-
--- worktree 作成済み (記録 {path=wt_path(), created_by_us=true}) のセッションを開始。
-local function started_with_worktree()
-  begin_pr {
-    git_ok, -- worktree add
-    function()
-      return diff_ok(RAW_DIFF_A_B)
-    end,
-  }
-end
-
--- install_git の worktree remove 非同期版。'git worktree remove' に限って
--- on_exit を state.deferred に捕捉して呼ばない (実 vim.system は非同期。
--- install_git の同期 on_exit では区別できない「remove 完了前/後」の順序を pin する)。
--- responses の remove のスロットは手前へ返るため読まれない (placeholder で可)。
-local function install_git_deferred_remove(responses)
-  state.git_calls = {}
-  state.git_opts = {}
-  state.deferred = nil
-  cli._set_system(function(cmd, opts, on_exit)
-    local idx = #state.git_calls + 1
-    table.insert(state.git_calls, cmd)
-    state.git_opts[idx] = opts
-    if cmd[2] == 'worktree' and cmd[3] == 'remove' then
-      state.deferred = on_exit
-      return
-    end
-    if responses[idx] == nil then
-      error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
-    end
-    on_exit(responses[idx](cmd, opts))
-  end)
-  cli._set_executable(function()
-    return 1
-  end)
-end
-
-describe('branch は worktree を作らない (pr-worktree.md 決定表の新契約)', function()
-  use_env()
-
-  -- 旧契約 «branch + 未コミット変更 or head 不一致なら worktree 作成» を pin していた
-  -- test の置換先。作成しないことを worktree 起動 0 件 + 記録 nil で検出する。
-
-  it('head 不一致 + switch 拒否の縮退でも worktree 起動 0 件・記録 nil', function()
+  it('削除ファイルの o は WARN «開けません» で tab を開かない', function()
     install_git {
       top_ok,
-      RP_HEAD_MISMATCH[1],
-      RP_HEAD_MISMATCH[2],
-      showref_ok,
-      status_clean,
+      RP_HEAD_MATCH[1],
+      RP_HEAD_MATCH[2],
       function()
-        return diff_ok(RAW_DIFF_A_B)
+        return diff_ok(RAW_DIFF_DEL_BIN)
       end,
     }
-    state.input_answer = 'n'
-
     session_handler.start { base = 'main', head = 'feature' }
+    session_handler.next_file() -- c.lua (D) 現在位置
+    local tabs_before = #vim.api.nvim_list_tabpages()
+    state.notifications = {}
 
-    assert.is_false(has_worktree_call())
-    assert.equals(vim.NIL, load_saved().worktree)
+    session_handler.open_file_current()
+
+    assert.same({
+      msg = 'review.nvim: 削除ファイル c.lua は開けません',
+      level = vim.log.levels.WARN,
+    }, state.notifications[1])
+    assert.equals(tabs_before, #vim.api.nvim_list_tabpages())
   end)
 
   it(
-    '作業ツリー dirty でも worktree を作らない (縮退は head 解決フローが担う)',
+    'scratch 縮退時の o は INFO (現在のチェックアウト宣言) + 実ファイルを開く',
     function()
       install_git {
         top_ok,
         RP_HEAD_MISMATCH[1],
         RP_HEAD_MISMATCH[2],
         showref_ok,
-        status_dirty,
+        status_clean,
         function()
           return diff_ok(RAW_DIFF_A_B)
         end,
       }
-
+      state.input_answer = 'n'
       session_handler.start { base = 'main', head = 'feature' }
+      state.notifications = {}
 
-      assert.equals(vim.NIL, load_saved().worktree)
+      session_handler.open_file_current()
+
+      assert.same({
+        msg = 'review.nvim: a.lua は現在のチェックアウトの実ファイルです (head の状態は縮退中)',
+        level = vim.log.levels.INFO,
+      }, state.notifications[1])
+      assert.equals(
+        state.repo .. '/a.lua',
+        vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+      )
     end
   )
-end)
-
-describe('branch の旧契約 worktree 名残の掃除 (INV-3: 自前分だけ)', function()
-  use_env()
 
   it(
-    '開始時に created_by_us=true 名残を remove で掃除し、セッション記録は nil になる',
+    'worktree 記録あり: o は <worktree>/<path> の実ファイルを開く (git show を呼ばず・編集可)',
     function()
       local wt = wt_path()
       vim.fn.mkdir(wt, 'p')
-      store.save(existing_stub { worktree = { path = wt, created_by_us = true } })
-      install_git {
-        top_ok,
-        RP_HEAD_MATCH[1],
-        RP_HEAD_MATCH[2],
-        function()
-          return diff_ok(RAW_DIFF_A_B)
-        end,
-        git_ok, -- 掃除: status clean
-        git_ok, -- 掃除: remove ok
-      }
-      state.input_answer = 'y' -- 継承確認
+      local f = io.open(vim.fs.joinpath(wt, 'a.lua'), 'w')
+      f:write 'WT-HEAD-CONTENT\n'
+      f:close()
+      started_with_worktree()
+      local calls_before = #state.git_calls
+      local sb = vim.fn.bufnr(SIDEBAR_NAME)
+      vim.api.nvim_set_current_win(vim.fn.win_findbuf(sb)[1])
+      vim.api.nvim_win_set_cursor(0, { 1, 0 })
 
-      session_handler.start { base = 'main', head = 'feature' }
+      local rhs
+      for _, m in ipairs(vim.api.nvim_buf_get_keymap(sb, 'n')) do
+        if m.lhs == 'o' then
+          rhs = m.rhs
+        end
+      end
+      vim.cmd((rhs:gsub('<CR>$', '')))
 
-      assert.same({ 'git', '-C', wt, 'status', '--porcelain' }, state.git_calls[5])
-      assert.same({ 'git', 'worktree', 'remove', wt }, state.git_calls[6])
-      assert.equals(vim.NIL, load_saved().worktree)
-      assert.equals(SLUG, session_handler.active().id)
+      local fbuf = vim.fn.bufnr(vim.fs.joinpath(wt, 'a.lua'))
+      assert.not_equals(-1, fbuf)
+      assert.same({ 'WT-HEAD-CONTENT' }, vim.api.nvim_buf_get_lines(fbuf, 0, -1, false))
+      assert.equals(false, vim.bo[fbuf].readonly)
+      assert.equals(calls_before, #state.git_calls)
     end
   )
 
+  it('q (close_by_key) は無確認で閉じ tab 消滅 INFO も出さない', function()
+    start_done('main', 'feature')
+    local tab = review_tab()
+
+    session_handler.close_by_key()
+
+    assert.equals('closed', load_saved().status)
+    assert.is_nil(session_handler.active())
+    assert.is_false(vim.api.nvim_tabpage_is_valid(tab))
+    assert.equals(0, #state.notifications)
+    assert.equals(0, #state.inputs)
+  end)
+end)
+
+describe('commit_comment_change (INV-4 + extmark 再適用)', function()
+  use_env()
+
+  it('save + head extmark 再構成 + head/panel winbar comments 件数', function()
+    start_done('main', 'feature')
+    inject_comment 'first thread'
+
+    local saved = load_saved()
+    assert.equals(1, #saved.comments)
+    local head_buf = vim.api.nvim_win_get_buf(ui_windows.win 'head')
+    local ns = vim.api.nvim_get_namespaces().review_comment
+    assert.equals(1, #vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, {}))
+
+    local hw = ui_windows.win 'head'
+    assert.equals('main..feature · a.lua · +1 -0 · 1 comment', vim.w[hw].review_winbar)
+    local pw = ui_windows.win 'panel'
+    assert.equals('main..feature · 2 files · 1 comment', vim.w[pw].review_winbar)
+
+    -- 2 件目 (同一行 = 同一 group の extmark は併合のまま件数 2)
+    inject_comment_at(2, 'second thread')
+    assert.equals(2, #load_saved().comments)
+    assert.equals(1, #vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, {}))
+    local details = vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, { details = true })
+    local vt = ''
+    for _, chunk in ipairs(details[1][4].virt_text or {}) do
+      vt = vt .. (type(chunk[1]) == 'table' and chunk[1][1] or chunk[1])
+    end
+    assert.is_true(vt:find('💬 2', 1, true) ~= nil, vt)
+    assert.equals('main..feature · a.lua · +1 -0 · 2 comments', vim.w[hw].review_winbar)
+  end)
+
   it(
-    'created_by_us=false 名残記録は掃除しない (INV-3: 自前分のみ削除)。remove 起動 0 件',
+    '告知窓 (binary) を開いている間は save と panel winbar のみ (extmark を張らない)',
     function()
-      local wt = wt_path()
-      store.save(existing_stub { worktree = { path = wt, created_by_us = false } })
       install_git {
         top_ok,
         RP_HEAD_MATCH[1],
         RP_HEAD_MATCH[2],
         function()
-          return diff_ok(RAW_DIFF_A_B)
+          return diff_ok(RAW_DIFF_DEL_BIN)
         end,
       }
-      state.input_answer = 'y' -- 継承確認
-
       session_handler.start { base = 'main', head = 'feature' }
+      inject_comment('on-binary', 'bin.dat', 1) -- file=bin.dat のコメントを注入
 
-      assert.equals(4, #state.git_calls)
-      assert.equals(vim.NIL, load_saved().worktree)
+      local bin_buf = vim.fn.bufnr('review://binary/' .. SLUG .. '/bin.dat')
+      local ns = vim.api.nvim_get_namespaces().review_comment
+      assert.equals(0, #vim.api.nvim_buf_get_extmarks(bin_buf, ns, 0, -1, {}))
+      assert.equals(
+        'main..feature · 2 files · 1 comment',
+        vim.w[ui_windows.win 'panel'].review_winbar
+      )
+      assert.equals(1, #load_saved().comments)
     end
   )
 end)
+
+-- ---------------------------------------------------------------------------
+-- pr worktree (作成判断 / 記録再利用 / 直列化)
+-- ---------------------------------------------------------------------------
 
 describe(
   'pr worktree 作成判断 (mode=pr は常時作って差分は worktree 基準)',
@@ -1320,7 +2039,9 @@ describe(
 
         assert.same(add_cmd(), state.git_calls[1])
         assert.same({ 'git', 'diff', 'main' }, state.git_calls[2])
-        assert.equals(wt_path(), state.git_opts[2].cwd)
+        -- dir 実在しない (stub add) ため open 充填の show cwd は repo 基準
+        assert.same({ 'git', 'show', 'main:a.lua' }, state.git_calls[3])
+        assert.equals(state.repo, state.git_opts[3].cwd)
         assert.same({ path = wt_path(), created_by_us = true }, load_saved().worktree)
         assert.equals(0, #state.notifications)
         assert.equals(SLUG, session_handler.active().id)
@@ -1372,6 +2093,10 @@ describe(
       function()
         local wt = wt_path()
         vim.fn.mkdir(wt, 'p')
+        -- 再利用する worktree の a.lua を実在させる (head 実ファイル窓の前提)
+        local wf = io.open(vim.fs.joinpath(wt, 'a.lua'), 'w')
+        wf:write 'WT-HEAD-CONTENT\n'
+        wf:close()
         store.save(existing_stub {
           mode = 'pr',
           worktree = { path = wt, created_by_us = true },
@@ -1381,7 +2106,7 @@ describe(
           function()
             return {
               code = 0,
-              stdout = 'worktree ' .. REPO_TOP .. '\nworktree ' .. vim.uv.fs_realpath(wt) .. '\n',
+              stdout = 'worktree ' .. state.repo .. '\nworktree ' .. vim.uv.fs_realpath(wt) .. '\n',
               stderr = '',
             }
           end, -- list: 登録あり
@@ -1395,11 +2120,16 @@ describe(
         assert.same({ 'git', 'diff', 'main' }, state.git_calls[2])
         assert.equals(wt, state.git_opts[2].cwd)
         assert.same({ path = wt, created_by_us = true }, load_saved().worktree)
+        -- dir 実在 -> head 実ファイルも show 充填も worktree 基準
+        -- (bufadd は symlink を解決して buf 名を持つので buffer 名側だけ realpath で
+        -- 比較。git へ渡す cwd は記録された worktree path のまま — macOS の
+        -- /var -> /private/var 正規化は buf 名側の挙動)
+        assert.equals(vim.uv.fs_realpath(vim.fs.joinpath(wt, 'a.lua')), head_buf_name())
+        assert.equals(wt, state.git_opts[3].cwd)
       end
     )
 
     it(
-      -- INV-3: 削除してよいのは created_by_us=true の自前分だけ
       '記録 true + dir 実在 + 未登録 => add 衝突 -> prune -> 再衝突 -> remove_dir して再 add',
       function()
         local wt = wt_path()
@@ -1423,10 +2153,9 @@ describe(
         }
 
         -- remove_dir が自前 dir を実削除した (add3 はスタブ応答なので dir は再生成されない)。
-        -- 削除后的成功 add まで通ってワークツリー記録が復活すること自体の往復は worktree_spec 実 git 側。
         assert.is_true(vim.uv.fs_stat(wt) == nil)
-        -- list, add1, prune, add2, add3, diff
-        assert.equals(6, #state.git_calls)
+        -- list, add1, prune, add2, add3, diff, (open) show
+        assert.equals(7, #state.git_calls)
         assert.same({ path = wt, created_by_us = true }, load_saved().worktree)
       end
     )
@@ -1470,7 +2199,13 @@ describe(
             return diff_ok(RAW_DIFF_A_B)
           end,
         }
-        local opts = { repo = REPO_TOP, id = SLUG, mode = 'pr', base = 'main', head = 'feature' }
+        local opts = {
+          repo = state.repo,
+          id = SLUG,
+          mode = 'pr',
+          base = 'main',
+          head = 'feature',
+        }
         session_handler.begin(opts) -- #1: add -> diff 0 -> remove 投入 (未完)
 
         assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[3])
@@ -1504,7 +2239,7 @@ describe(
           function()
             return {
               code = 0,
-              stdout = 'worktree ' .. REPO_TOP .. '\nworktree ' .. vim.uv.fs_realpath(wt) .. '\n',
+              stdout = 'worktree ' .. state.repo .. '\nworktree ' .. vim.uv.fs_realpath(wt) .. '\n',
               stderr = '',
             }
           end, -- list 登録あり -> 記録を再利用 (add なし)
@@ -1516,7 +2251,7 @@ describe(
         state.input_answer = 'y' -- 継承確認
 
         session_handler.begin {
-          repo = REPO_TOP,
+          repo = state.repo,
           id = SLUG,
           mode = 'pr',
           base = 'main',
@@ -1526,7 +2261,6 @@ describe(
         assert.same({ 'git', 'worktree', 'remove', wt }, state.git_calls[3])
         assert.is_nil(session_handler.active())
         -- 開始は開かない = 新規 save はしないが、既存 JSON の整合は保つ
-        -- (status / comments / refs はそのまま、worktree 記録だけ nil 化)。
         assert.same(
           existing_stub { mode = 'pr', worktree = vim.NIL, updated_at = 4321 },
           load_saved()
@@ -1540,7 +2274,6 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
   use_env()
 
   it(
-    -- 終了手順 2-3: status -> save(closed) -> remove。ref 掃除は delete のみ
     'worktree clean => 確認なしで save(closed) -> `git worktree remove` まで走る',
     function()
       started_with_worktree()
@@ -1653,7 +2386,7 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
 
       session_handler.close_by_key()
       session_handler.begin {
-        repo = REPO_TOP,
+        repo = state.repo,
         id = SLUG,
         mode = 'pr',
         base = 'main',
@@ -1681,7 +2414,7 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
       assert.is_true(has_add, 'remove 完了後も add が再開しない')
       assert.same(add_cmd(), state.git_calls[3])
       assert.same({ 'git', 'diff', 'main' }, state.git_calls[4])
-      assert.equals('main--feature', session_handler.active().id)
+      assert.equals(SLUG, session_handler.active().id)
     end
   )
 
@@ -1701,19 +2434,16 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
     end
   )
 
-  it(
-    'worktree なしセッションの close は git 追加呼び出し 0 (従来動作)',
-    function()
-      start_done('main', 'feature')
-      install_git {}
-      session_handler.close()
-      assert.equals('closed', load_saved().status)
-      assert.equals(0, #state.git_calls)
-    end
-  )
+  it('worktree なしセッションの close は git 追加呼び出し 0', function()
+    start_done('main', 'feature')
+    install_git {}
+    session_handler.close()
+    assert.equals('closed', load_saved().status)
+    assert.equals(0, #state.git_calls)
+  end)
 
   it(
-    'INV-3: created_by_us=false 記録のまま close すると worktree に一切触れない (status/remove 0 件)',
+    'INV-3: created_by_us=false 記録のまま close すると worktree に一切触れない',
     function()
       started_with_worktree()
       -- active / disk の記録を非自前へ書き換える (テスト目的の注入)
@@ -1721,7 +2451,7 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
       sess.worktree = { path = wt_path(), created_by_us = false }
       assert.equals(true, store.save(sess).ok)
       session_handler.active().worktree = sess.worktree
-      install_git { git_ok }
+      install_git {}
 
       session_handler.close()
 
@@ -1737,7 +2467,7 @@ describe('delete の worktree / ref 掃除', function()
   use_env()
 
   it(
-    '閉じた作成分残骸 (active なし): status -> remove 掃除 -> 自前 pr ref 削除 -> JSON 削除 (孤児 dir を残さない)',
+    '閉じた作成分残骸 (active なし): status -> remove 掃除 -> 自前 pr ref 削除 -> JSON 削除',
     function()
       vim.fn.mkdir(wt_path 'pr-7', 'p')
       store.save(existing_stub {
@@ -1762,7 +2492,7 @@ describe('delete の worktree / ref 掃除', function()
       assert.same({ 'git', 'worktree', 'remove', wt_path 'pr-7' }, state.git_calls[3])
       assert.same({ 'git', 'update-ref', '-d', 'refs/heads/review-nvim/pr-7' }, state.git_calls[4])
       assert.equals(4, #state.git_calls)
-      assert.is_true(vim.uv.fs_stat(paths.session_file(REPO_TOP, 'pr-7')) == nil)
+      assert.is_true(vim.uv.fs_stat(paths.session_file(state.repo, 'pr-7')) == nil)
     end
   )
 
@@ -1779,6 +2509,28 @@ describe('delete の worktree / ref 掃除', function()
       assert.is_true(vim.uv.fs_stat(json_path()) == nil)
     end
   )
+
+  describe('head 窓実バッファの扱い', function()
+    it(
+      'tabclose 後も head 実ファイルバッファの modified 内容は失われない',
+      function()
+        start_done('main', 'feature')
+        inject_comment 'keep-buffer'
+        local head_buf = vim.api.nvim_win_get_buf(ui_windows.win 'head')
+        vim.api.nvim_buf_set_lines(head_buf, 1, 2, false, { 'USER EDIT' })
+
+        vim.api.nvim_set_current_tabpage(review_tab())
+        vim.cmd 'tabclose!'
+        vim.wait(300, function()
+          return session_handler.active() == nil
+        end)
+
+        assert.is_true(vim.api.nvim_buf_is_valid(head_buf))
+        assert.equals(true, vim.bo[head_buf].modified)
+        assert.same({ 'line1', 'USER EDIT' }, vim.api.nvim_buf_get_lines(head_buf, 0, -1, false))
+      end
+    )
+  end)
 
   it(
     'active 同一 id の delete は close 相当の掃除 (status -> save -> remove) -> JSON 削除',
@@ -1812,20 +2564,18 @@ describe('delete の worktree / ref 掃除', function()
     'active 同一 id の delete: JSON+ref 削除は remove (手順 3) の投入より先へ進まず、完了を待って実行する',
     function()
       started_with_worktree()
-      install_git_deferred_remove { top_ok, git_ok, git_ok, git_ok }
+      install_git_deferred_remove { top_ok, git_ok, git_ok }
       state.input_answer = 'y'
 
       session_handler.delete(SLUG)
 
       -- remove は投入済みで未完了 (state.deferred)。この時点で JSON が消えて
-      -- いると、remove 失敗時に孤児 dir を scan が回収できない (記録が既に
-      -- 削除済みで created_by_us を読めない) — pr-worktree.md「セッションの
-      -- 削除」手順 1〜3 完了順の pin。
+      -- いると、remove 失敗時に孤児 dir を scan が回収できない — pr-worktree.md
+      -- 「セッションの削除」手順 1〜3 完了順の pin。
       assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[3])
       assert.is_true(state.deferred ~= nil)
       assert.is_true(vim.uv.fs_stat(json_path()) ~= nil)
       assert.equals('closed', load_saved().status)
-      assert.equals(0, #state.notifications)
 
       state.deferred { code = 0, stdout = '', stderr = '' }
 
@@ -1841,13 +2591,12 @@ describe('delete の worktree / ref 掃除', function()
       started_with_worktree()
       local wt = wt_path()
       vim.fn.mkdir(wt, 'p') -- remove 失敗後も dir が残る実状態
-      install_git_deferred_remove { top_ok, git_ok, git_ok, git_ok }
+      install_git_deferred_remove { top_ok, git_ok, git_ok }
       state.input_answer = 'y'
 
       session_handler.delete(SLUG)
       state.deferred { code = 255, stdout = '', stderr = 'fatal: remove boom\n' }
 
-      -- 失敗は通知され (delete 自身の失敗通知)、掃除が完走したら JSON+ref 削除へ進む。
       assert.same({
         msg = 'review.nvim: worktree 掃除に失敗しました (残骸は起動 scan が回収します): fatal: remove boom',
         level = vim.log.levels.WARN,
@@ -1868,10 +2617,10 @@ describe('delete の worktree / ref 掃除', function()
       locked:write 'x\n'
       locked:close()
       -- dir を r-x (書き込み不可) にすると remove_dir の unlink が実 FS 権限で失敗する
-      -- (root 実行では成り立たない。make test はローカル非 root 前提 — DESIGN.md 開発コマンド)。
+      -- (root 実行では成り立たない。make test はローカル非 root 前提 — DESIGN.md)。
       vim.fn.system { 'chmod', '555', wt }
       assert.equals(0, vim.v.shell_error)
-      install_git_deferred_remove { top_ok, git_ok, git_ok, git_ok }
+      install_git_deferred_remove { top_ok, git_ok, git_ok }
       state.input_answer = 'y'
 
       session_handler.delete(SLUG)
@@ -1882,8 +2631,6 @@ describe('delete の worktree / ref 掃除', function()
         msg = 'review.nvim: worktree 掃除に失敗しました (残骸は起動 scan が回収します): fatal: remove boom',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
-      -- close 側の二段目自己修復 (prune + dir 削除) も失敗した旨の通知が挟まり、
-      -- delete 側の中止通知が続く (same-id delete = close 連鎖の上に乗るため)。
       local function has_msg(pat)
         for _, n in ipairs(state.notifications) do
           if n.msg:find(pat, 1, true) ~= nil then
@@ -1894,8 +2641,7 @@ describe('delete の worktree / ref 掃除', function()
       end
       assert.is_true(has_msg 'worktree dir を削除できませんでした')
       assert.is_true(has_msg '孤児 worktree dir を消去できませんでした')
-      -- JSON を消さない = closed + created_by_us=true の記録が残る。これは起動
-      -- scan (health.classify) の「掃除してよい残骸」入力そのもの (孤児化しない)。
+      -- JSON を消さない = closed + created_by_us=true の記録が残る (起動 scan 回収可)。
       assert.is_true(vim.uv.fs_stat(json_path()) ~= nil)
       assert.equals('closed', load_saved().status)
       assert.same({ path = wt, created_by_us = true }, load_saved().worktree)
@@ -1907,7 +2653,7 @@ describe('delete の worktree / ref 掃除', function()
   )
 
   it(
-    'INV-3: created_by_us=false 記録の dir は触れない (active なし delete は remove なしでファイルのみ削除)',
+    'INV-3: created_by_us=false 記録の dir は触れない (active なし delete は JSON ファイルのみ削除)',
     function()
       store.save(existing_stub {
         worktree = { path = wt_path(), created_by_us = false },
@@ -1923,7 +2669,7 @@ describe('delete の worktree / ref 掃除', function()
   )
 
   it(
-    'active なし残骸が dirty: --force 確認、キャンセルなら delete 中止 (JSON 保持・dir 保持)',
+    'active なし残骸が dirty: --force 確認、キャンセルなら delete 中止 (JSON 保持)',
     function()
       vim.fn.mkdir(wt_path(), 'p')
       store.save(existing_stub {
@@ -1953,7 +2699,7 @@ describe('delete の worktree / ref 掃除', function()
   )
 
   it(
-    'remove 失敗 (dir 残る) は prune + 自前 dir remove_dir で回収してから削除を続行 (孤児 dir を残さない)',
+    'remove 失敗 (dir 残る) は prune + 自前 dir remove_dir で回収してから削除を続行',
     function()
       local wt = wt_path()
       vim.fn.mkdir(wt, 'p')
@@ -1975,113 +2721,53 @@ describe('delete の worktree / ref 掃除', function()
       assert.is_true(vim.uv.fs_stat(json_path()) == nil)
     end
   )
-end)
-
-describe('open_file_current の worktree / 削除行 (o)', function()
-  use_env()
 
   it(
-    'worktree 記録あり: <worktree>/<path> の実ファイルを開く (git show を呼ばず・編集可)',
+    '閉じた残骸で dir まで消せなければ delete を中止して JSON を残す (孤児 dir なし・scan 回収可)',
     function()
       local wt = wt_path()
       vim.fn.mkdir(wt, 'p')
-      local f = io.open(vim.fs.joinpath(wt, 'a.lua'), 'w')
-      f:write 'WT-HEAD-CONTENT\n'
-      f:close()
-      started_with_worktree()
-      local sb = vim.fn.bufnr(SIDEBAR_NAME)
-      local win = vim.fn.win_findbuf(sb)[1]
-      vim.api.nvim_set_current_win(win)
-      vim.api.nvim_win_set_cursor(win, { 1, 0 })
-      install_git {} -- 追加の git 呼び出しは即エラー
-
-      -- sidebar o の RHS (keymap) を実行 = 押下と同一経路
-      local rhs
-      for _, m in ipairs(vim.api.nvim_buf_get_keymap(sb, 'n')) do
-        if m.lhs == 'o' then
-          rhs = m.rhs
-        end
-      end
-      vim.cmd((rhs:gsub('<CR>$', '')))
-
-      local fbuf = vim.fn.bufnr(vim.fs.joinpath(wt, 'a.lua'))
-      assert.not_equals(-1, fbuf)
-      assert.same({ 'WT-HEAD-CONTENT' }, vim.api.nvim_buf_get_lines(fbuf, 0, -1, false))
-      assert.equals(false, vim.bo[fbuf].readonly)
-      assert.equals('a.lua', vim.b[fbuf].review_meta.path)
-    end
-  )
-
-  it(
-    'worktree 記録なし: 従来通り git show read-only (作成判断 skip 経路の o)',
-    function()
-      start_done('main', 'feature')
-      install_git {
-        function()
-          return { code = 0, stdout = 'shown\n', stderr = '' }
-        end,
-      }
-      local sb = vim.fn.bufnr(SIDEBAR_NAME)
-      local win = vim.fn.win_findbuf(sb)[1]
-      vim.api.nvim_set_current_win(win)
-      vim.api.nvim_win_set_cursor(win, { 1, 0 })
-
-      session_handler.open_file_current()
-
-      assert.same({ 'git', 'show', 'feature:a.lua' }, state.git_calls[1])
-    end
-  )
-
-  it(
-    'diff の削除行上で o: コンテキストへ寄せず WARN (fileview を開かない・git を呼ばない)',
-    function()
-      local RAW_DEL = table.concat({
-        'diff --git a/a.lua b/a.lua',
-        'index 1111111..2222222 100644',
-        '--- a/a.lua',
-        '+++ b/a.lua',
-        '@@ -1,2 +1,2 @@',
-        ' line1',
-        '-gone',
-        '+new',
-        '',
-      }, '\n')
+      local locked = io.open(vim.fs.joinpath(wt, 'locked.txt'), 'w')
+      locked:write 'x\n'
+      locked:close()
+      -- dir を r-x (書き込み不可) にすると remove_dir の unlink が実 FS 権限で
+      -- 失敗する (root 実行では成り立たない。make test はローカル非 root 前提)。
+      vim.fn.system { 'chmod', '555', wt }
+      assert.equals(0, vim.v.shell_error)
+      store.save(existing_stub {
+        worktree = { path = wt, created_by_us = true },
+      })
       install_git {
         top_ok,
-        RP_HEAD_MATCH[1],
-        RP_HEAD_MATCH[2],
-        function()
-          return diff_ok(RAW_DEL)
-        end,
+        git_ok, -- status clean
+        git_fail 'fatal: remove boom\n', -- remove 失敗
+        git_ok, -- prune ok (dir は rm 不能のまま)
       }
-      session_handler.start { base = 'main', head = 'feature' }
+      state.input_answer = 'y'
 
-      local diff_buf = vim.fn.bufnr(DIFF_A_NAME)
-      local win = vim.fn.win_findbuf(diff_buf)[1]
-      vim.api.nvim_set_current_win(win)
-      local del_row
-      for i, line in ipairs(vim.api.nvim_buf_get_lines(diff_buf, 0, -1, false)) do
-        if line:sub(1, 1) == '-' then
-          del_row = i
-          break
-        end
-      end
-      assert.is_true(del_row ~= nil)
-      vim.api.nvim_win_set_cursor(win, { del_row, 0 })
-      install_git {}
+      session_handler.delete(SLUG)
 
-      session_handler.open_file_current()
-
+      assert.same({ 'git', 'worktree', 'prune' }, state.git_calls[4])
+      assert.equals(4, #state.git_calls)
       assert.same({
-        msg = 'review.nvim: 削除行の上のためファイルを開けません (new 側に該当行がありません)',
+        msg = 'review.nvim: 孤児 worktree dir を消去できませんでした。'
+          .. '孤児 dir を残さないためセッション削除は中止します: '
+          .. wt,
         level = vim.log.levels.WARN,
       }, state.notifications[1])
-      assert.equals(-1, vim.fn.bufnr 'review://file/main--feature/a.lua')
+      -- JSON を消さない = closed + created_by_us の記録が残る (起動 scan が回収できる)
+      assert.is_true(vim.uv.fs_stat(json_path()) ~= nil)
+      assert.equals('closed', load_saved().status)
+      assert.same({ path = wt, created_by_us = true }, load_saved().worktree)
+
+      -- after_each の tmpdir 掃除 (delete 'rf') を通すため権限を戻す
+      vim.fn.system { 'chmod', '755', wt }
+      assert.equals(0, vim.v.shell_error)
     end
   )
 end)
 
-describe('sidebar 絞り込み (`/`)', function()
+describe('panel 絞り込み (`/`)', function()
   use_env()
 
   local inputs
@@ -2099,93 +2785,71 @@ describe('sidebar 絞り込み (`/`)', function()
     vim.ui.input = REAL_INPUT
   end)
 
-  local function sidebar_lines()
-    local buf = vim.fn.bufnr 'review://sidebar/main--feature'
-    if buf < 0 then
+  local function panel_lines()
+    local pw = ui_windows.win 'panel'
+    if pw == nil then
       return nil
     end
-    return vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(pw), 0, -1, false)
+  end
+
+  local function panel_winbar()
+    local pw = ui_windows.win 'panel'
+    return pw ~= nil and vim.w[pw].review_winbar or nil
   end
 
   it('絞り込み後は一致ファイルのみ表示し、winbar に filter を出す', function()
     start_done('main', 'feature')
     inputs.result = 'a.lua'
     session_handler.filter_sidebar()
-    vim.wait(200, function()
-      return #sidebar_lines() == 1
-    end)
-    assert.same({ 'M a.lua +1 -0' }, sidebar_lines())
-    assert.equals(
-      'main..feature · 1 file · 0 comments · filter=a.lua',
-      vim.b[vim.fn.bufnr 'review://sidebar/main--feature'].review_winbar
-    )
+    assert.same({ '[✓] M a.lua +1 -0' }, panel_lines())
+    assert.equals('main..feature · 1 file · 0 comments · filter=a.lua', panel_winbar())
   end)
 
   it('空入力で解除 (全行戻る・winbar から filter 消える)', function()
     start_done('main', 'feature')
     inputs.result = 'a.lua'
     session_handler.filter_sidebar()
-    vim.wait(200, function()
-      return #sidebar_lines() == 1
-    end)
+    assert.equals(1, #panel_lines())
     inputs.result = ''
     session_handler.filter_sidebar()
-    vim.wait(200, function()
-      return #sidebar_lines() == 2
-    end)
-    assert.equals(2, #sidebar_lines())
-    assert.equals(
-      'main..feature · 2 files · 0 comments',
-      vim.b[vim.fn.bufnr 'review://sidebar/main--feature'].review_winbar
-    )
+    assert.equals(2, #panel_lines())
+    assert.equals('main..feature · 2 files · 0 comments', panel_winbar())
   end)
 
   it('キャンセル (nil) は現在の絞り込みを維持する', function()
     start_done('main', 'feature')
     inputs.result = 'a.lua'
     session_handler.filter_sidebar()
-    vim.wait(200, function()
-      return #sidebar_lines() == 1
-    end)
     inputs.result = nil
     session_handler.filter_sidebar()
-    vim.wait(200)
-    assert.same({ 'M a.lua +1 -0' }, sidebar_lines())
+    assert.same({ '[✓] M a.lua +1 -0' }, panel_lines())
   end)
 
   it(']d は絞り込み後の並びを進む (非一致ファイルを跨がない)', function()
-    start_done('main', 'feature')
+    start_done('main', 'feature') -- 先頭 a.lua
     inputs.result = 'b.lua'
     session_handler.filter_sidebar()
-    vim.wait(200, function()
-      return #sidebar_lines() == 1
-    end)
-    -- 右ペインは開始時 sorted 先頭 (a.lua) のまま = 現在位置に無関係に
-    -- ]d は一致集合 (b.lua のみ) の次へ = b.lua を開く
     session_handler.next_file()
-    assert.equals(
-      'review://diff/main--feature/b.lua',
-      vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(vim.api.nvim_get_current_win()))
-    )
-    vim.cmd 'buffer review://sidebar/main--feature'
+    assert.equals(state.repo .. '/b.lua', head_buf_name())
   end)
 
-  it('一致 0 件は 0 行一覧 + 解除案内の winbar (閉じない)', function()
-    start_done('main', 'feature')
-    inputs.result = 'zzz'
-    session_handler.filter_sidebar()
-    vim.wait(200, function()
-      return sidebar_lines() ~= nil and #sidebar_lines() >= 1
-    end)
-    local lines = sidebar_lines()
-    -- nvim の空 buffer 契約 (最低 1 空行) = 絞り込み 0 件は空行 1 本 + winbar 案内
-    assert.equals(1, #lines)
-    assert.equals('', lines[1])
-    assert.equals(
-      'main..feature · 0 files · 0 comments · filter=zzz (空入力で解除)',
-      vim.b[vim.fn.bufnr 'review://sidebar/main--feature'].review_winbar
-    )
-  end)
+  it(
+    '一致 0 件は 0 行一覧 + 解除案内の winbar (閉じない・窓も残す)',
+    function()
+      start_done('main', 'feature')
+      inputs.result = 'zzz'
+      session_handler.filter_sidebar()
+      local lines = panel_lines()
+      -- nvim の空 buffer 契約 (最低 1 空行) = 絞り込み 0 件は空行 1 本 + winbar 案内
+      assert.equals(1, #lines)
+      assert.equals('', lines[1])
+      assert.equals(
+        'main..feature · 0 files · 0 comments · filter=zzz (空入力で解除)',
+        panel_winbar()
+      )
+    end
+  )
 
   it('active 不在では入力を開かない (無音 safe)', function()
     inputs.result = 'x'

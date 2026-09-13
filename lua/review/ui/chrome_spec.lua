@@ -3,7 +3,7 @@
 local chrome = require 'review.ui.chrome'
 local config = require 'review.config'
 
-local PLUGIN_WINBAR = '%{get(b:,"review_winbar","")}'
+local PLUGIN_WINBAR = '%{get(w:,"review_winbar","")}'
 
 describe('ui/chrome winbar グローバル式', function()
   local global_before
@@ -43,7 +43,7 @@ describe('ui/chrome winbar グローバル式', function()
     'window の winbar 適用は window-local set をしない (global 漏れの実測教訓)',
     function()
       -- window-local set は初回代入で global を書き換えるため chrome.window は
-      -- 使わない設計。b:review_winbar 経由のみが winbar 内容の契約。
+      -- 使わない設計。w:review_winbar 経由のみが winbar 内容の契約。
       chrome.window(vim.api.nvim_get_current_win())
       assert.equals(PLUGIN_WINBAR, vim.o.winbar)
       local w = vim.api.nvim_get_current_win()
@@ -110,14 +110,34 @@ describe('ui/chrome number', function()
   )
 end)
 
-describe('ui/chrome.bar', function()
+describe('ui/chrome.winbar (w:review_winbar 一本化)', function()
+  local tab
   before_each(function()
     config.reset()
+    vim.cmd 'vsplit'
+    tab = vim.api.nvim_get_current_tabpage()
   end)
-  it('% を含むパスも winbar 式で壊れないよう %% に逃がす', function()
-    local buf = vim.api.nvim_create_buf(false, true)
-    chrome.bar(buf, 'a%b.lua · +1 -0 · 2 comments')
-    assert.equals('a%%b.lua · +1 -0 · 2 comments', vim.b[buf].review_winbar)
-    vim.api.nvim_buf_delete(buf, { force = true })
+  after_each(function()
+    pcall(vim.cmd, 'tabclose!')
+    config.reset()
+    if tab ~= nil and vim.api.nvim_tabpage_is_valid(tab) then
+      vim.api.nvim_set_current_tabpage(tab)
+    end
+  end)
+  it(
+    '表示文字列は窓変数だけ持つ (b: に置いて実ファイル窓へ漏らさない)',
+    function()
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_win_set_buf(0, buf)
+      local w = vim.api.nvim_get_current_win()
+      chrome.winbar(w, 'a%b.lua · +1 -0 · 2 comments')
+      assert.equals('a%%b.lua · +1 -0 · 2 comments', vim.w[w].review_winbar)
+      assert.is_nil(vim.b[buf].review_winbar)
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  )
+  it('invalid 窓・text nil では無操作 (set_buf 前の窓でも安全)', function()
+    chrome.winbar(999999, 'x')
+    chrome.winbar(vim.api.nvim_get_current_win(), nil)
   end)
 end)

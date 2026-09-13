@@ -69,6 +69,13 @@ local function install_git(responses)
     table.insert(state.git_calls, cmd)
     state.git_opts[idx] = opts
     if responses[idx] == nil then
+      -- 3 窓開通の base scratch 充填 (git show) は窓の中身の契約として
+      -- session_spec が pin 済み。本 spec の対象 (引数組み立て) でないので
+      -- 既定応答で通す。それ以外の想定外実行は従来どおり error。
+      if cmd[2] == 'show' then
+        on_exit { code = 0, stdout = 'base content\n', stderr = '' }
+        return
+      end
       error('pr stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
     end
     on_exit(responses[idx](cmd, opts))
@@ -211,7 +218,8 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         pr = { number = 7, url = 'https://github.com/acme/demo/pull/7' },
         worktree = { path = wt, created_by_us = true },
         status = 'open',
-        files = { ['a.lua'] = { viewed = false } },
+        -- 開始時の初期開き = open_file 共通処理なので先頭ファイルは viewed=true
+        files = { ['a.lua'] = { viewed = true } },
         comments = {},
         created_at = 4321,
         updated_at = 4321,
@@ -320,7 +328,10 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
       assert.same({ 'git', 'worktree', 'add', '--detach', wt, 'topic' }, state.git_calls[4])
       assert.same({ 'git', 'diff', 'main' }, state.git_calls[5])
       assert.equals(wt, state.git_opts[5].cwd)
-      assert.equals(5, #state.git_calls)
+      -- 初期開き (ui/windows + session.open_file) = base scratch 充填の git show。
+      -- 引数・窓契約は session_spec が pin 済みなのでここでは発生のみ見る。
+      assert.same({ 'git', 'show', 'main:a.lua' }, state.git_calls[6])
+      assert.equals(6, #state.git_calls)
       assert.equals('topic', store.load(REPO_TOP, 'pr-7').data.head)
     end
   )

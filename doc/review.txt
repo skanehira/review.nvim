@@ -43,10 +43,10 @@ USAGE						*review-usage*
 	:Review pr {number|url}			PR レビュー開始 (gh 連携)。
 					{number} は <Tab> で open PR の番号が
 					補完できる (gh を同期実行)。
-					head を git worktree に展開し、`o` で
-					差分と同一内容の実ファイルが開ける
-					(worktree 作成は pr モードのみ。掃除は
-					|review-sessions|)
+					head を git worktree に展開し、レビュー
+					窓 (tcd 済み) の head 側が worktree 内の
+					実ファイルになる (worktree 作成は pr
+					モードのみ。掃除は |review-sessions|)
 	:Review list				保存済みセッション一覧 |review-list|
 	:Review close				現セッションを保存して閉じる |review-sessions|
 	:Review delete {id}			保存済みセッションを削除
@@ -90,6 +90,7 @@ SETUP						*review-setup*
 		gh_bin = "gh",             -- gh 実行ファイル (PR 用)
 		diff_context = nil,        -- diff context 行数 (nil = git 既定 3)
 		auto_notify_resume = true, -- 起動時に open セッションを通知
+		panel_width = 35,          -- file panel (左窓) の幅
 		keymaps = {},              -- buffer-local キーマップ override
 		highlight = {},            -- グループ別 highlight override
 		winbar = true,           -- review 窓に winbar 情報 (既定 on)
@@ -110,7 +111,7 @@ KEYMAPS						*review-keymaps*
 既定値の全体と override の書式:
 
 	keymaps = {
-		diff = {                      -- diff バッファ
+		diff = {                      -- レビュー窓 (head / base)
 			add_comment    = 'c',     -- |review-comment-input|
 			edit_comment   = 'e',
 			delete_comment = 'd',
@@ -121,9 +122,11 @@ KEYMAPS						*review-keymaps*
 			next_file      = ']d',
 			prev_file      = '[d',
 			focus_sidebar  = 'S',
+			focus_panel    = '<leader>e',
+			toggle_panel   = '<leader>b',
 			view_comments  = 'i',
 		},
-		sidebar = {                   -- 変更ファイル一覧
+		sidebar = {                   -- file panel (変更ファイル一覧)
 			open_diff      = '<CR>',
 			open_file      = 'o',
 			toggle_viewed  = 'x',
@@ -143,9 +146,18 @@ KEYMAPS						*review-keymaps*
 	})
 <
 
-DIFF バッファ					*review-keymaps-diff*
+レビュー窓 (head / base)			*review-keymaps-diff*
 
-	c		コメント作成。visual-line で範囲指定
+	レビューは専有 tabpage の 3 窓 (file panel │ base │ head) で開く。head 窓は
+	実ファイル (`:edit`・編集可)、base 窓は `git show` の scratch。2 窓は Neovim
+	標準の窓 diff なので hunk 移動の `[c` / `]c` や fold が標準のまま効く。以下の
+	キーは head / base 窓に buffer-local で貼り、押した時点の窓 role gate を通る
+	ものだけが発火する。gate を通らない窓 (ユーザーが自分の窓で開いた同じ実
+	ファイルなど) では 1 キーストロークが built-in 動作に戻る (レビュー操作は
+	誤発火しない)。
+
+	c		コメント作成 (head 窓のみ)。visual-line で範囲指定。base 窓・
+			削除/binary 告知窓では «この窓にはコメントを付けられません»
 	e		カーソル行のコメントを編集 (入力窓は
 			|review-comment-input|)。その行に複数ある場合
 			は番号選択のプロンプトになる (既定の
@@ -156,23 +168,24 @@ DIFF バッファ					*review-keymaps-diff*
 			複数件が消えないため)。arming は他行移動・e での
 			編集確定・2 秒経過で解除
 	y		カーソル行のコメントのプロンプトを yank
-	o		その行の実ファイルを開く (worktree あり =
-			編集可、なし = `git show <head>:<path>` の
-			read-only)
+	o		そのファイルの実ファイルをレビュー tab の外 (前行儀の
+			tab) で開く。削除ファイルは «開けません» の WARN
 	q		セッションを閉じる (コメント 0 件は無確認)
 	<F1>		キーバインドの help float
-	]d		次のファイルの diff を開く (パス昇順の並び。端では
-			無動作。viewed 更新と save は一覧の <CR> と同じ)
-	[d		前のファイルの diff を開く (上記と同じ規則)
-	S		sidebar (変更ファイル一覧) へ移動 (窓が閉じて
+	]d		次のファイルを開く (head/base を張り替え。パス昇順の並び。
+			端では無動作。viewed 更新と save は一覧の <CR> と同じ)
+	[d		前のファイルを開く (上記と同じ規則)
+	S		file panel (変更ファイル一覧) へ移動 (窓が閉じて
 			いれば左に再建してから移動)
+	<leader>e	file panel へ移動 (S と同一処理)
+	<leader>b	file panel の表示トグル (閉じても tab とレビュー窓は残る)
 	i		カーソル行のコメント全文を read-only 窓で閲覧
 			(編集は e)。q / <Esc> で閉じる
 
-変更ファイル一覧 (sidebar)			*review-keymaps-sidebar*
+ file panel (変更ファイル一覧)			*review-keymaps-sidebar*
 
-	<CR>		そのファイルの diff を開き、focus を diff へ移動
-			(viewed 自動 true)
+	<CR>		そのファイルを head/base 窓に開き、focus を head 窓へ
+			移動 (viewed 自動 true)
 	o		そのファイルの実ファイルを開く (diff の o と
 			同じ規則)
 	x		viewed 切替
@@ -194,51 +207,56 @@ SESSION 状態と復旧				*review-sessions*
 
 保存済みセッションには open / closed の 2 状態がある (list で 1 行表示):
 
-	窓を閉じる操作 (q / `:Review close`)	comments + viewed を保存して
-		窓を閉じる。:Review q と close の違いは worktree掃除の有無:
+ 契約化された「閉じる」操作は q / `:Review close` の 2 つ (同じ手順): comments +
+ viewed を保存して closed にし、レビュー tab を閉じ、plugin が作った worktree を
+ 掃除する (closed は `:Review` では復元できず、`:Review list` からのみ再開できる。
+ 開くと自動的に open に戻り worktree は再生成される)。
 
-		q 	-> open のまま窓だけ閉じる (worktree は残る。
-			`:Review` で即復元)
-		close 	-> closed に変え、plugin が作った worktree を掃除
-			する (closed は `:Review` では復元できず、
-			`:Review list` からのみ再開できる。開くと
-			自動的に open に戻り worktree は再生成される)
+	ユーザーがレビュー tab を `:tabclose` / `:tabonly` 等で直接閉じるのは close
+	と区別される: コメントと open 状態は保存されたまま (status=open)、extmark と
+	キーマップだけ掃除し、INFO «レビュー tab を閉じました (セッションは保存済み・
+	`:Review` で開き直し可)» を出す。次回 `:Review` で開き直せる。head 窓に
+	なっていた実ファイルバッファ (未保存編集を含む) とユーザーの窓・tab は
+	どちらの経路でも消さない。
 
 	Neovim 異常終了	 open のまま JSON が data dir に残り、次回起動時に
 			「続けられます」通知 (:Review で復元 / worktree
 			残骸は起動 scan が掃除)
 
-	保存時自動反映	 保存した差分は自動でレビューに反映される。
-			レビュー対象ファイルを保存 (どの窓の :w でも可)
-			すると差分を再取得し、±カウント・コメント位置
-			(anchor 補正 / outdated)・:Review prompt が
-			直近保存基準で更新される。未保存のバッファ編集は
-			表示にだけ映り、カウントと prompt には入らない。
-			再取得の失敗は WARN 通知で前の表示とコメントを保持する
-
-outdated 認定 (差分の揺れで対象行を特定できないコメント) は diff 上で
-行末に `(⚠N)`、スレッドを gray + `⚠` で示し (:h review-display)、
-`:Review prompt` の既定出力から除外される。本文は失わず closed 前の JSON に
-残るため、refs を戻せば再度 active として扱える場合がある。
+outdated 認定 (差分の揺れで対象行を特定できないコメント) は head バッファで
+ 解ける位置にあえば行末 `(💬 N (⚠M))` と gray スレッド、head 窓に解けない分は
+ head バッファ 1 行目の行上に «⚠ N outdated (prompt 除外中)» として集約、窓の
+ さえないファイル (削除/binary 告知) の分は file panel winbar 末尾の `⚠N` で示す
+ (:h review-display)。`:Review prompt` の既定出力からは除外される。本文は失わず
+ closed 前の JSON に残るため、refs を戻せば再度 active として扱える場合がある。
 
 ==============================================================================
 表示の特性					*review-display*
 
-diff バッファ				*review-display-diff*
+レビューの 3 窓				*review-display-diff*
 
-	・filetype=diff (標準 syntax) + 自前の add/delete hunk highlight の
-		二層で色分けする。
-	・ラップしない (wrap=off)。大きい hunk は fold されて開くので、
-		`za` / `zo` / `zR` (標準) で展開するか、`o` で実ファイルを
-		開いて読む。
-	・コメントは対象行に下線_extmark+行末に件数 (`💬 N`、outdated を含む =
-		`💬 N (⚠M)`)、本文は**行下スレッド** (GitHub 風) に全文出る。位置は
-		変わらない (スレッドは実行ではなく virt_lines のため `/検索` と移動の
-		対象外 = 検索したい場合は :Review prompt 出力や data dir の JSON を
-		grep する)。長文スレッドは 10 行で打ち切れ、全文は `i` 窓 (read-only)。
-	・標準の `[c` / `]c` (ftplugin で定義される diff の hunk 移動) はこの
-		バッファでもそのまま効く。ファイル単位の移動は `]d` / `[d`
-		(|review-keymaps-diff)。
+	レビューは専有 tabpage に file panel (左・既定幅 35)│base│head の横 3 窓で
+	開く。tab は repo / worktree へ tcd される (LSP server の spawn cwd と
+	相対パス解決用)。
+
+	head 窓		差分の new 側 = 実ファイルそのもの (:edit)。編集可・
+		filetype / LSP が効く。base との比較は Neovim 標準の窓 diff
+		(DiffAdd / DiffChange / DiffDelete / DiffText) で、fold・`[c` /
+		`]c` hunk 移動・scrollbind は標準のまま (マップしていない)。
+	base 窓		`git show <base>:<path>` の読み取り専用 scratch。
+		追加ファイルは 0 行 scratch、削除 / binary ファイルは告知
+		scratch に置き換わり窓 diff から退避する (diffoff)。
+	head/base の縮退 (scratch 縮退) は両窓 git show の読み取り専用になる
+		(INFO 通知済み)。
+
+	コメントは head 実バッファの extmark (対象行の下線 + 行末 `💬 N`、
+	outdated 混在は `💬 N (⚠M)`、本文は**行下スレッド** virt_lines に GitHub 風、
+	10 行で打ち切れ全文は `i` 窓)。スレッドはそのバッファを見る全窓に
+	見える (窓単位で抑える API が Neovim に無い実測。バッファ行を占有しない
+	ので行番号写像は不変)。位置を解けない outdated は その head バッファ
+	1 行目の行上に «⚠ N outdated (prompt 除外中)» + 本文一覧として集約、
+	窓のさえないファイル (告知窓 / 差分から消えたファイル) の分は file panel
+	の winbar 末尾 `⚠N` に出す。
 
 ==============================================================================
 COMMENT INPUT					*review-comment-input*

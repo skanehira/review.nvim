@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>issue #16 保留レビュー項目</title>
+<style>body{font-family:system-ui;max-width:70rem;margin:2rem auto;padding:0 1rem}li{margin:.5rem 0}.cat{color:#666;font-size:.9em}</style>
+<h1>#16 保留レビュー項目 (dev-impl)</h1>
+<p>修正対象外 (high のみ修正運用)。r1 medium 2 件が r2 でも残存 (重複排除済みの和)。確認が済んだらこのファイルごと削除する。</p>
+<h2>medium</h2>
+<ul>
+  <li>
+    <label><input type="checkbox">
+      <b><span data-severity="medium" data-category="spec-compliance">medium</span> / spec-compliance — <code>lua/review/handlers/session.lua:648</code></b><br>
+      rename の base 窓解決が設計エッジ «旧パス自体が新規なら review://null/&lt;session&gt;/&lt;path&gt;» を未実装 (diff-review.md:39/110)。R の git show 失敗 (旧パスが base に無い) は review://base 名の空 scratch に倒れ、winbar も «(git show)» のまま。rename 窓張り分け (old_path 充填) の pin test も 0 件。<br>
+      <span class="cat">fix_hint:</span> fill_show 失敗 &amp;&amp; old_path≠nil で null scratch + «(new file)» ラベルへ統一、または rename 張り分けを session_spec に pin。仕様追認なら docs 表を «旧パスに無い場合 = 同名 base scratch 空内容» に明確化して «git show» ラベルの嘘を消す。
+    </label>
+  </li>
+  <li>
+    <label><input type="checkbox">
+      <b><span data-severity="medium" data-category="code-quality">medium</span> / code-quality — <code>lua/review/handlers/session.lua:589</code></b><br>
+      panel バッファへ ui_keygate.install で head/base 全 diff キー集合を張っている (refresh_panel/open_session_ui/focus_sidebar の 3 経路)。gate_state は role=='panel' で常に false なので panel 窓では何も発火せず、ユーザーの同キー global マップだけを built-in に化けて隠す。DESIGN の file panel 節が panel の正本キー集合。<br>
+      <span class="cat">fix_hint:</span> 3 経路の panel_buf install を削除 (uninstall ループは掃除目的で残置可)。panel から toggle したいなら DESIGN キー表へ file panel 行として &lt;leader&gt;b を正式追記し gate を通す設計変更として別 issue で。
+    </label>
+  </li>
+</ul>

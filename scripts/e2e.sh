@@ -3,11 +3,14 @@
 # docs/design/features/{diff-review,persistence-restore}.md「テスト方針」)。
 #
 # golden path: fixture repo (main / feature, 複数ファイル・複数 hunk) で
-# headless nvim を起動 -> :Review start -> c キーでコメント -> sidebar <Enter> ->
-# sidebar o (fileview read-only) -> 視覚選択で range コメント -> y で "0 に
-# @path#L.. + 本文 -> :Review prompt で見出し + 全件全文一致 (issue #7) ->
-# 正常終了 -> 別プロセスで VimEnter notify -> :Review 復元 ->
-# 本文・行位置・viewed が元の状態と一致することを assert。
+# headless nvim を起動 -> :Review start -> 専有 tab 3 窓 (panel│base│head) +
+# tcd==repo + head 実ファイル -> head 窓 c キーでコメント (extmark 実ファイル) ->
+# panel <CR> 切替 -> panel o (前行儀 tab に実ファイル・編集可) -> 視覚選択で
+# range コメント -> y で "0 に @path#L.. + 本文 ->
+# :Review prompt で見出し + 全件全文一致 (issue #7) -> 正常終了 ->
+# 別プロセスで VimEnter notify -> :Review 復元 -> 本文・行位置・viewed が元の
+# 状態と一致 -> q (close 確認 y) -> tab 消滅 + 実ファイル extmark 残骸 0 +
+# status=closed。
 # phase3: :Review start <base> 1 引数 -> head 省略 = rev-parse --abbrev-ref HEAD
 # による自動採用・保存 (入力 UI なし) を実 git で pin (issue #14 の開始契約)。
 # phase5: 編集 :write -> BufWritePost 自動リフレッシュで panel ±カウントが
@@ -78,9 +81,13 @@ cat "$OUT1" | tee -a "$WORK/e2e-report.txt"
 S1=$(grep -oE 'E2E-S1 body=.* line=[0-9]+' "$OUT1" || true)
 [ -n "$S1" ] || { echo "e2e: phase1 の E2E-S1 行が無い (assert 不合格)" >&2; exit 1; }
 grep -q 'E2E-S1 body=use a map here' "$OUT1" || { echo 'e2e: phase1 本文不一致' >&2; exit 1; }
-grep -q 'E2E-W1 winbar=true' "$OUT1" || { echo 'e2e: phase1 winbar chrome が入っていない' >&2; exit 1; }
+grep -q 'E2E-L1 wins=3 tcd=repo' "$OUT1" || {
+  echo 'e2e: phase1 3 窓開通/tcd==repo の golden path assert が無い' >&2
+  exit 1
+}
+grep -q 'E2E-W1 winbar=true' "$OUT1" || { echo 'e2e: phase1 winbar chrome (w: のみ) が入っていない' >&2; exit 1; }
 grep -q 'E2E-T1 thread=eol+virtlines' "$OUT1" || { echo 'e2e: コメント行下スレッド (件数 eol + virt_lines 本文) が表示されない' >&2; exit 1; }
-grep -q 'E2E-O1 fileview=readonly' "$OUT1" || { echo 'e2e: phase1 sidebar o で fileview が開かない' >&2; exit 1; }
+grep -q 'E2E-O1 fileview=real-editable' "$OUT1" || { echo 'e2e: phase1 panel o で前行儀 tab に実ファイル (編集可) が開かない' >&2; exit 1; }
 grep -q 'E2E-V1 viewwin=scratch' "$OUT1" || { echo 'e2e: phase1 ]d/[d/i/S 一連 (閲覧 float が開かない等) に失敗' >&2; exit 1; }
 # prompt yank (issue #7): y で "0 = @path#L.. + 本文、:Review prompt = 全文一致
 grep -q 'E2E-Y1 yank=@path-range+body' "$OUT1" || {
@@ -130,6 +137,11 @@ if [ "$L1" != "$L2" ]; then
   exit 1
 fi
 grep -q 'viewed=1' "$OUT2" || { echo 'e2e: viewed 復元なし' >&2; exit 1; }
+# q (close) 経路の掃除: レビュー tab 消滅 + 実ファイル extmark 残骸 0 + closed
+grep -q 'E2E-Q1 cleared=1 tabclosed=1 status=closed' "$OUT2" || {
+  echo 'e2e: phase2 q close で tab 消滅 / extmark clear / status=closed が確認できない' >&2
+  exit 1
+}
 
 # --- phase 3: head 省略 (1 引数) -> 実 vim.ui.input で選択 -> 開始 ---------
 OUT3=$(mktemp "$WORK/phase3.out.XXXXXX")
@@ -254,7 +266,7 @@ pr_fail() { # $1=out file, $2=label
 D_PR1="$WORK/d-pr1"
 OUTP1=$(mktemp "$WORK/pr1.out.XXXXXX")
 run_pr "$REPO_ROOT/tests/e2e/pr1.lua" "$D_PR1" >"$OUTP1" 2>&1 || pr_fail "$OUTP1" "pr phase1"
-grep -q 'E2E-PR1 open=' "$OUTP1" || pr_fail "$OUTP1" 'pr phase1 (o で worktree file が開かない)'
+grep -q 'E2E-PR1 wt-file=' "$OUTP1" || pr_fail "$OUTP1" 'pr phase1 (head が worktree 実ファイルでない)'
 [ ! -d "$(WT_OF "$D_PR1")" ] || { echo 'e2e: close 後に worktree dir が残っている' >&2; exit 1; }
 # show-ref --verify は短縮名を解決しないため rev-parse --verify で見る (0.13/git 実測)
 git -C "$REPO_PR" rev-parse --verify -q review-nvim/pr-7 >/dev/null || {

@@ -1,7 +1,11 @@
--- E2E phase 2 (DoD golden path 後半)。別 headless プロセスで起動し、
--- VimEnter の継続 notify -> :Review 復元 -> 本文 / 行位置 / viewed の一致を assert。
+-- E2E phase 2 (DoD golden path 後半 / 3 窓窓 diff)。別 headless プロセスで起動し、
+-- VimEnter の継続 notify -> :Review 復元 -> 実ファイル head バッファの extmark
+-- (本文 / 行位置) と viewed の一致を assert -> q (close 確認 y) -> レビュー tab
+-- 消滅 + 張った実ファイルの extmark 残骸 0 + status=closed を assert。
 -- 行位置 / 本文の跨プロセス照合は shell 側で行うため、観測値は E2E-S2 で print する。
 -- e2e_init が setup 済み (VimEnter フック登録込み)。
+
+local windows = require 'review.ui.windows'
 
 local function fail(why)
   print('E2E-FAIL: ' .. why)
@@ -38,10 +42,15 @@ local function run()
     return vim.fn.bufexists 'review://sidebar/main--feature' == 1
   end, '復元 sidebar')
   wait_for(function()
-    return vim.fn.bufexists 'review://diff/main--feature/a.lua' == 1
-  end, '復元 先頭ファイル (一覧先頭 a.lua)')
+    return windows.state() ~= nil and windows.win 'head' ~= nil
+  end, '復元 3 窓')
 
-  local a_buf = vim.fn.bufnr 'review://diff/main--feature/a.lua'
+  -- head 窓 = 復元先頭ファイルの実バッファ (一覧先頭 a.lua の open_file)
+  local head_win = windows.win 'head'
+  local a_buf = vim.api.nvim_win_get_buf(head_win)
+  if not vim.api.nvim_buf_get_name(a_buf):match 'repo/a%.lua$' then
+    fail('復元 head 窓が実ファイルでない: ' .. vim.api.nvim_buf_get_name(a_buf))
+  end
   local ns = vim.api.nvim_get_namespaces()['review_comment']
   if ns == nil then
     fail 'review_comment namespace が無い'
@@ -73,6 +82,38 @@ local function run()
   end
 
   print('E2E-S2 line=' .. (marks[1][2] + 1) .. ' body=use a map here viewed=1')
+
+  -- q (close) 経路: コメントありなので vim.ui.input 確認になる (headless では
+  -- 応答を注入。pr4 と同手法)。承認後、レビュー tab 消滅 + 実ファイルの
+  -- extmark 残骸 0 + status=closed。
+  local review_tab = windows.state().tab
+  vim.ui.input = function(_, cb)
+    cb 'y'
+  end
+  vim.api.nvim_set_current_win(head_win)
+  vim.cmd 'normal q'
+  wait_for(function()
+    return not vim.api.nvim_tabpage_is_valid(review_tab)
+  end, 'q 後のレビュー tab 消滅')
+  if #vim.api.nvim_buf_get_extmarks(a_buf, ns, 0, -1, {}) ~= 0 then
+    fail 'close 後に実ファイルの extmark 残骸が残った'
+  end
+  if not vim.api.nvim_buf_is_valid(a_buf) then
+    fail 'close でユーザー所有の実ファイルバッファが消えた (消してはいけない)'
+  end
+  local json = vim.fn.glob(
+    (vim.fn.stdpath 'data') .. '/review.nvim/sessions/*/main--feature.json',
+    false,
+    true
+  )
+  if #json ~= 1 then
+    fail('セッション JSON が 1 件でない: ' .. vim.inspect(json))
+  end
+  local status = vim.json.decode(table.concat(vim.fn.readfile(json[1]), '\n')).status
+  if status ~= 'closed' then
+    fail('q close 後の status が closed でない: ' .. tostring(status))
+  end
+  print 'E2E-Q1 cleared=1 tabclosed=1 status=closed'
   vim.cmd 'qa'
 end
 
