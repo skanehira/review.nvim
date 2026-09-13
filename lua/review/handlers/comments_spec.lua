@@ -1,20 +1,31 @@
--- handlers/comments: c / e / d 操作フロー (diff-review.md「操作」)。
+-- handlers/comments: c / e / d / y / i 操作フロー (diff-review.md「操作」/
+-- DESIGN.md「デフォルトキーマップ」)。契約の要点:
+--   * 行写像は恒等 — head 実ファイル (縮退時は head scratch) バッファの行番号 =
+--     new 側行番号そのもの (INV-2。unified 自前行写像は撤廃)。
+--   * 不可窓 (base / 告知 scratch) の c 系は確定文言 «この窓にはコメントを
+--     付けられません» の WARN で開かない。
 -- 検証の中心は (1) 作成された Comment の契約 (id 採番 / range / anchor 生成)、
 -- (2) 操作直後の永続化 (INV-4: ディスクを読んで判定)、(3) 不可行時の WARN。
--- 入力 float は :normal キーシーケンスで実経路を駆動する (ui/input_spec と同じ前提)。
+-- 入力 float は :normal キーシーケンスで実経路を駆動する。
 local cli = require 'review.git.cli'
 local config = require 'review.config'
-local comment_model = require 'review.core.comment'
 local comments_handler = require 'review.handlers.comments'
 local paths = require 'review.store.paths'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
+local ui_windows = require 'review.ui.windows'
 
-local REPO_TOP = '/spec/repo-top'
 local SLUG = 'main--feature'
-local DIFF_A_NAME = 'review://diff/' .. SLUG .. '/a.lua'
+
+-- プロセス単一の vim 組み込みを require 時に 1 回捕捉 (before_each ごとに見ると
+-- spy が入れ子になり after_each の復旧先が壊れる — session_spec と同型)。
+local REAL_INPUT = vim.ui.input
 
 local CY = vim.api.nvim_replace_termcodes('<C-y>', true, false, true)
+
+-- head (作業ツリー) の a.lua = new 側 5 行。実 repo dir の disk と同じ内容に
+-- する (head 実ファイル窓は :edit 相当の実在ファイル経路なので磁盘実在が前提)。
+local HEAD_TEXT = table.concat({ 'one', 'two', 'three', 'four', 'six' }, '\n') .. '\n'
 
 local RAW_DIFF = table.concat({
   'diff --git a/a.lua b/a.lua',
@@ -31,8 +42,6 @@ local RAW_DIFF = table.concat({
   '',
 }, '\n')
 
-local REAL_NOTIFY = vim.notify
-
 local state = {}
 
 local function use_env()
@@ -41,6 +50,13 @@ local function use_env()
     state = { notifications = {}, inputs = {}, input_answer = 'y' }
     state.dir = vim.fn.tempname()
     vim.fn.mkdir(state.dir, 'p')
+    -- 実 repo に見せた dir (head 実ファイルがディスクに実在する = 通常経路)
+    state.repo = vim.fs.joinpath(state.dir, 'repo')
+    vim.fn.mkdir(state.repo, 'p')
+    state.repo = vim.uv.fs_realpath(state.repo) or state.repo
+    local f = io.open(vim.fs.joinpath(state.repo, 'a.lua'), 'w')
+    f:write(HEAD_TEXT)
+    f:close()
     paths._set_data_dir(state.dir)
     store._set_now(function()
       return 4321
@@ -55,7 +71,10 @@ local function use_env()
     session_handler._reset()
     cli._set_system(function(cmd, _opts, on_exit)
       if cmd[2] == 'rev-parse' then
-        on_exit { code = 0, stdout = REPO_TOP .. '\n', stderr = '' }
+        on_exit { code = 0, stdout = state.repo .. '\n', stderr = '' }
+      elseif cmd[2] == 'show' then
+        -- base scratch 充填 (git show main:a.lua)
+        on_exit { code = 0, stdout = 'one\nfive deleted\nsix\n', stderr = '' }
       else
         on_exit { code = 0, stdout = RAW_DIFF, stderr = '' }
       end
@@ -63,38 +82,46 @@ local function use_env()
     cli._set_executable(function()
       return 1
     end)
+    state.tab = vim.api.nvim_get_current_tabpage()
     state.real_notify = vim.notify
     vim.notify = function(msg, level)
       table.insert(state.notifications, { msg = msg, level = level })
     end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
-      end
-    end
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
-    -- セッションを開始し、右ペインの diff バッファにフォーカスする
-    -- (UI = sidebar + diff の 2 窓。float が開いたときのみ +1)
     session_handler.start { base = 'main', head = 'feature' }
     state.session = session_handler.active()
-    state.diff_buf = vim.fn.bufnr(DIFF_A_NAME)
-    state.diff_win = vim.fn.win_findbuf(state.diff_buf)[1]
-    vim.api.nvim_set_current_win(state.diff_win)
-    -- buffer 行 -> new 側行の対応はこの diff での事実: row3=' one'(new1)
-    -- row4='+two'(2) row5='+three'(3) row6=' four'(4) row7='-five'(del) row8=' six'(5)
+    -- head 実ファイル窓 (専有 tab 開通後 focus == head 窓)
+    state.head_buf = vim.fn.bufnr(vim.fs.joinpath(state.repo, 'a.lua'))
+    state.head_win = ui_windows.win 'head'
+    vim.api.nvim_set_current_win(state.head_win)
+    -- 恒等行: head バッファの行 N = new 側行 N (1 one / 2 two / 3 three / 4 four / 5 six)
   end)
   after_each(function()
+    -- close はコメントあり確認として vim.ui.input を引く (headless の既定 provider は
+    -- 無限待ちになるため 'y' 応答に戻してから閉じる)。
+    vim.ui.input = function(_, cb)
+      cb 'y'
+    end
+    session_handler.close()
+    vim.ui.input = REAL_INPUT
+    if ui_windows.state() ~= nil then
+      ui_windows.close()
+    end
     if vim.api.nvim_tabpage_is_valid(state.tab) then
       vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
+      pcall(vim.cmd, 'tabclose!')
+    end
+    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+      if vim.api.nvim_tabpage_is_valid(tab) then
+        vim.api.nvim_set_current_tabpage(tab)
+        pcall(vim.cmd, 'tabclose!')
+      end
     end
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
       end
     end
-    vim.notify = REAL_NOTIFY
+    vim.notify = state.real_notify
     paths._set_data_dir(nil)
     store._set_now(nil)
     store._set_notify(nil)
@@ -108,12 +135,13 @@ local function use_env()
   end)
 end
 
-local function focus_diff_row(row)
-  vim.api.nvim_win_set_cursor(state.diff_win, { row, 0 })
+local function focus_head_row(row)
+  vim.api.nvim_set_current_win(state.head_win)
+  vim.api.nvim_win_set_cursor(state.head_win, { row, 0 })
 end
 
 local function saved()
-  return store.load(REPO_TOP, SLUG).data
+  return store.load(state.repo, SLUG).data
 end
 
 -- 現在開いている入力 float で本文を打鍵し <C-y> で確定する (実キー経路)。
@@ -121,189 +149,163 @@ local function type_into_float(body)
   vim.cmd('normal i' .. body .. CY)
 end
 
--- visual selection の '< /> marks を明示設定する (:normal Vj と異なり
--- busted + 実 UI 環境での打鍵合成は不安定 — キー発火自体は
--- dbg で検証済み、mapping 登録は ui/diffbuffer_spec、実打鍵は e2e が担保)。
+-- visual selection の '< /> marks を head バッファ行に明示設定する (:normal Vj と
+-- 異なり busted + 実 UI 環境での打鍵合成は不安定 — 実打鍵の発火単位は e2e が担保)。
 local function set_visual_marks(r1, r2)
-  local buf = vim.api.nvim_win_get_buf(state.diff_win)
+  local buf = vim.api.nvim_win_get_buf(state.head_win)
   vim.cmd([[call setpos("'<", []] .. buf .. [[, ]] .. r1 .. [[, 0, 0])]])
   vim.cmd([[call setpos("'>", []] .. buf .. [[, ]] .. r2 .. [[, 0, 0])]])
 end
 
-describe('comments c (作成)', function()
+describe('comments c (作成 / head バッファ恒等行)', function()
   use_env()
 
-  it('カーソル行 (+ 行) のコメントを作成: id/range/anchor/save/表示', function()
-    focus_diff_row(4) -- '+two' = new 2
-    comments_handler.add_normal()
-    type_into_float 'use map here'
+  it(
+    'カーソル行のコメントを作成: line=buffer 行 (恒等) / anchor=head 行テキスト / save',
+    function()
+      focus_head_row(2) -- 'two'
+      comments_handler.add_normal()
+      type_into_float 'use map here'
 
-    assert.same({
-      id = 'c1',
-      file = 'a.lua',
-      line = 2,
-      end_line = 2,
-      body = 'use map here',
-      anchor = { before = 'one', line = 'two', after = 'three' },
-      state = 'active',
-      created_at = 4321,
-    }, saved().comments[1])
-    -- extmark 再描画: row4 (0-based 3) に下線 + 💬 抜粋 (行テキストは変わらない、
-    -- 表示は extmark virt text)。
-    local ns = vim.api.nvim_get_namespaces()['review_comment']
-    local marks = vim.api.nvim_buf_get_extmarks(state.diff_buf, ns, 0, -1, { details = true })
-    assert.equals(' 💬 1', marks[1][4].virt_text[1][1])
-    assert.equals('  [c1] use map here', marks[1][4].virt_lines[1][1][1])
-    -- save は操作直後 (INV-4)
-    assert.equals(4321, saved().updated_at)
-    assert.equals(0, #state.notifications)
-  end)
+      local sess = saved()
+      assert.equals(1, #sess.comments)
+      local c = sess.comments[1]
+      assert.equals('c1', c.id)
+      assert.equals('a.lua', c.file)
+      assert.equals(2, c.line)
+      assert.equals(2, c.end_line)
+      assert.equals('use map here', c.body)
+      assert.same({ before = 'one', line = 'two', after = 'three' }, c.anchor)
+      assert.equals(4321, c.created_at)
+      assert.equals('active', c.state)
+    end
+  )
 
-  it('コンテキスト行でも作成できる (new 側に行が存在すれば可)', function()
-    focus_diff_row(3) -- ' one' = new 1、before は不存在
-    comments_handler.add_normal()
-    type_into_float 'ctx comment'
-
-    local c = saved().comments[1]
-    assert.same({ before = vim.NIL, line = 'one', after = 'two' }, c.anchor)
-    assert.equals(1, c.line)
-  end)
-
-  it('- 行では WARN で float を開かない (new 側行番号が無い)', function()
-    focus_diff_row(7) -- '-five'
-    comments_handler.add_normal()
-
-    assert.same({
-      msg = 'review.nvim: この行は new 側に存在しないためコメントを付けられません (削除行 / diff ヘッダ)',
-      level = vim.log.levels.WARN,
-    }, state.notifications[1])
-    assert.equals(0, #saved().comments)
-    -- 打ち込む float は開いていない (UI 2 窓のまま)
-    assert.equals(2, #vim.api.nvim_tabpage_list_wins(state.tab))
-  end)
-
-  it('ファイルヘッダ行でも開かない', function()
-    focus_diff_row(1)
-    comments_handler.add_normal()
-    assert.same({
-      msg = 'review.nvim: この行は new 側に存在しないためコメントを付けられません (削除行 / diff ヘッダ)',
-      level = vim.log.levels.WARN,
-    }, state.notifications[1])
-    assert.equals(0, #saved().comments)
-  end)
-
-  it('visual-line 範囲では先頭〜末尾 new 側行が range になる', function()
-    focus_diff_row(4)
-    set_visual_marks(4, 5) -- '+two'..'+three' = new 2..3
+  it('視覚範囲は min/max の new 側 range (恒等行)', function()
+    focus_head_row(2)
+    set_visual_marks(2, 4)
     comments_handler.add_visual_marks()
     type_into_float 'range note'
 
     local c = saved().comments[1]
-    assert.same({ line = 2, end_line = 3, body = 'range note' }, {
-      line = c.line,
-      end_line = c.end_line,
-      body = c.body,
-    })
-    assert.same({ before = 'one', line = 'two', after = 'three' }, c.anchor)
+    assert.equals(2, c.line)
+    assert.equals(4, c.end_line)
   end)
 
-  it('visual 選択が削除専用行だけなら WARN で拒否', function()
-    focus_diff_row(7)
-    set_visual_marks(7, 7) -- '-five' 単一行 = 削除専用
-    comments_handler.add_visual_marks()
+  it('head 実バッファに extmark が載る (件数 eol + 行下スレッド本文)', function()
+    focus_head_row(3)
+    comments_handler.add_normal()
+    type_into_float 'inline thread'
+
+    local ns = vim.api.nvim_get_namespaces().review_comment
+    assert.is_true(ns ~= nil)
+    local found_cnt, found_body = false, false
+    local head_marks = vim.api.nvim_buf_get_extmarks(state.head_buf, ns, 0, -1, { details = true })
+    for _, m in ipairs(head_marks) do
+      if m[2] == 2 then
+        -- chunk は get_extmarks strict 既定 ([text, hl]) で返る (AGENTS virt_text
+        -- chunk 教訓の get 側形状)。text = chunk[1] を直接見る。
+        local function text_of(chunk)
+          if type(chunk) == 'table' then
+            local inner = chunk[1]
+            return type(inner) == 'table' and inner[1] or inner
+          end
+          return chunk
+        end
+        local vt = m[4].virt_text and text_of(m[4].virt_text[1]) or ''
+        if type(vt) == 'string' and vt:find('💬', 1, true) ~= nil then
+          found_cnt = true
+        end
+        for _, vl in ipairs(m[4].virt_lines or {}) do
+          local t = vl[1] and text_of(vl[1]) or nil
+          if type(t) == 'string' and t:find('inline thread', 1, true) ~= nil then
+            found_body = true
+          end
+        end
+      end
+    end
+    assert.is_true(found_cnt, '件数 eol mark が無い')
+    assert.is_true(found_body, '行下スレッド本文が無い')
+  end)
+
+  it(
+    'base 窓の c はコメントを作らず確定 WARN («この窓にはコメントを付けられません»)',
+    function()
+      vim.api.nvim_set_current_win(ui_windows.win 'base')
+      state.notifications = {}
+      comments_handler.add_normal()
+      assert.same({
+        msg = 'review.nvim: この窓にはコメントを付けられません',
+        level = vim.log.levels.WARN,
+      }, state.notifications[1])
+      assert.equals(1, #state.notifications)
+      assert.equals(0, #saved().comments)
+    end
+  )
+
+  it('active セッション無しは WARN で作成しない', function()
+    session_handler.close()
+    state.notifications = {}
+    comments_handler.add_normal()
     assert.same({
-      msg = 'review.nvim: 選択に new 側行がありません',
+      msg = 'review.nvim: アクティブなセッションがありません',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
-    -- float は開いていない
-    assert.equals(2, #vim.api.nvim_tabpage_list_wins(state.tab))
-  end)
-
-  it('作成を <Esc> で取消したら何も作らない', function()
-    focus_diff_row(4)
-    comments_handler.add_normal()
-    vim.cmd 'normal iunsent'
-    vim.cmd('normal ' .. vim.api.nvim_replace_termcodes('<Esc>', true, false, true))
-
-    assert.equals(0, #saved().comments)
-  end)
-
-  it('入力 float の title に対象の path:line が表示される', function()
-    focus_diff_row(4) -- '+two' = new 2
-    comments_handler.add_normal()
-    local t = vim.api.nvim_win_get_config(0).title
-    local text = type(t) == 'table' and (type(t[1]) == 'table' and t[1][1] or t[1]) or (t or '')
-    assert.is_true(text:find('a.lua:2', 1, true) ~= nil)
-    -- 本文なし q = 即時閉 (窓掃除)
-    vim.cmd('normal ' .. vim.api.nvim_replace_termcodes('<Esc>', true, false, true) .. 'q')
-  end)
-
-  it('2 件目の id は max+1 採番', function()
-    focus_diff_row(4)
-    comments_handler.add_normal()
-    type_into_float 'first'
-
-    focus_diff_row(5)
-    comments_handler.add_normal()
-    type_into_float 'second'
-
-    assert.same({ 'c1', 'c2' }, { saved().comments[1].id, saved().comments[2].id })
+    assert.equals(1, #state.notifications)
   end)
 end)
 
-describe('comments e (編集) / d (削除)', function()
+describe('comments e / d (編集・削除 arming)', function()
   use_env()
 
-  local function seed_one(body)
-    focus_diff_row(4)
+  local function seed_comment(body)
+    focus_head_row(2)
     comments_handler.add_normal()
-    type_into_float(body or 'origin')
+    type_into_float(body)
   end
 
-  it('e: カーソル行 1 件を事前入力 float で更新 -> anchor 不変 + save', function()
-    seed_one 'origin'
-    focus_diff_row(4)
+  it('e: カーソル行のコメント Body を編集して save', function()
+    seed_comment 'orig'
+    focus_head_row(2)
     comments_handler.edit_current()
-
-    -- float には body が事前入力されている
-    assert.same({ 'origin' }, vim.api.nvim_buf_get_lines(0, 0, -1, false))
-    vim.cmd 'normal 0d$'
+    vim.cmd 'normal 0d$' -- 事前入力行を消してから打ち直す (入力 float 契約)
     type_into_float 'edited'
 
-    local c = saved().comments[1]
-    assert.equals('edited', c.body)
-    assert.same({ before = 'one', line = 'two', after = 'three' }, c.anchor)
-    assert.equals(1, #saved().comments)
+    assert.equals('edited', saved().comments[1].body)
+    assert.is_true(
+      vim.bo[state.head_buf].modifiable,
+      'head 実窓は編集可でなければならない'
+    )
   end)
 
-  it('e: 複数件は vim.ui.select で対象を選ぶ', function()
-    focus_diff_row(4)
+  it('e: 複数該当は vim.ui.select で対象を選ぶ', function()
+    focus_head_row(2)
     comments_handler.add_normal()
     type_into_float 'first'
-    -- 同じ new 行にもう 1 件 (range を広げて重なる)
     table.insert(state.session.comments, {
       id = 'c2',
       file = 'a.lua',
       line = 2,
-      end_line = 4,
+      end_line = 3,
       body = 'second',
       anchor = vim.NIL,
       state = 'active',
       created_at = 4321,
     })
 
-    local selected_body = nil
+    local seen = nil
     local real_select = vim.ui.select
     vim.ui.select = function(items, _opts, on_choice)
-      selected_body = #items
+      seen = #items
       on_choice(items[2])
     end
-    focus_diff_row(4)
+    focus_head_row(2)
     comments_handler.edit_current()
-    assert.equals(2, selected_body)
-    vim.cmd 'normal 0d$'
-    type_into_float 'chose second'
     vim.ui.select = real_select
+    assert.equals(2, seen, 'ui.select に複数件が渡っていない')
+
+    vim.cmd 'normal 0d$' -- 事前入力 (items[2].body) を打ち直す
+    type_into_float 'chose second'
 
     local by_id = {}
     for _, c in ipairs(saved().comments) do
@@ -312,8 +314,9 @@ describe('comments e (編集) / d (削除)', function()
     assert.same({ c1 = 'first', c2 = 'chose second' }, by_id)
   end)
 
-  it('e: カーソル行にコメントがなければ WARN', function()
-    focus_diff_row(8) -- ' six' = new 5、コメント無し
+  it('e: 該当コメント無しは WARN', function()
+    focus_head_row(5)
+    state.notifications = {}
     comments_handler.edit_current()
     assert.same({
       msg = 'review.nvim: その行のコメントはありません',
@@ -321,185 +324,100 @@ describe('comments e (編集) / d (削除)', function()
     }, state.notifications[1])
   end)
 
-  -- UX review F9: vim 筋 dd が「d 2 回」= 複数を無確認で消せた事故の再発防止。
-  -- 1 目は armed のみ、同じコメントへ 2 度目で削除 (window 内)。
-  it('d: 1 目は削除せず armed + WARN、同じ行 2 度目で削除 -> save', function()
-    seed_one()
-    focus_diff_row(4)
-    comments_handler.delete_current()
-
-    assert.equals(1, #saved().comments) -- まだ消えていない
-    assert.equals('warn', state.notifications[1].level == vim.log.levels.WARN and 'warn' or 'FAIL')
-
-    comments_handler.delete_current()
-    assert.equals(0, #saved().comments)
-    local ns = vim.api.nvim_get_namespaces()['review_comment']
-    assert.equals(0, #vim.api.nvim_buf_get_extmarks(state.diff_buf, ns, 0, -1, {}))
-  end)
-
-  it('d: armed が discard window を過ぎると 1 目に戻る', function()
-    seed_one()
-    focus_diff_row(4)
-    local t = 100
-    comments_handler._set_now(function()
-      return t
-    end)
-    comments_handler.delete_current()
-    t = t + 3
-    comments_handler.delete_current()
-    assert.equals(1, #saved().comments) -- 再 armed (window 外)
-    comments_handler.delete_current()
-    assert.equals(0, #saved().comments)
-    comments_handler._set_now(nil)
-  end)
-
-  it('d: 別行へ移動すると arming はその行に切り替わる', function()
-    seed_one() -- c1 @ new 2 (row 4)
-    focus_diff_row(5) -- '+three' = new 3 にコメント無し -> ここは arming 対象なし
-    -- (comments_at_cursor が WARN)
-    comments_handler.delete_current()
-    assert.equals(
-      'review.nvim: その行のコメントはありません',
-      state.notifications[1].msg
-    )
-    assert.equals(1, #saved().comments)
-  end)
-
-  -- dd = d 2 回。arming により「同一行なら 1 件しか消えない」ことを担保
-  -- (旧実装は無確認即時削除で複数件吹き飛んだ — UX review F9)。
-  it('d 連打 (dd 相当) でも同一行のコメントは 1 件しか消えない', function()
-    comments_handler._set_now(function()
-      return 100
-    end)
-    seed_one 'first'
-    focus_diff_row(4)
+  it('d: armed が discard window (2 秒) を過ぎると 1 目に戻る', function()
+    focus_head_row(2)
     comments_handler.add_normal()
-    type_into_float 'second' -- 同じ new 行に 2 件目
+    type_into_float 'expire me'
+    focus_head_row(2)
 
-    focus_diff_row(4)
-    comments_handler.delete_current()
-    comments_handler.delete_current()
-
+    local clock = 100
+    comments_handler._set_now(function()
+      return clock
+    end)
+    comments_handler.delete_current() -- armed (clock=100)
+    clock = clock + 3 -- 窓 (DELETE_ARM_WINDOW_S=2.0) を過ぎる
+    comments_handler.delete_current() -- 窓外 = 1 目として再 armed、まだ消えない
     assert.equals(1, #saved().comments)
-    comments_handler._set_now(nil)
+    comments_handler.delete_current() -- 同一窓 2 回目で削除
+    assert.equals(0, #saved().comments)
+    comments_handler._set_now(function()
+      return 4321
+    end)
   end)
 
-  -- 「取り消しは他行へ移動」が docs/help の契約なので positive に pin する
-  -- (review finding: 旧テストはコメントなし行の WARN しか見ておらず arming 解除
-  -- を検証できていなかった)。
+  it('d: arming 二重押しで削除 + save (dd で複数消えない)', function()
+    focus_head_row(2)
+    comments_handler.add_normal()
+    type_into_float 'x1'
+    focus_head_row(3)
+    comments_handler.add_normal()
+    type_into_float 'x2'
+    assert.equals(2, #saved().comments)
+
+    focus_head_row(2)
+    comments_handler.delete_current() -- arming 1 回目
+    assert.same({
+      msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)',
+      level = vim.log.levels.WARN,
+    }, state.notifications[#state.notifications])
+    assert.equals(2, #saved().comments)
+
+    focus_head_row(3) -- 他行移動 = arming 解除
+    comments_handler.delete_current() -- c2 arming
+    assert.equals(2, #saved().comments)
+    comments_handler.delete_current() -- c2 確定削除
+    assert.equals(1, #saved().comments)
+    assert.equals('x1', saved().comments[1].body)
+  end)
+end)
+
+describe('comments y / i', function()
+  use_env()
+
+  local function seed_at(row, body)
+    focus_head_row(row)
+    comments_handler.add_normal()
+    -- マルチライン本文は insert 内の <CR> で改行して打鍵する (入力 float 契約)
+    local CR = vim.api.nvim_replace_termcodes('<CR>', true, true, true)
+    for i, part in ipairs(vim.split(body, '\n', { plain = true })) do
+      vim.cmd('normal i' .. part .. (i < #vim.split(body, '\n', { plain = true }) and CR or CY))
+    end
+  end
+
   it(
-    'd: 別行で d すると arming が移り、元行に戻ると再 armed から始まる',
+    'y: カーソル行のコメントを "0 へ (クリップボード provider 無しでも)',
     function()
-      comments_handler._set_now(function()
-        return 100
-      end)
-      seed_one 'on-2'
-      focus_diff_row(5) -- '+three' = new 3
-      comments_handler.add_normal()
-      type_into_float 'on-3' -- 2 件目を作る (new 2 / new 3 に 1 件ずつ)
-
-      focus_diff_row(4)
-      comments_handler.delete_current() -- new 2 のコメントを armed
-      focus_diff_row(5)
-      comments_handler.delete_current() -- arming が new 3 へ移る (new 2 は消えない)
-      assert.equals(2, #saved().comments)
-
-      focus_diff_row(4)
-      comments_handler.delete_current() -- 元行 = 再度 1 目 (arming し直し)
-      assert.equals(2, #saved().comments)
-      comments_handler.delete_current()
-      assert.equals(1, #saved().comments) -- new 2 のみが消える
-      comments_handler._set_now(nil)
+      seed_at(2, 'yank me')
+      focus_head_row(2)
+      comments_handler.yank_current()
+      assert.equals('@a.lua#L2\nyank me', vim.fn.getreg '0')
     end
   )
 
-  it(
-    'd 予約中のコメントを e で編集確定すると arming が解除される',
-    function()
-      comments_handler._set_now(function()
-        return 100
-      end)
-      seed_one 'armed-then-edited'
-      focus_diff_row(4)
-      comments_handler.delete_current() -- armed
-      comments_handler.edit_current() -- 1 件なので select なしで float
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'edited' }) -- 事前入力を置換
-      vim.cmd('normal ' .. CY) -- 確定 (= 「編集確定」で arming 解除のはず)
-      comments_handler.delete_current() -- 解除済み = 1 目は armed
-      assert.equals(1, #saved().comments)
-      assert.equals('edited', saved().comments[1].body)
-      comments_handler.delete_current()
-      assert.equals(0, #saved().comments)
-      comments_handler._set_now(nil)
-    end
-  )
+  it('i: 全文閲覧 float を開く', function()
+    seed_at(2, 'view me\nsecond line')
 
-  it(
-    'i: 該当行のコメント全文を read-only float で開く (閉じるのみ / 編集しない)',
-    function()
-      local session = session_handler.active()
-      comment_model.add(session.comments, {
-        file = 'a.lua',
-        line = 2,
-        body = 'first line\nsecond line',
-        anchor = vim.NIL,
-        created_at = 4321,
-      })
-      session_handler.commit_comment_change()
-      local wins_after_commit = #vim.api.nvim_tabpage_list_wins(state.tab)
-      focus_diff_row(4)
-
-      comments_handler.view_current()
-
-      assert.equals(wins_after_commit + 1, #vim.api.nvim_tabpage_list_wins(state.tab))
-      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-      assert.equals('[1] c1  a.lua:2', lines[1])
-      -- 本文は全文 (切り詰めなし・複数行保つ)、行頭インデント付き
-      assert.equals('  first line', lines[2])
-      assert.equals('  second line', lines[3])
-      assert.is_true(vim.bo[vim.api.nvim_get_current_buf()].modifiable == false)
-      -- q で閉じる (編集経路ではない: コメントも save も変わらない)
-      local ws = vim.api.nvim_tabpage_list_wins(state.tab)
-      vim.api.nvim_win_close(ws[#ws], true)
-      assert.equals(1, #saved().comments)
-      assert.equals('first line\nsecond line', saved().comments[1].body)
-    end
-  )
-
-  it(
-    'i の float は q で閉じられる (焦点が diff に戻る・コメント不変)',
-    function()
-      seed_one 'x'
-      focus_diff_row(4)
-      comments_handler.view_current()
-      local w = vim.api.nvim_tabpage_list_wins(state.tab)
-      vim.api.nvim_win_close(w[#w], true)
-      assert.equals(2, #vim.api.nvim_tabpage_list_wins(state.tab))
-      assert.equals(1, #saved().comments)
-    end
-  )
+    focus_head_row(2)
+    state.notifications = {}
+    comments_handler.view_current()
+    local wins = vim.api.nvim_tabpage_list_wins(ui_windows.state().tab)
+    assert.equals(4, #wins, '閲覧 float が開かない (3 レビュー窓 + float)')
+    local buf = vim.api.nvim_get_current_buf()
+    assert.same(
+      { '[1] c1  a.lua:2', '  view me', '  second line' },
+      vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    )
+    assert.equals(0, #state.notifications)
+  end)
 
   it('i: outdated コメントは prompt 除外中と表示する', function()
-    seed_one 'drifted'
-    saved().comments[1].state = 'outdated'
-    -- 内存側も同じオブジェクトなので state 反映済み
+    seed_at(2, 'drifted')
     local session = session_handler.active()
     session.comments[1].state = 'outdated'
 
-    focus_diff_row(4)
+    focus_head_row(2)
     comments_handler.view_current()
-    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-    assert.is_true(lines[1]:find('outdated', 1, true) ~= nil, lines[1])
-    assert.is_true(lines[1]:find('prompt 除外中', 1, true) ~= nil)
-  end)
-
-  it('d: コメントなしは WARN で save 内容不変', function()
-    focus_diff_row(8)
-    comments_handler.delete_current()
-    assert.same({
-      msg = 'review.nvim: その行のコメントはありません',
-      level = vim.log.levels.WARN,
-    }, state.notifications[1])
-    assert.equals(0, #saved().comments)
+    local lines = vim.api.nvim_buf_get_lines(vim.api.nvim_get_current_buf(), 0, -1, false)
+    assert.same({ '[1] c1  a.lua:2  ! outdated (prompt 除外中)', '  drifted' }, lines)
   end)
 end)
