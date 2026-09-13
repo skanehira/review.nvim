@@ -26,7 +26,7 @@ local ui_chrome = require 'review.ui.chrome'
 local ui_commentmarks = require 'review.ui.commentmarks'
 local ui_fileview = require 'review.ui.fileview'
 local ui_keygate = require 'review.ui.keygate'
-local ui_list = require 'review.ui.list'
+local ui_filepanel = require 'review.ui.filepanel'
 local ui_scratchwin = require 'review.ui.scratchwin'
 local ui_windows = require 'review.ui.windows'
 local usermsg = require 'review.handlers.usermsg'
@@ -48,7 +48,18 @@ M.NO_CHANGES = '(no-changes)'
 --            current = { path, file, kind, base_buf, head_buf }, degraded,
 --            fill_token, owned_bufs = { [bufnr]=true }, scratch_bufs = {} }
 local active = nil
-local sidebar_filter = nil -- panel 絞り込み (view state、session JSON に載せない)
+-- file panel の view state (session JSON に載せない — diff-review「file panel」)。
+-- filter: 絞り込み句。panel_mode: 'tree' (既定) ⇄ 'list' (`i`)。panel_collapsed:
+-- 折り畳んだ dir の集合 (key = row_entry の deepest dir path)。
+local sidebar_filter = nil
+local panel_mode = 'tree'
+local panel_collapsed = {}
+
+local function reset_panel_view_state()
+  sidebar_filter = nil
+  panel_mode = 'tree'
+  panel_collapsed = {}
+end
 
 -- リフレッシュ in-flight まとめ (diff-review「リフレッシュ」): git diff 同時 1 本。
 -- in-flight 中は二重発火せず dirty マークだけ立て、完了後に追い fetch 1 回。
@@ -67,7 +78,7 @@ local open_session_ui
 
 function M._reset()
   active = nil
-  sidebar_filter = nil
+  reset_panel_view_state()
   reset_refresh_state()
   ui_windows.reset()
 end
@@ -349,7 +360,7 @@ local function detach()
   end
   local current = active
   active = nil
-  sidebar_filter = nil
+  reset_panel_view_state()
   -- close / 切替時の in-flight・dirty 無効化 (リフレッシュ契約)。解決済み
   -- コールバック側の破棄は active 同一性比較 (refresh の guard) が担う。
   reset_refresh_state()
@@ -480,17 +491,16 @@ end
 -- 向くよう、可視一覧はこの 1 関数からのみ供給する (filter は view state で
 -- session JSON に載せない — 復元・開き直し後は全一覧が正しい)。
 local function visible_files()
-  if sidebar_filter == nil or sidebar_filter == '' then
-    return active.file_order_sorted
+  return ui_filepanel.visible(active.file_order_sorted, sidebar_filter)
+end
+
+-- «Showing changes for: <base>..<head 表示名>» の後者 (DESIGN 決定表: 通常経路は
+-- 作業ツリー、scratch 縮退時は ref 名)。
+local function panel_head_display()
+  if active.degraded then
+    return active.session.head
   end
-  local needle = sidebar_filter:lower()
-  local out = {}
-  for _, e in ipairs(active.file_order_sorted) do
-    if e.path:lower():find(needle, 1, true) ~= nil then
-      out[#out + 1] = e
-    end
-  end
-  return out
+  return '作業ツリー'
 end
 
 local function plural(n, word)
@@ -575,12 +585,16 @@ local function apply_chrome()
   local bw = ui_windows.win 'base'
   local hw = ui_windows.win 'head'
   ui_chrome.window(pw)
+  if pw ~= nil then
+    -- 相互ハイライト: 選択行 hl (filepanel) + 窓 cursorline (diff-review「file panel」)
+    vim.wo[pw].cursorline = true
+  end
   ui_chrome.window(bw)
   ui_chrome.window(hw)
   if pw ~= nil and active.panel_buf ~= nil and vim.api.nvim_buf_is_valid(active.panel_buf) then
     ui_chrome.winbar(
       pw,
-      ui_list.sidebar_winbar(active.session, visible_files(), {
+      ui_filepanel.winbar(active.session, visible_files(), {
         filter = sidebar_filter,
         hidden_outdated = hidden_outdated_count(),
       })
@@ -596,15 +610,43 @@ local function apply_chrome()
   end
 end
 
-local function refresh_panel()
+local function refresh_panel(cursor_entry)
   if active == nil then
     return
   end
-  active.panel_buf = ui_list.render_sidebar(active.session, visible_files())
+  active.panel_buf = ui_filepanel.render(active.session, visible_files(), {
+    mode = panel_mode,
+    collapsed = panel_collapsed,
+    head_display = panel_head_display(),
+    cursor = cursor_entry,
+  })
   ui_keygate.install(active.panel_buf)
   active.owned_bufs[active.panel_buf] = true
   ui_windows.set_panel_buf(active.panel_buf)
   apply_chrome()
+end
+
+-- dir entry «開く» (<CR> / o) = 折り畳みトグル。dir 行自身は残り、子行 (連結 chain
+-- 含む) を隠す。カーソル contract: 同じ dir entry を指したまま (filepanel.render が
+-- entry で追従、隠れない) — diff-review「file panel」折込カーソル。
+local function toggle_dir_collapse(path)
+  if panel_collapsed[path] == true then
+    panel_collapsed[path] = nil
+  else
+    panel_collapsed[path] = true
+  end
+  refresh_panel { kind = 'dir', path = path }
+end
+
+--- `i` (file panel): list 表示 (フルパス 1 行) ⇄ tree 表示の切替。view state で
+--- save しない。filter / collapsed / 選択 entry は.mode の切り替えを跨ぐ (tree 側で
+--- 畳んだ dir は list 表示では効かず、全ファイル行が出る)。
+function M.toggle_listing_style()
+  if active == nil then
+    return
+  end
+  panel_mode = (panel_mode == 'tree') and 'list' or 'tree'
+  refresh_panel()
 end
 
 --- `/`: panel 一覧を絞り込む。空入力 = 解除、キャンセル (Esc) = 現状維持。
@@ -793,7 +835,8 @@ local function resolve_and_open(path)
     session.files[path] = entry
   end
   entry.viewed = true
-  refresh_panel()
+  -- panel カーソルを開いたファイル行へ逆追従 (<CR> 以外の移動系・初期開き含む)
+  refresh_panel(path == M.NO_CHANGES and nil or { kind = 'file', path = path })
   persist() -- INV-4: viewed 更新の直後 (open_file 共通処理)
   apply_chrome()
 end
@@ -824,7 +867,7 @@ local function on_review_tab_closed()
     return
   end
   active = nil
-  sidebar_filter = nil
+  reset_panel_view_state()
   ui_commentmarks.clear_tracked()
   for buf in pairs(current.owned_bufs) do
     ui_keygate.uninstall(buf)
@@ -1417,8 +1460,8 @@ begin_session = function(args, files, existing, worktree, degraded)
 
   local files_by_path, file_order, sorted = build_file_state(session, files)
 
-  -- 開き直し = 全一覧が正しい (前回の絞り込みを持ち込まない)
-  sidebar_filter = nil
+  -- 開き直し = 全一覧が正しい (前回の絞り込み・fold・list/tree を持ち込まない)
+  reset_panel_view_state()
   reset_refresh_state()
   active = {
     session = session,
@@ -1443,7 +1486,11 @@ begin_session = function(args, files, existing, worktree, degraded)
 end
 
 open_session_ui = function()
-  active.panel_buf = ui_list.render_sidebar(active.session, active.file_order_sorted)
+  active.panel_buf = ui_filepanel.render(active.session, active.file_order_sorted, {
+    mode = panel_mode,
+    collapsed = panel_collapsed,
+    head_display = panel_head_display(),
+  })
   ui_keygate.install(active.panel_buf)
   active.owned_bufs[active.panel_buf] = true
   -- vsplit 継承 drift 回避と tcd は windows.open 内 (レビュー 3 窓を作ってから
@@ -1492,11 +1539,16 @@ function M.open_selected_file()
     return
   end
   local row = vim.api.nvim_win_get_cursor(win)[1]
-  local path = ui_list.row_file(buf, row)
-  if path == nil then
+  local entry = ui_filepanel.row_entry(buf, row)
+  if entry == nil then
+    return -- ヘッダ行 / 範囲外 (<CR> 無動作)
+  end
+  if entry.kind == 'dir' then
+    -- dir entry «開く» = fold トグル (DESIGN キー表 <CR>/o/l。カーソルは dir 行に残る)
+    toggle_dir_collapse(entry.path)
     return
   end
-  M.open_file(path)
+  M.open_file(entry.path)
 end
 
 --- コメント CRUD 直後の再永続化 + 表示更新 (INV-4、diff-review「コメント表示」
@@ -1566,7 +1618,11 @@ function M.focus_sidebar()
   end
   if active.panel_buf == nil or not vim.api.nvim_buf_is_valid(active.panel_buf) then
     active.panel_buf = nil
-    local buf = ui_list.render_sidebar(active.session, visible_files())
+    local buf = ui_filepanel.render(active.session, visible_files(), {
+      mode = panel_mode,
+      collapsed = panel_collapsed,
+      head_display = panel_head_display(),
+    })
     ui_keygate.install(buf)
     active.owned_bufs[buf] = true
     active.panel_buf = buf
@@ -1605,10 +1661,15 @@ function M.open_file_current()
   local path = current_path()
   if meta.kind == 'sidebar' then
     local row = vim.api.nvim_win_get_cursor(win)[1]
-    path = ui_list.row_file(buf, row)
-    if path == nil then
+    local entry = ui_filepanel.row_entry(buf, row)
+    if entry == nil then
       return
     end
+    if entry.kind == 'dir' then
+      toggle_dir_collapse(entry.path)
+      return
+    end
+    path = entry.path
   end
   if path == nil then
     notify_warn '対象ファイルが解決できません'
@@ -1659,10 +1720,11 @@ function M.toggle_viewed_current()
     return
   end
   local row = vim.api.nvim_win_get_cursor(win)[1]
-  local path = ui_list.row_file(buf, row)
-  if path == nil then
-    return
+  local target = ui_filepanel.row_entry(buf, row)
+  if target == nil or target.kind ~= 'file' then
+    return -- dir / ヘッダ行の x は無動作 (viewed はファイルの状態)
   end
+  local path = target.path
   local entry = active.session.files[path] or { viewed = false }
   entry.viewed = not entry.viewed
   active.session.files[path] = entry

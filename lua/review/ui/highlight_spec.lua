@@ -17,14 +17,25 @@ describe('highlight.setup', function()
       vim.api.nvim_get_hl(0, { name = 'ReviewDiffDelete', link = true }).link
     )
     assert.equals('diffLine', vim.api.nvim_get_hl(0, { name = 'ReviewDiffHunk', link = true }).link)
+    -- file panel の 4 グループ (DESIGN「命名」。旧 ReviewSidebar* は panel 側へ統合)
+    assert.equals('Normal', vim.api.nvim_get_hl(0, { name = 'ReviewPanelFile', link = true }).link)
     assert.equals(
       'Directory',
-      vim.api.nvim_get_hl(0, { name = 'ReviewSidebarFile', link = true }).link
+      vim.api.nvim_get_hl(0, { name = 'ReviewPanelDir', link = true }).link
     )
     assert.equals(
       'Comment',
-      vim.api.nvim_get_hl(0, { name = 'ReviewSidebarStatus', link = true }).link
+      vim.api.nvim_get_hl(0, { name = 'ReviewPanelStatus', link = true }).link
     )
+    assert.equals('Comment', vim.api.nvim_get_hl(0, { name = 'ReviewPanelMeta', link = true }).link)
+    assert.is_nil(next(vim.api.nvim_get_hl(0, { name = 'ReviewSidebarFile' })))
+  end)
+
+  it('config.highlight の file panel group override が既定定義に勝つ', function()
+    config.setup { highlight = { ReviewPanelDir = { link = 'Question', bold = true } } }
+    highlight.setup()
+    local hl = vim.api.nvim_get_hl(0, { name = 'ReviewPanelDir', link = true })
+    assert.equals('Question', hl.link)
   end)
 
   it('config.highlight の override が既定定義に勝つ', function()

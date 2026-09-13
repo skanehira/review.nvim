@@ -35,6 +35,8 @@ M.defaults = {
       toggle_viewed = 'x',
       close = 'q',
       filter = '/',
+      -- list 表示 (フルパス 1 行) と tree 表示の切替 (view state。DESIGN キー表)
+      toggle_style = 'i',
     },
     sessionlist = {
       open = '<CR>',
