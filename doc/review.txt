@@ -19,25 +19,34 @@ USAGE						*review-usage*
 	:Review					続きのセッションを復元。open
 					状態のみが対象で、複数あれば選択 UI。
 					closed は |review-list| から再開する
-	:Review start {base} [{head}]		ブランチレビュー開始。
-					{base} / {head} は cmdline で <Tab>
-					により branches -> tags 順に補完
-					される (取得は同期・短時間 cache)。
-					head 省略時は `prompt` で head を
-					入力する。同一 refs 組の保存済み
-					セッションがある場合は「継承する
-					か」の [y/N] 確認が出る (y で
+	:Review start {base} [{head}]		ブランチレビュー開始。レビュー
+					対象は現在のチェックアウトの作業ツリー
+					(未コミット変更を含む)。{base} / {head}
+					は cmdline で <Tab> により branches ->
+					tags 順に補完される (取得は同期・短時間
+					cache)。head 省略時は現在のブランチ名
+					(rev-parse --abbrev-ref HEAD。detach
+					では "HEAD") を自動採用・保存し、入力
+					UI は出さない。head を明示して現在の
+					HEAD と違うコミットを指す場合、head が
+					ローカルブランチで作業ツリーが clean
+					なら git switch するか [y/N] で確認する
+					(承諾 = switch してレビュー、拒否・
+					dirty・非ローカルブランチ・switch 失敗
+					= git show 内容の読み取り専用レビューに
+					縮退し INFO 通知)。branch レビューでは
+					worktree を作らない。同一 refs 組の
+					保存済みセッションがある場合は「継承
+					するか」の [y/N] 確認が出る (y で
 					comments / viewed を引き継ぎ、n で
 					何もしない)
 	:Review pr {number|url}			PR レビュー開始 (gh 連携)。
 					{number} は <Tab> で open PR の番号が
 					補完できる (gh を同期実行)。
 					head を git worktree に展開し、`o` で
-					差分と同一内容の実ファイルが開ける。
-					branch レビュー (`:Review start`) で
-					も worktree は作られ、`o` とプロンプト
-					の @path は worktree 基準の絶対パスに
-					なる (掃除は |review-sessions|)
+					差分と同一内容の実ファイルが開ける
+					(worktree 作成は pr モードのみ。掃除は
+					|review-sessions|)
 	:Review list				保存済みセッション一覧 |review-list|
 	:Review close				現セッションを保存して閉じる |review-sessions|
 	:Review delete {id}			保存済みセッションを削除
@@ -57,8 +66,10 @@ git/gh を伴う実行の成否は非同期に UI 開閉か vim.notify で返る
 
 	setup(opts)			config 合成と初期化 (省略可、既定値で
 					動作)。設定項目は |review-setup|
-	start({ base=, head= })		ブランチレビュー開始。head 省略時は
-					選択 UI になる
+	start({ base=[, head=] })	ブランチレビュー開始。head 省略時は
+					現在のブランチ名を自動採用・保存する
+					(入力 UI なし)。振る舞いは
+					|review-usage| と同じ
 	start_pr({ number= })		PR レビュー開始 (gh 連携、|review-usage|)
 	resume({ id= })			保存済みセッションを id で復元
 	close()				現セッションの save + 窓を閉じる +

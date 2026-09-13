@@ -8,8 +8,8 @@
 # @path#L.. + 本文 -> :Review prompt で見出し + 全件全文一致 (issue #7) ->
 # 正常終了 -> 別プロセスで VimEnter notify -> :Review 復元 ->
 # 本文・行位置・viewed が元の状態と一致することを assert。
-# phase3: :Review start <base> 1 引数 -> 実 vim.ui.input (customlist 補完) で
-# head を選んでセッション開始する経路を pin (mock を通さない接続検証)。
+# phase3: :Review start <base> 1 引数 -> head 省略 = rev-parse --abbrev-ref HEAD
+# による自動採用・保存 (入力 UI なし) を実 git で pin (issue #14 の開始契約)。
 # E2E は clipboard provider 無しで走る (クリップボード非依存、"0 レジスタ比較のみ)。
 #
 # 契約: 毎回 mktemp の一意ディレクトリに fixture repo と XDG_DATA_HOME を作り、
@@ -55,7 +55,7 @@ PYEOF
 printf 'feature addition\nsecond line\n' >"$REPO/b.lua"
 git -C "$REPO" add -A
 git -C "$REPO" commit -qm feature
-# phase3 (head 省略選択) の単一補完候補。feature と同じツリーの別ref。
+# phase3 で自動採用 head とは別の ref (feature と同一ツリー)。補完候補にも出る。
 git -C "$REPO" branch hotfix
 
 # --- phase 1: 起動 -> コメント -> 切替 -> 正常終了 -------------------
@@ -136,7 +136,7 @@ if ! run_nvim "$REPO_ROOT/tests/e2e/phase3.lua" >"$OUT3" 2>&1; then
   exit 1
 fi
 cat "$OUT3" | tee -a "$WORK/e2e-report.txt"
-grep -q 'E2E-S3 head=hotfix' "$OUT3" || { echo 'e2e: head 省略選択経路が開始に到達しない' >&2; exit 1; }
+grep -q 'E2E-S3 head=hotfix' "$OUT3" || { echo 'e2e: head 省略自動採用経路が開始に到達しない' >&2; exit 1; }
 
 # --- phase 4: :Review start の cmdline ref 補完 (実 git for-each-ref 同期) ---
 # customlist の呼び出し側 (review.complete) を実 repo で検証。popup 描画自体は
