@@ -589,3 +589,153 @@ describe('ref.refs_sync (cmdline 補完専用の同期一覧)', function()
     assert.is_nil(res.data)
   end)
 end)
+
+describe('git/ref abbrev_ref_head (head 省略の自動解決)', function()
+  restore_after_each()
+
+  it(
+    'rev-parse --abbrev-ref HEAD を実行し、ブランチ名を末尾改行除去で data に返す',
+    function()
+      local captured = {}
+      cli._set_system(stub_system(captured))
+      stub_ok_executable()
+
+      local received
+      ref.abbrev_ref_head({ cwd = '/tmp/repo' }, function(res)
+        received = res
+      end)
+      assert.same({ 'git', 'rev-parse', '--abbrev-ref', 'HEAD' }, captured.cmd)
+      assert.equals('/tmp/repo', captured.opts.cwd)
+      captured.on_exit { code = 0, stdout = 'feature\n', stderr = '' }
+
+      assert.same({ __class = 'review.Result', ok = true, data = 'feature' }, received)
+    end
+  )
+
+  it(
+    'detached HEAD では literal "HEAD" をそのまま data に返す (diff-review「開始」1)',
+    function()
+      local captured = {}
+      cli._set_system(stub_system(captured))
+      stub_ok_executable()
+
+      local received
+      ref.abbrev_ref_head({}, function(res)
+        received = res
+      end)
+      captured.on_exit { code = 0, stdout = 'HEAD\n', stderr = '' }
+
+      assert.same({ __class = 'review.Result', ok = true, data = 'HEAD' }, received)
+    end
+  )
+
+  it('repo 外 (exit 128) は code=E_REF の err 結果を返す', function()
+    local captured = {}
+    cli._set_system(stub_system(captured))
+    stub_ok_executable()
+
+    local received
+    ref.abbrev_ref_head({}, function(res)
+      received = res
+    end)
+    captured.on_exit { code = 128, stdout = '', stderr = 'fatal: not a git repository\n' }
+
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      data = { stdout = '', code = 128 },
+      error = 'fatal: not a git repository',
+      code = 'E_REF',
+    }, received)
+  end)
+
+  it('実 git: feature checkout 中で feature を、detach 中で HEAD を返す', function()
+    local dir = build_repo()
+    local received_branch = await_result(function(cb)
+      ref.abbrev_ref_head({ cwd = dir }, cb)
+    end)
+    assert.same({ __class = 'review.Result', ok = true, data = 'main' }, received_branch)
+
+    vim.system({ 'git', '-C', dir, 'checkout', '-q', '--detach', 'HEAD' }):wait(10000)
+    local received_detach = await_result(function(cb)
+      ref.abbrev_ref_head({ cwd = dir }, cb)
+    end)
+    assert.same({ __class = 'review.Result', ok = true, data = 'HEAD' }, received_detach)
+  end)
+end)
+
+describe(
+  'git/ref is_local_branch (switch 提案可否のローカルブランチ判定)',
+  function()
+    restore_after_each()
+
+    it(
+      'show-ref --verify --quiet refs/heads/<ref> を実行し、ヒットは data=true の ok を返す',
+      function()
+        local captured = {}
+        cli._set_system(stub_system(captured))
+        stub_ok_executable()
+
+        local received
+        ref.is_local_branch({ ref = 'feature/x', cwd = '/tmp/repo' }, function(res)
+          received = res
+        end)
+        assert.same(
+          { 'git', 'show-ref', '--verify', '--quiet', 'refs/heads/feature/x' },
+          captured.cmd
+        )
+        assert.equals('/tmp/repo', captured.opts.cwd)
+        captured.on_exit { code = 0, stdout = '', stderr = '' }
+
+        assert.same({ __class = 'review.Result', ok = true, data = true }, received)
+      end
+    )
+
+    it(
+      '非ヒット (exit 1 = tag / remote branch / sha) は ref がローカルブランチでない err 結果',
+      function()
+        local captured = {}
+        cli._set_system(stub_system(captured))
+        stub_ok_executable()
+
+        local received
+        ref.is_local_branch({ ref = 'v1.0.0' }, function(res)
+          received = res
+        end)
+        captured.on_exit { code = 1, stdout = '', stderr = '' }
+
+        assert.same({
+          __class = 'review.Result',
+          ok = false,
+          error = 'v1.0.0 はローカルブランチではありません',
+          code = 'E_REF',
+        }, received)
+      end
+    )
+
+    it(
+      '実 git: 実在 branch ok / tag err (show-ref は refs/heads 底下だけ見る)',
+      function()
+        local dir = build_repo()
+        local ok_res = await_result(function(cb)
+          ref.is_local_branch({ ref = 'feature', cwd = dir }, cb)
+        end)
+        assert.same({ __class = 'review.Result', ok = true, data = true }, ok_res)
+
+        local tag_res = await_result(function(cb)
+          ref.is_local_branch({ ref = 'v1.0.0', cwd = dir }, cb)
+        end)
+        assert.equals(false, tag_res.ok)
+        assert.equals('E_REF', tag_res.code)
+
+        local sha = await_result(function(cb)
+          ref.rev_parse({ ref = 'feature', cwd = dir }, cb)
+        end)
+        local sha_res = await_result(function(cb)
+          ref.is_local_branch({ ref = sha.data, cwd = dir }, cb)
+        end)
+        assert.equals(false, sha_res.ok)
+      end
+    )
+  end
+)

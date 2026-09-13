@@ -1,4 +1,7 @@
--- git/diff: `git diff <base> <head>` の実行アダプタ (diff-review.md「開始」手順 2)。
+-- git/diff: 差分取得の実行アダプタ (diff-review.md「開始」手順 3)。
+-- 通常経路は作業ツリー基準の**単引数形** `git diff <base>` (head 省略)、
+-- scratch 縮退時だけ `git diff <base> <head>`。cwd 指定 (branch=repo /
+-- PR=worktree) は vim.system opts へそのまま渡る。
 -- 引数組み立て (-U<n> 込み) と結果型分岐は注入 system スタブで検証し、
 -- 実 git 経路を 1 ケース置いてスタブにしか通っていない経路を残さない
 -- (git/cli_spec.lua と同じ規律)。
@@ -69,22 +72,29 @@ describe('git/diff fetch 引数組み立て', function()
   restore_after_each()
 
   it(
-    'diff_context 未指定では git diff <base> <head> のみ、cwd は vim.system へ渡る',
+    'head 省略 (通常経路) は作業ツリー基準の単引数形 git diff <base>、cwd は vim.system へ渡る',
     function()
       local captured = {}
       cli._set_system(stub_system(captured))
       stub_ok_executable()
 
-      diff_adapter.fetch(
-        { base = 'main', head = 'feature', cwd = '/tmp/review-spec-repo' },
-        function() end
-      )
+      diff_adapter.fetch({ base = 'main', cwd = '/tmp/review-spec-repo' }, function() end)
 
-      assert.same({ 'git', 'diff', 'main', 'feature' }, captured.cmd)
+      assert.same({ 'git', 'diff', 'main' }, captured.cmd)
       assert.equals('/tmp/review-spec-repo', captured.opts.cwd)
       assert.is_true(captured.opts.text)
     end
   )
+
+  it('head 指定 (scratch 縮退経路) は git diff <base> <head> の 2 引数形', function()
+    local captured = {}
+    cli._set_system(stub_system(captured))
+    stub_ok_executable()
+
+    diff_adapter.fetch({ base = 'main', head = 'feature' }, function() end)
+
+    assert.same({ 'git', 'diff', 'main', 'feature' }, captured.cmd)
+  end)
 
   it('config.diff_context=5 では引数に -U5 が挿入される', function()
     local captured = {}
@@ -195,6 +205,68 @@ describe('git/diff fetch 実 git', function()
 
       local received = nil
       diff_adapter.fetch({ base = 'main', head = 'headbr', cwd = dir }, function(res)
+        received = res
+      end)
+      vim.wait(6000, function()
+        return received ~= nil
+      end)
+
+      assert.is_true(received ~= nil and received.ok)
+      assert.same({
+        path = 'x.txt',
+        status = 'M',
+        binary = false,
+        added = 1,
+        deleted = 0,
+        hunks = {
+          {
+            old_start = 1,
+            old_count = 1,
+            new_start = 1,
+            new_count = 2,
+            header = '@@ -1 +1,2 @@',
+            lines = {
+              { kind = 'context', text = 'one', new_line = 1 },
+              { kind = 'add', text = 'two', new_line = 2 },
+            },
+          },
+        },
+      }, received.data.files[1])
+      assert.equals(1, #received.data.files)
+    end
+  )
+
+  it(
+    '実リポジトリ + head 省略の単引数形 (作業ツリー基準) も同一の parse 結果を返す',
+    function()
+      local dir = vim.fn.tempname()
+      vim.fn.mkdir(dir, 'p')
+      table.insert(created_dirs, dir)
+      local function git(args)
+        local out =
+          vim.system(vim.list_extend({ 'git' }, args), { cwd = dir, text = true }):wait(10000)
+        if out.code ~= 0 then
+          error('git ' .. table.concat(args, ' ') .. ' 失敗: ' .. out.stderr, 0)
+        end
+        return out.stdout
+      end
+      git { 'init', '-q', '-b', 'main' }
+      git { 'config', 'user.email', 'spec@example.com' }
+      git { 'config', 'user.name', 'spec' }
+      local f = io.open(vim.fs.joinpath(dir, 'x.txt'), 'w')
+      f:write 'one\n'
+      f:close()
+      git { 'add', '-A' }
+      git { 'commit', '-qm', 'base' }
+      git { 'checkout', '-qb', 'headbr' }
+      local f2 = io.open(vim.fs.joinpath(dir, 'x.txt'), 'w')
+      f2:write 'one\ntwo\n'
+      f2:close()
+      git { 'add', '-A' }
+      git { 'commit', '-qm', 'two' }
+
+      local received = nil
+      diff_adapter.fetch({ base = 'main', cwd = dir }, function(res)
         received = res
       end)
       vim.wait(6000, function()

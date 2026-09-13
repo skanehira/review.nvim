@@ -35,11 +35,14 @@ local DIFF_A_NAME = 'review://diff/' .. SLUG .. '/a.lua'
 local state = {}
 
 -- cli._set_system 注入: 実行順に responses[idx] を同期 for on_exit を呼ぶ。
+-- state.git_opts[idx] には vim.system opts を並列記録し、cwd 契約を pin できるようにする。
 local function install_git(responses)
   state.git_calls = {}
+  state.git_opts = {}
   cli._set_system(function(cmd, opts, on_exit)
     local idx = #state.git_calls + 1
     table.insert(state.git_calls, cmd)
+    state.git_opts[idx] = opts
     if responses[idx] == nil then
       error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
     end
@@ -146,32 +149,27 @@ local function use_env()
   end)
 end
 
--- top -> diff -> worktree 作成判断 (branch: head==HEAD + clean で skip) までを
--- 完結させるレスポンス列。作成判断の 3 呼び (rev-parse head / rev-parse HEAD /
--- status --porcelain) を同一コミット + clean で応答すると worktree なしになる。
+-- top -> head 解決 (rev-parse <head> == rev-parse HEAD の一致 = 通常経路) ->
+-- `git diff <base>` (単引数・作業ツリー基準) までを完結させるレスポンス列。
 local SAME_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-local JUDGE_SKIP = {
+local RP_HEAD_MATCH = {
   function()
     return { code = 0, stdout = SAME_SHA .. '\n', stderr = '' }
   end,
   function()
     return { code = 0, stdout = SAME_SHA .. '\n', stderr = '' }
-  end,
-  function()
-    return { code = 0, stdout = '', stderr = '' }
   end,
 }
 
--- top -> diff メインの start を完結させる。
+-- top -> diff メインの start を完結させる (head == 現在のチェックアウト)。
 local function start_done(base, head)
   install_git {
     top_ok,
+    RP_HEAD_MATCH[1],
+    RP_HEAD_MATCH[2],
     function()
       return diff_ok(RAW_DIFF_A_B)
     end,
-    JUDGE_SKIP[1],
-    JUDGE_SKIP[2],
-    JUDGE_SKIP[3],
   }
   return session_handler.start { base = base, head = head }
 end
@@ -186,7 +184,10 @@ describe('session.start 開始フロー', function()
 
       assert.equals(true, res.ok)
       assert.same({ 'git', 'rev-parse', '--show-toplevel' }, state.git_calls[1])
-      assert.same({ 'git', 'diff', 'main', 'feature' }, state.git_calls[2])
+      -- head==HEAD 一致 (通常経路) は作業ツリー基準の単引数形
+      assert.same({ 'git', 'rev-parse', '--verify', 'feature' }, state.git_calls[2])
+      assert.same({ 'git', 'rev-parse', '--verify', 'HEAD' }, state.git_calls[3])
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[4])
 
       assert.same({
         version = 1,
@@ -287,6 +288,10 @@ describe('session.start 開始フロー', function()
     function()
       install_git {
         top_ok,
+        -- rev-parse <head> 失敗 (短絡) -> 縮退 2 引数形の diff 本体が E_REF を出す
+        function()
+          return { code = 128, stdout = '', stderr = "fatal: bad revision 'nope'\n" }
+        end,
         function()
           -- 実 git と同じ shape (fatal 主行 + usage 続き) で翻訳経路を通す
           return {
@@ -299,6 +304,10 @@ describe('session.start 開始フロー', function()
       -- git を伴う失敗は結果型では返さず notify で返す (DESIGN.md「API 一覧」非同期契約)。
       session_handler.start { base = 'main', head = 'nope' }
 
+      -- 存在しない ref に switch 提案も縮退 INFO も出さない (提案対象は解決可能な
+      -- ローカルブランチだけ — INV-3)
+      assert.same({ 'git', 'diff', 'main', 'nope' }, state.git_calls[3])
+      assert.equals(0, #state.inputs)
       -- 生 stderr 丸出しでなく「名前 + 次の行動」を伝える (UX review F4)
       assert.same({
         msg = "review.nvim: レビュー対象 ref が解決できません: 'nope'。存在するブランチ/コミットを"
@@ -319,6 +328,8 @@ describe('session.start 開始フロー', function()
     function()
       install_git {
         top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
         function()
           return diff_ok ''
         end,
@@ -338,44 +349,54 @@ describe('session.start 開始フロー', function()
   )
 
   it(
-    'head 省略時は vim.ui.input (branches -> tags 補完) で選んだ head で開始する',
+    'head 省略は rev-parse --abbrev-ref HEAD を自動採用・保存する (入力 UI を出さない)',
     function()
       install_git {
         top_ok,
         function()
-          return { code = 0, stdout = 'feature\nmain\n', stderr = '' }
+          return { code = 0, stdout = 'feature\n', stderr = '' }
         end,
-        function()
-          return { code = 0, stdout = 'v1\n', stderr = '' }
-        end,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
         function()
           return diff_ok(RAW_DIFF_A_B)
         end,
-        JUDGE_SKIP[1],
-        JUDGE_SKIP[2],
-        JUDGE_SKIP[3],
       }
-      local capture = nil
-      vim.ui.input = function(opts, cb)
-        capture = opts
-        table.insert(state.inputs, opts)
-        cb 'feature'
-      end
+
+      local res = session_handler.start { base = 'main' }
+
+      assert.equals(true, res.ok)
+      assert.same({ 'git', 'rev-parse', '--abbrev-ref', 'HEAD' }, state.git_calls[2])
+      -- 自動解決したブランチ名で保存され、head==HEAD 一致なので作業ツリー基準の単引数形
+      assert.equals('feature', load_saved().head)
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[5])
+      assert.equals(0, #state.inputs)
+      assert.equals(SLUG, session_handler.active().id)
+    end
+  )
+
+  it(
+    'detached HEAD では head に literal "HEAD" を保存して通常経路で開始する',
+    function()
+      install_git {
+        top_ok,
+        function()
+          return { code = 0, stdout = 'HEAD\n', stderr = '' }
+        end,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
 
       session_handler.start { base = 'main' }
 
-      -- 既定 vim.ui.input は opts を vim.fn.input へそのまま渡す。Lua 関数を
-      -- 含む opts は E467 で即失敗し on_confirm(nil) になるため、input() が
-      -- 受理する文字形式 'customlist,{Vim script 関数名}' でなければならない
-      -- (実 nvim での手動実証は DESIGN.md「既知の制約」)。
-      assert.equals('customlist,ReviewNvimHeadComplete', capture.completion)
-      assert.is_nil(capture.complete)
-      -- 補完関数の実体解決 (vim fn -> luaeval -> Lua) を本物の呼び出しで pin する。
-      -- opts を mock してもこの経路は mock を通らない。
-      assert.same({ 'feature', 'main', 'v1' }, vim.fn.call('ReviewNvimHeadComplete', { '', '', 0 }))
-      assert.same({ 'main' }, vim.fn.call('ReviewNvimHeadComplete', { 'ma', '', 0 }))
-      assert.same({ 'git', 'diff', 'main', 'feature' }, state.git_calls[4])
-      assert.equals(SLUG, session_handler.active().id)
+      -- 保存された "HEAD" は復元時にブランチ名として再評価できる (DESIGN「データスキーマ」)
+      assert.equals('HEAD', load_saved('main--HEAD').head)
+      assert.equals('main--HEAD', session_handler.active().id)
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[5])
+      assert.equals(0, #state.inputs)
     end
   )
 
@@ -391,6 +412,213 @@ describe('session.start 開始フロー', function()
     assert.equals(vim.log.levels.WARN, state.notifications[1].level)
     assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME))
   end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- head 解決フロー (diff-review.md「開始」2 / DESIGN 決定表「head が現在の HEAD
+-- と違うとき」)。rev-parse 一致 = 通常経路 / 不一致 + ローカルブランチ + clean
+-- = switch 提案 [y/N] / 拒否・dirty・非ローカルブランチ・switch 失敗 = 縮退。
+-- ---------------------------------------------------------------------------
+
+local OTHER_SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+
+-- 不一致状態 (head と HEAD が別コミット) の rev-parse 応答ペア。
+local RP_HEAD_MISMATCH = {
+  function()
+    return { code = 0, stdout = SAME_SHA .. '\n', stderr = '' }
+  end,
+  function()
+    return { code = 0, stdout = OTHER_SHA .. '\n', stderr = '' }
+  end,
+}
+
+local git_ok = function()
+  return { code = 0, stdout = '', stderr = '' }
+end
+
+local showref_ok = function()
+  return { code = 0, stdout = '', stderr = '' }
+end
+
+local showref_miss = function()
+  return { code = 1, stdout = '', stderr = '' }
+end
+
+local status_clean = function()
+  return { code = 0, stdout = '', stderr = '' }
+end
+
+local status_dirty = function()
+  return { code = 0, stdout = ' M a.lua\n', stderr = '' }
+end
+
+local SWITCH_OFFER = 'review.nvim: head feature は現在のチェックアウトと別のコミットです。'
+  .. 'git switch で feature に切り替えてレビューしますか? [y/N]: '
+
+local DEGRADED_MSG = {
+  msg = 'review.nvim: head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします',
+  level = vim.log.levels.INFO,
+}
+
+local function has_call(prefix)
+  for _, cmd in ipairs(state.git_calls) do
+    local joined = table.concat(cmd, ' ')
+    if joined:sub(1, #prefix) == prefix then
+      return true
+    end
+  end
+  return false
+end
+
+describe('head 解決フロー (branch: diff-review「開始」2)', function()
+  use_env()
+
+  it(
+    'rev-parse <head> と HEAD が一致 -> 通常経路 (switch 提案なし・status 照会なし・単引数 diff)',
+    function()
+      start_done('main', 'feature')
+
+      assert.equals(4, #state.git_calls)
+      assert.equals(0, #state.inputs)
+      assert.equals(0, #state.notifications)
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[4])
+      assert.equals(vim.NIL, load_saved().worktree)
+    end
+  )
+
+  it(
+    '不一致 + ローカルブランチ + clean + 承諾 -> git switch 後に通常経路の単引数 diff (INFO なし)',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MISMATCH[1],
+        RP_HEAD_MISMATCH[2],
+        showref_ok,
+        status_clean,
+        git_ok, -- switch ok
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+
+      session_handler.start { base = 'main', head = 'feature' }
+
+      assert.equals(1, #state.inputs)
+      assert.equals(SWITCH_OFFER, state.inputs[1].prompt)
+      assert.same({ 'git', 'switch', 'feature' }, state.git_calls[6])
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[7]) -- switch 後 = 作業ツリー基準
+      assert.equals(0, #state.notifications)
+      assert.equals(SLUG, session_handler.active().id)
+    end
+  )
+
+  it(
+    '承諾後 switch 失敗 -> WARN + scratch 縮退 INFO、diff は <base> <head> 2 引数形で開始は続く',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MISMATCH[1],
+        RP_HEAD_MISMATCH[2],
+        showref_ok,
+        status_clean,
+        function()
+          return {
+            code = 128,
+            stdout = '',
+            stderr = 'fatal: your local changes would be overwritten by checkout\n',
+          }
+        end,
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+
+      session_handler.start { base = 'main', head = 'feature' }
+
+      assert.same({
+        msg = 'review.nvim: git switch に失敗しました。読み取り専用 scratch でレビューします: '
+          .. 'fatal: your local changes would be overwritten by checkout',
+        level = vim.log.levels.WARN,
+      }, state.notifications[1])
+      assert.same(DEGRADED_MSG, state.notifications[2])
+      assert.same({ 'git', 'diff', 'main', 'feature' }, state.git_calls[7])
+      assert.equals(SLUG, session_handler.active().id)
+    end
+  )
+
+  it(
+    'switch 提案を拒否 -> 縮退 INFO + 2 引数 diff で開始 (git switch は一切走らない)',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MISMATCH[1],
+        RP_HEAD_MISMATCH[2],
+        showref_ok,
+        status_clean,
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+      state.input_answer = 'n'
+
+      session_handler.start { base = 'main', head = 'feature' }
+
+      assert.equals(1, #state.inputs)
+      assert.is_false(has_call 'git switch')
+      assert.same(DEGRADED_MSG, state.notifications[1])
+      assert.same({ 'git', 'diff', 'main', 'feature' }, state.git_calls[6])
+      assert.equals(SLUG, session_handler.active().id)
+    end
+  )
+
+  it(
+    '不一致 + dirty な作業ツリー -> 提案を出さない (INV-3) ので縮退 INFO + 2 引数 diff',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MISMATCH[1],
+        RP_HEAD_MISMATCH[2],
+        showref_ok,
+        status_dirty,
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+
+      session_handler.start { base = 'main', head = 'feature' }
+
+      assert.equals(0, #state.inputs)
+      assert.same(DEGRADED_MSG, state.notifications[1])
+      assert.same({ 'git', 'diff', 'main', 'feature' }, state.git_calls[6])
+      assert.equals(SLUG, session_handler.active().id)
+    end
+  )
+
+  it(
+    '不一致 + 非ローカルブランチ (show-ref 非ヒット) -> status も見ず提案なしで縮退 (tag/sha 相当)',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MISMATCH[1],
+        RP_HEAD_MISMATCH[2],
+        showref_miss,
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+
+      session_handler.start { base = 'main', head = 'feature' }
+
+      assert.same(
+        { 'git', 'show-ref', '--verify', '--quiet', 'refs/heads/feature' },
+        state.git_calls[4]
+      )
+      assert.is_false(has_call('git -C ' .. REPO_TOP .. ' status'))
+      assert.equals(0, #state.inputs)
+      assert.same(DEGRADED_MSG, state.notifications[1])
+      assert.same({ 'git', 'diff', 'main', 'feature' }, state.git_calls[5])
+    end
+  )
 end)
 
 describe('session.start 既存セッション継承と active 排他 (INV-1)', function()
@@ -455,12 +683,11 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
 
       install_git {
         top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
         function()
           return diff_ok(RAW_DIFF_A_B)
         end,
-        JUDGE_SKIP[1],
-        JUDGE_SKIP[2],
-        JUDGE_SKIP[3],
       }
       session_handler.start { base = 'main', head = 'hotfix' }
 
@@ -478,12 +705,11 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       start_done('main', 'feature')
       install_git {
         top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
         function()
           return diff_ok(RAW_DIFF_A_B)
         end,
-        JUDGE_SKIP[1],
-        JUDGE_SKIP[2],
-        JUDGE_SKIP[3],
       }
       state.input_answer = 'n'
 
@@ -517,12 +743,11 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
 
     install_git {
       top_ok,
+      RP_HEAD_MATCH[1],
+      RP_HEAD_MATCH[2],
       function()
         return diff_ok(RAW_DIFF_A_B)
       end,
-      JUDGE_SKIP[1],
-      JUDGE_SKIP[2],
-      JUDGE_SKIP[3],
     }
     session_handler.start { base = 'main', head = 'hotfix' } -- 別 refs 組へ切替
     assert.equals('main--hotfix', session_handler.active().id)
@@ -539,12 +764,11 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
 
       install_git {
         top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
         function()
           return diff_ok(RAW_DIFF_A_B)
         end,
-        JUDGE_SKIP[1],
-        JUDGE_SKIP[2],
-        JUDGE_SKIP[3],
       }
       session_handler.start { base = 'main', head = 'feature' }
 
@@ -574,12 +798,11 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       local mtime_before = vim.uv.fs_stat(paths.session_file(REPO_TOP, SLUG)).mtime
       install_git {
         top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
         function()
           return diff_ok(RAW_DIFF_A_B)
         end,
-        JUDGE_SKIP[1],
-        JUDGE_SKIP[2],
-        JUDGE_SKIP[3],
       }
       state.input_answer = 'n'
 
@@ -890,44 +1113,13 @@ describe('sidebar 操作 (viewed / 差分切替) と INV-4 save', function()
 end)
 
 -- ---------------------------------------------------------------------------
--- #6 worktree: 作成判断 / close / delete / o 実ファイル (pr-worktree.md)
+-- #6 worktree: 作成判断 (新契約: pr のみ常時作成 / branch は作らない) /
+-- close / delete / o 実ファイル (pr-worktree.md 決定表 + head 解決フロー)
 -- ---------------------------------------------------------------------------
-
-local WT_OTHER_SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 
 -- paths.worktree_path は注入済み state.dir を使うので require 時でなく呼ぶ時に計算する。
 local function wt_path(slug)
   return paths.worktree_path(REPO_TOP, slug or SLUG)
-end
-
--- 作成判断で worktree を要る状態にするレスポンス (head != HEAD コミット / tree clean)。
-local JUDGE_HEAD_DIFF = {
-  function()
-    return { code = 0, stdout = SAME_SHA .. '\n', stderr = '' }
-  end,
-  function()
-    return { code = 0, stdout = WT_OTHER_SHA .. '\n', stderr = '' }
-  end,
-  function()
-    return { code = 0, stdout = '', stderr = '' }
-  end,
-}
-
--- 作成判断で worktree を要る状態にするレスポンス (同一コミット + 未コミット変更)。
-local JUDGE_DIRTY = {
-  function()
-    return { code = 0, stdout = SAME_SHA .. '\n', stderr = '' }
-  end,
-  function()
-    return { code = 0, stdout = SAME_SHA .. '\n', stderr = '' }
-  end,
-  function()
-    return { code = 0, stdout = ' M a.lua\n', stderr = '' }
-  end,
-}
-
-local git_ok = function()
-  return { code = 0, stdout = '', stderr = '' }
 end
 
 local function git_fail(msg)
@@ -936,8 +1128,8 @@ local function git_fail(msg)
   end
 end
 
-local function add_cmd(ref)
-  return { 'git', 'worktree', 'add', '--detach', wt_path(), ref or 'feature' }
+local function add_cmd(ref, slug)
+  return { 'git', 'worktree', 'add', '--detach', wt_path(slug), ref or 'feature' }
 end
 
 local function list_cmd()
@@ -954,23 +1146,35 @@ local function answer_queue(answers)
   end
 end
 
--- worktree 作成まで進む start。
-local function start_with(responses)
+local function has_worktree_call()
+  for _, cmd in ipairs(state.git_calls) do
+    if cmd[2] == 'worktree' then
+      return true
+    end
+  end
+  return false
+end
+
+-- worktree 作成判断は mode=pr のみ。pr 開始は add/再利用 -> diff (cwd=worktree、
+-- 単引数) の順 (pr-worktree.md「PR 解決」3)。handlers/pr と同じ入口 (session.begin)。
+local function begin_pr(responses, opts)
   install_git(responses)
-  return session_handler.start { base = 'main', head = 'feature' }
+  return session_handler.begin {
+    repo = REPO_TOP,
+    id = (opts and opts.id) or SLUG,
+    mode = 'pr',
+    base = 'main',
+    head = (opts and opts.head) or 'feature',
+  }
 end
 
 -- worktree 作成済み (記録 {path=wt_path(), created_by_us=true}) のセッションを開始。
 local function started_with_worktree()
-  start_with {
-    top_ok,
+  begin_pr {
+    git_ok, -- worktree add
     function()
       return diff_ok(RAW_DIFF_A_B)
     end,
-    JUDGE_HEAD_DIFF[1],
-    JUDGE_HEAD_DIFF[2],
-    JUDGE_HEAD_DIFF[3],
-    git_ok,
   }
 end
 
@@ -980,10 +1184,12 @@ end
 -- responses の remove のスロットは手前へ返るため読まれない (placeholder で可)。
 local function install_git_deferred_remove(responses)
   state.git_calls = {}
+  state.git_opts = {}
   state.deferred = nil
   cli._set_system(function(cmd, opts, on_exit)
     local idx = #state.git_calls + 1
     table.insert(state.git_calls, cmd)
+    state.git_opts[idx] = opts
     if cmd[2] == 'worktree' and cmd[3] == 'remove' then
       state.deferred = on_exit
       return
@@ -998,190 +1204,337 @@ local function install_git_deferred_remove(responses)
   end)
 end
 
-describe('worktree 作成判断 (branch: pr-worktree.md 決定表)', function()
+describe('branch は worktree を作らない (pr-worktree.md 決定表の新契約)', function()
   use_env()
 
-  it(
-    'head==HEAD コミットかつ clean => worktree を作らない (現在の作業ツリーが head の実ファイル)',
-    function()
-      start_done('main', 'feature')
+  -- 旧契約 «branch + 未コミット変更 or head 不一致なら worktree 作成» を pin していた
+  -- test の置換先。作成しないことを worktree 起動 0 件 + 記録 nil で検出する。
 
-      assert.equals(vim.NIL, load_saved().worktree)
-      assert.equals(5, #state.git_calls) -- top, diff, rp head, rp HEAD, status
-    end
-  )
+  it('head 不一致 + switch 拒否の縮退でも worktree 起動 0 件・記録 nil', function()
+    install_git {
+      top_ok,
+      RP_HEAD_MISMATCH[1],
+      RP_HEAD_MISMATCH[2],
+      showref_ok,
+      status_clean,
+      function()
+        return diff_ok(RAW_DIFF_A_B)
+      end,
+    }
+    state.input_answer = 'n'
 
-  it('判断の 5 呼び以降に worktree 起動は出ない (skip)', function()
-    start_done('main', 'feature')
-    local joined = ''
-    for _, cmd in ipairs(state.git_calls) do
-      joined = joined .. table.concat(cmd, ' ') .. ';'
-    end
-    assert.equals(
-      'git rev-parse --show-toplevel;git diff main feature;'
-        .. 'git rev-parse --verify feature;git rev-parse --verify HEAD;'
-        .. 'git -C '
-        .. REPO_TOP
-        .. ' status --porcelain;',
-      joined
-    )
+    session_handler.start { base = 'main', head = 'feature' }
+
+    assert.is_false(has_worktree_call())
+    assert.equals(vim.NIL, load_saved().worktree)
   end)
 
   it(
-    'head != HEAD コミット => add --detach <data 下の path> <head> 作り created_by_us=true 記録',
+    '作業ツリー dirty でも worktree を作らない (縮退は head 解決フローが担う)',
     function()
-      start_with {
+      install_git {
         top_ok,
+        RP_HEAD_MISMATCH[1],
+        RP_HEAD_MISMATCH[2],
+        showref_ok,
+        status_dirty,
         function()
           return diff_ok(RAW_DIFF_A_B)
         end,
-        JUDGE_HEAD_DIFF[1],
-        JUDGE_HEAD_DIFF[2],
-        JUDGE_HEAD_DIFF[3],
-        git_ok,
       }
 
-      assert.same(add_cmd(), state.git_calls[6])
-      assert.same({ path = wt_path(), created_by_us = true }, load_saved().worktree)
-      assert.equals(0, #state.notifications)
+      session_handler.start { base = 'main', head = 'feature' }
+
+      assert.equals(vim.NIL, load_saved().worktree)
+    end
+  )
+end)
+
+describe('branch の旧契約 worktree 名残の掃除 (INV-3: 自前分だけ)', function()
+  use_env()
+
+  it(
+    '開始時に created_by_us=true 名残を remove で掃除し、セッション記録は nil になる',
+    function()
+      local wt = wt_path()
+      vim.fn.mkdir(wt, 'p')
+      store.save(existing_stub { worktree = { path = wt, created_by_us = true } })
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+        git_ok, -- 掃除: status clean
+        git_ok, -- 掃除: remove ok
+      }
+      state.input_answer = 'y' -- 継承確認
+
+      session_handler.start { base = 'main', head = 'feature' }
+
+      assert.same({ 'git', '-C', wt, 'status', '--porcelain' }, state.git_calls[5])
+      assert.same({ 'git', 'worktree', 'remove', wt }, state.git_calls[6])
+      assert.equals(vim.NIL, load_saved().worktree)
       assert.equals(SLUG, session_handler.active().id)
     end
   )
 
   it(
-    '同一コミットでも未コミット変更あり => worktree を作る (決定表: clean は両条件)',
-    function()
-      start_with {
-        top_ok,
-        function()
-          return diff_ok(RAW_DIFF_A_B)
-        end,
-        JUDGE_DIRTY[1],
-        JUDGE_DIRTY[2],
-        JUDGE_DIRTY[3],
-        git_ok,
-      }
-
-      assert.same(add_cmd(), state.git_calls[6])
-      assert.same({ path = wt_path(), created_by_us = true }, load_saved().worktree)
-    end
-  )
-
-  it('作成失敗 -> `git worktree prune` 再試行 recover (孤児登録の回収)', function()
-    start_with {
-      top_ok,
-      function()
-        return diff_ok(RAW_DIFF_A_B)
-      end,
-      JUDGE_HEAD_DIFF[1],
-      JUDGE_HEAD_DIFF[2],
-      JUDGE_HEAD_DIFF[3],
-      git_fail 'fatal: already registered\n', -- add1
-      git_ok, -- prune
-      git_ok, -- add2
-    }
-
-    assert.same(add_cmd(), state.git_calls[8])
-    assert.same({ 'git', 'worktree', 'prune' }, state.git_calls[7])
-    assert.same({ path = wt_path(), created_by_us = true }, load_saved().worktree)
-  end)
-
-  it(
-    '作成失敗 (prune でも解消せず / 自前記録なし) => E_WORKTREE 案内を WARN、開始中断 (save なし・UI なし)',
-    function()
-      start_with {
-        top_ok,
-        function()
-          return diff_ok(RAW_DIFF_A_B)
-        end,
-        JUDGE_HEAD_DIFF[1],
-        JUDGE_HEAD_DIFF[2],
-        JUDGE_HEAD_DIFF[3],
-        git_fail('fatal: ' .. wt_path() .. ' already exists\n'), -- add1
-        git_ok, -- prune
-        git_fail('fatal: ' .. wt_path() .. ' already exists\n'), -- add2
-      }
-
-      assert.same(
-        (
-          'review.nvim: worktree を作成できません: %s。'
-          .. '同名の作業ツリーが残っている場合は `git worktree remove` で掃除してから再試行してください (fatal: %s already exists)'
-        ):format(wt_path(), wt_path()),
-        state.notifications[1].msg
-      )
-      assert.equals(vim.log.levels.WARN, state.notifications[1].level)
-      assert.equals(1, #state.notifications)
-      assert.is_nil(load_saved())
-      assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME))
-      assert.is_nil(session_handler.active())
-    end
-  )
-
-  it(
-    '記録済み worktree: git list 登録あり + dir 実在 => add せず再利用 (再開時の worktree 再利用)',
+    'created_by_us=false 名残記録は掃除しない (INV-3: 自前分のみ削除)。remove 起動 0 件',
     function()
       local wt = wt_path()
-      vim.fn.mkdir(wt, 'p')
-      local real_wt = vim.uv.fs_realpath(wt)
-      store.save(existing_stub { worktree = { path = wt, created_by_us = true } })
-
-      start_with {
+      store.save(existing_stub { worktree = { path = wt, created_by_us = false } })
+      install_git {
         top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
         function()
           return diff_ok(RAW_DIFF_A_B)
         end,
-        JUDGE_DIRTY[1],
-        JUDGE_DIRTY[2],
-        JUDGE_DIRTY[3],
-        function()
-          return {
-            code = 0,
-            stdout = 'worktree ' .. REPO_TOP .. '\nworktree ' .. real_wt .. '\n',
-            stderr = '',
-          }
-        end,
       }
+      state.input_answer = 'y' -- 継承確認
 
-      assert.equals(6, #state.git_calls)
-      assert.same(list_cmd(), state.git_calls[6])
-      assert.same({ path = wt, created_by_us = true }, load_saved().worktree)
-    end
-  )
+      session_handler.start { base = 'main', head = 'feature' }
 
-  it(
-    -- INV-3: 削除してよいのは created_by_us=true の自前分だけ
-    '記録 true + dir 実在 + 未登録 => add 衝突 -> prune -> 再衝突 -> remove_dir して再 add',
-    function()
-      local wt = wt_path()
-      vim.fn.mkdir(wt, 'p')
-      store.save(existing_stub { worktree = { path = wt, created_by_us = true } })
-
-      start_with {
-        top_ok,
-        function()
-          return diff_ok(RAW_DIFF_A_B)
-        end,
-        JUDGE_DIRTY[1],
-        JUDGE_DIRTY[2],
-        JUDGE_DIRTY[3],
-        function()
-          return { code = 0, stdout = 'worktree /elsewhere\n', stderr = '' } -- list: 未登録
-        end,
-        git_fail 'fatal: already registered\n', -- add1
-        git_ok, -- prune
-        git_fail 'fatal: already registered\n', -- add2 (dir がまだ在る)
-        git_ok, -- add3 (remove_dir 後)
-      }
-
-      -- remove_dir が自前 dir を実削除した (add3 はスタブ応答なので dir は再生成されない)。
-      -- 削除后的成功 add まで通ってワークツリー記録が復活すること自体の往復は worktree_spec 実 git 側。
-      assert.is_true(vim.uv.fs_stat(wt) == nil)
-      -- top, diff, rev-parse x2, status, list, add1, prune, add2, add3
-      assert.equals(10, #state.git_calls)
-      assert.same({ path = wt, created_by_us = true }, load_saved().worktree)
+      assert.equals(4, #state.git_calls)
+      assert.equals(vim.NIL, load_saved().worktree)
     end
   )
 end)
+
+describe(
+  'pr worktree 作成判断 (mode=pr は常時作って差分は worktree 基準)',
+  function()
+    use_env()
+
+    it(
+      'pr: add --detach -> cwd=worktree の単引数 git diff <base> -> created_by_us=true 記録',
+      function()
+        begin_pr {
+          git_ok, -- add
+          function()
+            return diff_ok(RAW_DIFF_A_B)
+          end,
+        }
+
+        assert.same(add_cmd(), state.git_calls[1])
+        assert.same({ 'git', 'diff', 'main' }, state.git_calls[2])
+        assert.equals(wt_path(), state.git_opts[2].cwd)
+        assert.same({ path = wt_path(), created_by_us = true }, load_saved().worktree)
+        assert.equals(0, #state.notifications)
+        assert.equals(SLUG, session_handler.active().id)
+      end
+    )
+
+    it('add 失敗 -> `git worktree prune` 再試行 recover -> diff まで到達', function()
+      begin_pr {
+        git_fail 'fatal: already registered\n', -- add1
+        git_ok, -- prune
+        git_ok, -- add2
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+
+      assert.same(add_cmd(), state.git_calls[3])
+      assert.same({ 'git', 'worktree', 'prune' }, state.git_calls[2])
+      assert.same({ path = wt_path(), created_by_us = true }, load_saved().worktree)
+    end)
+
+    it(
+      '作成失敗 (prune でも解消せず) は E_WORKTREE 案内で中断。diff は作成前に走らない (save なし・UI なし)',
+      function()
+        begin_pr {
+          git_fail('fatal: ' .. wt_path() .. ' already exists\n'), -- add1
+          git_ok, -- prune
+          git_fail('fatal: ' .. wt_path() .. ' already exists\n'), -- add2
+        }
+
+        assert.same(
+          (
+            'review.nvim: worktree を作成できません: %s。'
+            .. '同名の作業ツリーが残っている場合は `git worktree remove` で掃除してから再試行してください (fatal: %s already exists)'
+          ):format(wt_path(), wt_path()),
+          state.notifications[1].msg
+        )
+        assert.equals(vim.log.levels.WARN, state.notifications[1].level)
+        assert.equals(1, #state.notifications)
+        assert.is_false(has_call 'git diff')
+        assert.is_nil(load_saved())
+        assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME))
+        assert.is_nil(session_handler.active())
+      end
+    )
+
+    it(
+      '記録済み worktree: dir 実在 + git list 登録あり => add せず再利用 (crash 後再開)',
+      function()
+        local wt = wt_path()
+        vim.fn.mkdir(wt, 'p')
+        store.save(existing_stub {
+          mode = 'pr',
+          worktree = { path = wt, created_by_us = true },
+        })
+
+        begin_pr {
+          function()
+            return {
+              code = 0,
+              stdout = 'worktree ' .. REPO_TOP .. '\nworktree ' .. vim.uv.fs_realpath(wt) .. '\n',
+              stderr = '',
+            }
+          end, -- list: 登録あり
+          function()
+            return diff_ok(RAW_DIFF_A_B)
+          end,
+        }
+
+        assert.is_false(has_call 'git worktree add')
+        assert.same(list_cmd(), state.git_calls[1])
+        assert.same({ 'git', 'diff', 'main' }, state.git_calls[2])
+        assert.equals(wt, state.git_opts[2].cwd)
+        assert.same({ path = wt, created_by_us = true }, load_saved().worktree)
+      end
+    )
+
+    it(
+      -- INV-3: 削除してよいのは created_by_us=true の自前分だけ
+      '記録 true + dir 実在 + 未登録 => add 衝突 -> prune -> 再衝突 -> remove_dir して再 add',
+      function()
+        local wt = wt_path()
+        vim.fn.mkdir(wt, 'p')
+        store.save(existing_stub {
+          mode = 'pr',
+          worktree = { path = wt, created_by_us = true },
+        })
+
+        begin_pr {
+          function()
+            return { code = 0, stdout = 'worktree /elsewhere\n', stderr = '' } -- list: 未登録
+          end,
+          git_fail 'fatal: already registered\n', -- add1
+          git_ok, -- prune
+          git_fail 'fatal: already registered\n', -- add2 (dir がまだ在る)
+          git_ok, -- add3 (remove_dir 後)
+          function()
+            return diff_ok(RAW_DIFF_A_B)
+          end,
+        }
+
+        -- remove_dir が自前 dir を実削除した (add3 はスタブ応答なので dir は再生成されない)。
+        -- 削除后的成功 add まで通ってワークツリー記録が復活すること自体の往復は worktree_spec 実 git 側。
+        assert.is_true(vim.uv.fs_stat(wt) == nil)
+        -- list, add1, prune, add2, add3, diff
+        assert.equals(6, #state.git_calls)
+        assert.same({ path = wt, created_by_us = true }, load_saved().worktree)
+      end
+    )
+
+    it(
+      '差分 0 ファイルは「変更なし」で開かず、作りたての自前 worktree を掃除して戻る (孤児化防止)',
+      function()
+        begin_pr {
+          git_ok, -- add
+          function()
+            return diff_ok ''
+          end,
+          git_ok, -- remove (0 差分掃除)
+        }
+
+        assert.same({
+          msg = 'review.nvim: 変更なし (main..feature): レビュー対象がありません',
+          level = vim.log.levels.INFO,
+        }, state.notifications[1])
+        assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[3])
+        assert.is_nil(load_saved())
+        assert.is_nil(session_handler.active())
+      end
+    )
+
+    -- 0 差分掃除の remove も worktree 登録変更なので直列化契約の対象
+    -- (pr-worktree.md「worktree 登録操作の直列化」。「close -> 即 begin」の pin と
+    -- 同族で、remove 最中の concurrent add = main--x + main--x1 二重登録の源を
+    -- この経路でも reopen しないことを pin する)。
+    it(
+      '0 差分 remove 最中の begin (pr) は add/diff が lock 待ちで、remove 完了後に再開する',
+      function()
+        install_git_deferred_remove {
+          git_ok, -- add #1
+          function()
+            return diff_ok ''
+          end, -- diff #1: 0 ファイル -> remove (deferred)
+          git_ok, -- remove #1 (deferred: placeholder)
+          git_ok, -- add #2 (remove 完了後に再開)
+          function()
+            return diff_ok(RAW_DIFF_A_B)
+          end,
+        }
+        local opts = { repo = REPO_TOP, id = SLUG, mode = 'pr', base = 'main', head = 'feature' }
+        session_handler.begin(opts) -- #1: add -> diff 0 -> remove 投入 (未完)
+
+        assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[3])
+        assert.is_true(state.deferred ~= nil)
+
+        -- 同一 slug の 2 度目の開始: #1 は 0 差分で save していないので existing
+        -- なしで proceed を通り、resolve_worktree で lock を待つ -> git 起動 0 件。
+        session_handler.begin(opts)
+        assert.equals(3, #state.git_calls)
+        assert.is_nil(session_handler.active())
+
+        state.deferred { code = 0, stdout = '', stderr = '' }
+
+        assert.same(add_cmd(), state.git_calls[4])
+        assert.same({ 'git', 'diff', 'main' }, state.git_calls[5])
+        assert.equals(SLUG, session_handler.active().id)
+        assert.same({ path = wt_path(), created_by_us = true }, load_saved().worktree)
+      end
+    )
+
+    it(
+      '記録再利用で 0 差分: remove 成功後、保存 JSON の worktree 記録を nil 化する (実在しない dir を指した記録を残さない)',
+      function()
+        local wt = wt_path()
+        vim.fn.mkdir(wt, 'p')
+        store.save(existing_stub {
+          mode = 'pr',
+          worktree = { path = wt, created_by_us = true },
+        })
+        install_git {
+          function()
+            return {
+              code = 0,
+              stdout = 'worktree ' .. REPO_TOP .. '\nworktree ' .. vim.uv.fs_realpath(wt) .. '\n',
+              stderr = '',
+            }
+          end, -- list 登録あり -> 記録を再利用 (add なし)
+          function()
+            return diff_ok ''
+          end,
+          git_ok, -- 0 差分掃除の remove 成功
+        }
+        state.input_answer = 'y' -- 継承確認
+
+        session_handler.begin {
+          repo = REPO_TOP,
+          id = SLUG,
+          mode = 'pr',
+          base = 'main',
+          head = 'feature',
+        }
+
+        assert.same({ 'git', 'worktree', 'remove', wt }, state.git_calls[3])
+        assert.is_nil(session_handler.active())
+        -- 開始は開かない = 新規 save はしないが、既存 JSON の整合は保つ
+        -- (status / comments / refs はそのまま、worktree 記録だけ nil 化)。
+        assert.same(
+          existing_stub { mode = 'pr', worktree = vim.NIL, updated_at = 4321 },
+          load_saved()
+        )
+      end
+    )
+  end
+)
 
 describe('close の worktree クリーンアップ (セッション終了 1-4)', function()
   use_env()
@@ -1283,32 +1636,34 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
   )
 
   it(
-    'close -> 即同 refs start で add は remove 完了待ち (同一 path 直列化 = 二重登録防止)',
+    'close -> 即 begin (pr) で add は remove 完了待ち (同一 path 直列化 = 二重登録防止)',
     function()
       started_with_worktree()
-      -- close(q,0 件=無確認): status -> remove(deferred)。start(継承y): top,
-      -- diff(read=待たない)。lock 下なので judge/add は remove 後。
+      -- close(q, 0 件=無確認): status -> remove(deferred)。pr begin(継承y)は
+      -- resolve_worktree が最先頭なので lock 待ち = add も diff も remove 完了後。
       install_git_deferred_remove {
         git_ok, -- status (close)
         git_ok, -- remove (deferred: placeholder)
-        top_ok, -- top (start)
+        git_ok, -- add (begin: remove 完了後に再開)
         function()
           return diff_ok(RAW_DIFF_A_B)
         end,
-        JUDGE_HEAD_DIFF[1],
-        JUDGE_HEAD_DIFF[2],
-        JUDGE_HEAD_DIFF[3],
-        git_ok, -- add
       }
       state.input_answer = 'y'
 
       session_handler.close_by_key()
-      session_handler.start { base = 'main', head = 'feature' }
+      session_handler.begin {
+        repo = REPO_TOP,
+        id = SLUG,
+        mode = 'pr',
+        base = 'main',
+        head = 'feature',
+      }
 
       for _, c in ipairs(state.git_calls) do
-        if c[3] == 'add' or (c[2] == 'worktree' and c[3] == 'status') then
+        if c[3] == 'add' or c[2] == 'diff' then
           error(
-            'remove 完了前に worktree 変更/判断が走った (race = main--x + main--x1 二重登録の源)',
+            'remove 完了前に worktree add / diff が走った (race = main--x + main--x1 二重登録の源)',
             0
           )
         end
@@ -1324,6 +1679,8 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
         end
       end
       assert.is_true(has_add, 'remove 完了後も add が再開しない')
+      assert.same(add_cmd(), state.git_calls[3])
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[4])
       assert.equals('main--feature', session_handler.active().id)
     end
   )
@@ -1691,12 +2048,11 @@ describe('open_file_current の worktree / 削除行 (o)', function()
       }, '\n')
       install_git {
         top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
         function()
           return diff_ok(RAW_DEL)
         end,
-        JUDGE_SKIP[1],
-        JUDGE_SKIP[2],
-        JUDGE_SKIP[3],
       }
       session_handler.start { base = 'main', head = 'feature' }
 

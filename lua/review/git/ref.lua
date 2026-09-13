@@ -105,6 +105,38 @@ function M.rev_parse(opts, cb)
   end)
 end
 
+--- cb(result) result.data = 現在のブランチ名。**detached HEAD では literal
+--- "HEAD"** (git の仕様。diff-review.md「開始」1 の head 自動解決と保存表現)。
+function M.abbrev_ref_head(opts, cb)
+  run({ 'rev-parse', '--abbrev-ref', 'HEAD' }, opts, function(res)
+    if not res.ok then
+      cb(res)
+      return
+    end
+    cb(result.ok((res.data.stdout:gsub('[\r\n]+$', ''))))
+  end)
+end
+
+--- cb(result)。head が**ローカルブランチ**なら ok (data=true)、そうでなければ
+--- err (E_REF)。refs/heads 底下を直接指すフルパスで検証するのが決定形で、
+--- short name 解決は `show-ref --verify` やらない (e2e 実測注释・DESIGN「既知の制約」)。
+--- remote branch / tag / commit sha / 存在しない名前はみな err になり
+--- switch 提案を出さない判定に使う (diff-review.md「開始」2)。
+function M.is_local_branch(opts, cb)
+  run({ 'show-ref', '--verify', '--quiet', ('refs/heads/%s'):format(opts.ref) }, opts, function(res)
+    if not res.ok then
+      cb(
+        result.err(
+          ('%s はローカルブランチではありません'):format(opts.ref),
+          result.codes.E_REF
+        )
+      )
+      return
+    end
+    cb(result.ok(true))
+  end)
+end
+
 -- PR 用の自前一時 ref 名。fork PR の head は通常の branch ref として fetch
 -- されないため refs/pull/<n>/head から採る (DESIGN.md「既知の制約」fork PR 行)。
 -- 名前に PR 番号を含め衝突を防ぎ、決定的なので次回 fetch で上更新できる。
