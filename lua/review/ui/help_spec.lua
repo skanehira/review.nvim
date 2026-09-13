@@ -69,7 +69,13 @@ describe('help.open', function()
     assert.is_true(has_line(lines, 'o そのファイルの実ファイルを別 tab で開く'))
     assert.is_true(has_line(lines, 'q セッションを閉じる (レビュー tab を閉じる)'))
     assert.is_true(has_line(lines, '<F1> このヘルプ'))
-    assert.is_true(has_line(lines, '<CR> そのファイルを head/base 窓に開く'))
+    assert.is_true(
+      has_line(
+        lines,
+        '<CR> そのファイルを head/base 窓に開く (dir 行では折り畳み)'
+      )
+    )
+    assert.is_true(has_line(lines, 'i list 表示 (フルパス 1 行) ⇄ tree 表示を切替'))
     assert.is_true(has_line(lines, '/ 一覧を絞り込む (空入力で解除)'))
     assert.is_true(has_line(lines, 'x viewed 切替'))
     -- コメント入力 float の操作 (ui/input.lua の契約と同一文言。確定/閉じるの

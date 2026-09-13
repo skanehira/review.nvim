@@ -1,6 +1,7 @@
--- sidebar (変更ファイル一覧) と :Review list (セッション一覧) の描画。
--- 両者は filetype `review-list` を共有する (DESIGN.md「横断規約」UI)。挙動の分岐は
--- buffer に付けた review_meta で行う (FileType autocmd 分岐は使わない)。
+-- :Review list (セッション一覧) の描画 (file panel は issue-17 で ui/filepanel へ
+-- 移動済み。ここは sessionlist のみ)。filetype は file panel と共通の
+-- `review-list` を使う (DESIGN.md「横断規約」UI)。挙動の分岐は buffer に付けた
+-- review_meta で行う (FileType autocmd 分岐は使わない)。
 -- 行 -> データの引き渡しは行番号写像 (render ごとに再構築、バッファ側に値を持たない)。
 local config = require 'review.config'
 
@@ -45,80 +46,6 @@ local function paint(buf, lines, meta, rows, keymap)
   end
   rendered[buf] = { rows = rows }
   return buf
-end
-
---- session と parse 済み File 一覧を sidebar に描画する。
---- 1 行 `<status> <path> +<a> -<d>`、パス昇順、viewed は行頭に `[✓]`。
---- 行フィルタは呼び出し側 (handlers) が適用済みの files を渡す責任。winbar 文字列は
---- 窓側 (handlers が panel 窓へ chrome.winbar で当てる — b: に持つと実ファイル窓
---- 経由でユーザー窓へ漏れる。diff-review「窓装飾 (chrome)」)。
-function M.render_sidebar(session, files)
-  local sorted = {}
-  for _, file in ipairs(files) do
-    sorted[#sorted + 1] = file
-  end
-  table.sort(sorted, function(a, b)
-    return a.path < b.path
-  end)
-
-  local buf = buffer(('review://sidebar/%s'):format(session.id))
-  local lines, rows = {}, {}
-  for _, file in ipairs(sorted) do
-    local viewed = session.files[file.path] ~= nil and session.files[file.path].viewed
-    lines[#lines + 1] = ('%s%s %s +%d -%d'):format(
-      viewed and '[✓] ' or '',
-      file.status,
-      file.path,
-      file.added,
-      file.deleted
-    )
-    rows[#lines] = file.path
-  end
-  local k = config.get().keymaps.sidebar
-  return paint(buf, lines, { kind = 'sidebar', session_id = session.id }, rows, {
-    { k.open_diff, "require('review.handlers.session').open_selected_file()" },
-    -- diff の `o` と同じ入口 (handlers.session が sidebar meta 分岐で開く)。
-    -- fileview直呼びではなく handlers 経由に統一し、削除ファイル不可通知を共有する。
-    { k.open_file, "require('review.handlers.session').open_file_current()" },
-    { k.toggle_viewed, "require('review.handlers.session').toggle_viewed_current()" },
-    { k.filter, "require('review.handlers.session').filter_sidebar()" },
-    { k.close, "require('review.handlers.session').close_by_key()" },
-  })
-end
-
---- sidebar (file panel) の winbar 文字列。handlers が panel 窓に当てる。
---- `base..head · N files · M comments [· filter=…] [· ⚠N]` — `⚠N` は
---- opts.hidden_outdated (集約先 head 窓の無い outdated 件数。告知窓ファイルと
---- 差分消失ファイルの分で、呼び出し側 handlers が算出)。0 / 省略なら非表示
---- (diff-review「窓装飾」)。
-function M.sidebar_winbar(session, files, opts)
-  opts = opts or {}
-  local bar = ('%s..%s · %d %s · %d %s'):format(
-    session.base or '',
-    session.head or '',
-    #files,
-    #files == 1 and 'file' or 'files',
-    #(session.comments or {}),
-    #(session.comments or {}) == 1 and 'comment' or 'comments'
-  )
-  if opts.filter ~= nil and opts.filter ~= '' then
-    -- 一致 0 なら「閉じた?」と誤解されないよう解除手順をその場に出す
-    bar = bar
-      .. (' · filter=%s%s'):format(opts.filter, #files == 0 and ' (空入力で解除)' or '')
-  end
-  if opts.hidden_outdated ~= nil and opts.hidden_outdated > 0 then
-    bar = bar .. (' · ⚠%d'):format(opts.hidden_outdated)
-  end
-  return bar
-end
-
---- sidebar の行 -> ファイルパス (範囲外は nil)。
-function M.row_file(bufnr, row)
-  local st = rendered[bufnr]
-  if st == nil then
-    return nil
-  end
-  return st.rows[row]
 end
 
 --- セッション一覧の winbar 文字列 (handlers が窓に chrome.winbar で当てる)。
@@ -184,7 +111,7 @@ function M.render_sessionlist(sessions, opts)
       vim.api.nvim_buf_set_extmark(drawn, grey_ns, i - 1, 0, {
         end_row = i - 1,
         end_col = #lines[i],
-        hl_group = 'ReviewSidebarStatus',
+        hl_group = 'ReviewPanelMeta',
       })
     end
   end

@@ -1,6 +1,6 @@
--- ui/list: sidebar (変更ファイル一覧) / :Review list セッション一覧の描画
--- (diff-review.md「sidebar」/ persistence-restore.md「:Review list」)。
--- 行フォーマットと row->データ 引き渡し、viewed [✓]、repo 消失の grey 表示を検証する。
+-- ui/list: :Review list セッション一覧の描画 (persistence-restore.md「:Review
+-- list」。file panel は ui/filepanel / ui/treelist が持つ)。行フォーマットと
+-- row->データ 引き渡し、repo 消失の grey 表示を検証する。
 local list = require 'review.ui.list'
 
 local function session_stub(overrides)
@@ -40,162 +40,6 @@ local function use_env()
     end
   end)
 end
-
--- 実 git core/diff の parse 相当の最小 File テーブル (list は status/added/deleted のみ使用)。
-local function file_stub(path, status, added, deleted)
-  return {
-    path = path,
-    status = status,
-    binary = false,
-    added = added,
-    deleted = deleted,
-    hunks = {},
-  }
-end
-
-describe('list.render_sidebar', function()
-  use_env()
-
-  it(
-    'sidebar の winbar 文字列は窓側経路 (b: に置かず sidebar_winbar が返す)',
-    function()
-      local session = {
-        version = 1,
-        id = 'main--feature',
-        repo = '/r',
-        mode = 'branch',
-        base = 'main',
-        head = 'feature',
-        pr = vim.NIL,
-        worktree = vim.NIL,
-        status = 'open',
-        files = {},
-        comments = { { id = 'c1' } },
-        created_at = 1,
-        updated_at = 1,
-      }
-      local files = { { path = 'a.lua', status = 'M', binary = false, added = 1, deleted = 0 } }
-      local buf = list.render_sidebar(session, files)
-      assert.equals('main..feature · 1 file · 1 comment', list.sidebar_winbar(session, files))
-      -- b:review_winbar は実ファイル窓経由でユーザー窓へ漏れるため使わない (chrome 決定)
-      assert.is_nil(vim.b[buf].review_winbar)
-    end
-  )
-
-  it(
-    'sidebar_winbar は opts.hidden_outdated>0 のとき末尾に · ⚠N、0/省略では非表示',
-    function()
-      local session = session_stub { comments = { { id = 'c1' } } }
-      local files = { file_stub('a.lua', 'M', 1, 0) }
-      assert.equals('main..feature · 1 file · 1 comment', list.sidebar_winbar(session, files))
-      assert.equals(
-        'main..feature · 1 file · 1 comment',
-        list.sidebar_winbar(session, files, { hidden_outdated = 0 })
-      )
-      assert.equals(
-        'main..feature · 1 file · 1 comment · ⚠2',
-        list.sidebar_winbar(session, files, { hidden_outdated = 2 })
-      )
-      -- filter と併記 (contract の順序: ... · filter=… · ⚠N)
-      assert.equals(
-        'main..feature · 1 file · 1 comment · filter=a · ⚠1',
-        list.sidebar_winbar(session, files, { filter = 'a', hidden_outdated = 1 })
-      )
-    end
-  )
-
-  it('パス昇順・`<status> <path> +a -d` 表示で viewed は行頭に [✓]', function()
-    local session = session_stub {
-      files = { ['b.lua'] = { viewed = true }, ['a.lua'] = { viewed = false } },
-    }
-    local buf = list.render_sidebar(session, {
-      file_stub('b.lua', 'M', 2, 1),
-      file_stub('a.lua', 'A', 5, 0),
-    })
-    assert.same(
-      { 'A a.lua +5 -0', '[✓] M b.lua +2 -1' },
-      vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    )
-    assert.equals('review-list', vim.bo[buf].filetype)
-    assert.equals('review://sidebar/main--feature', vim.api.nvim_buf_get_name(buf))
-    assert.same({ kind = 'sidebar', session_id = 'main--feature' }, vim.b[buf].review_meta)
-  end)
-
-  it('row_from_line で行のファイルパスを引ける (範囲外は nil)', function()
-    local session = session_stub { files = {} }
-    local buf = list.render_sidebar(session, {
-      file_stub('a.lua', 'M', 1, 0),
-      file_stub('c.lua', 'D', 0, 7),
-    })
-    assert.equals('a.lua', list.row_file(buf, 1))
-    assert.equals('c.lua', list.row_file(buf, 2))
-    assert.is_nil(list.row_file(buf, 3))
-  end)
-
-  it('再 render で行を置き換える (append しない)', function()
-    local session = session_stub { files = {} }
-    local buf = list.render_sidebar(session, { file_stub('a.lua', 'M', 1, 0) })
-    assert.same({ 'M a.lua +1 -0' }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
-    buf = list.render_sidebar(session, {
-      file_stub('a.lua', 'M', 1, 0),
-      file_stub('z.lua', 'A', 1, 0),
-    })
-    assert.same({ 'M a.lua +1 -0', 'A z.lua +1 -0' }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
-  end)
-
-  it('sidebar キー (<CR>/o/x/q) が buffer-local に付く', function()
-    local session = session_stub { files = {} }
-    local buf = list.render_sidebar(session, { file_stub('a.lua', 'M', 1, 0) })
-    local lhs = {}
-    for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
-      lhs[m.lhs] = true
-    end
-    for _, key in ipairs { '<CR>', 'o', 'x', 'q', '/' } do
-      assert.is_true(lhs[key] == true, 'missing mapping: ' .. key)
-    end
-  end)
-
-  -- rhs は発火時に解決される文字列 (ui -> handlers の module-load 循環回避)。
-  -- key 表の存在だけでなく実 require 解決を検査し、未実装関数の dangling rhs を
-  -- 検出する (sidebar o -> fileview.open_from_sidebar の事故の再発防止)。
-  local function assert_rhs_callable(buf, keys)
-    for _, key in ipairs(keys) do
-      local rhs
-      for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
-        if m.lhs == key then
-          rhs = m.rhs
-        end
-      end
-      assert.is_not_nil(rhs, 'missing mapping: ' .. key)
-      local mod_path, func_name = rhs:match "require%('([^']+)'%)%.([%w_]+)%("
-      assert.is_not_nil(
-        mod_path,
-        ('rhs が require 呼び出し形でない: %s -> %s'):format(key, tostring(rhs))
-      )
-      local ok_mod, mod = pcall(require, mod_path)
-      assert.is_true(ok_mod, 'rhs の require が解決できない: ' .. mod_path)
-      assert.equals(
-        'function',
-        type(mod[func_name]),
-        ('%s.%s が関数として解決できない (key=%s)'):format(mod_path, func_name, key)
-      )
-    end
-  end
-
-  it(
-    'sidebar の全 keymap rhs は実関数として解決できる (未実装 dangling rhs の検出)',
-    function()
-      local session = session_stub { files = {} }
-      local buf = list.render_sidebar(session, { file_stub('a.lua', 'M', 1, 0) })
-      assert_rhs_callable(buf, { '<CR>', 'o', 'x', 'q', '/' })
-    end
-  )
-
-  it('sessionlist の全 keymap rhs は実関数として解決できる', function()
-    local buf = list.render_sessionlist {}
-    assert_rhs_callable(buf, { '<CR>', 'q' })
-  end)
-end)
 
 describe('list.render_sessionlist', function()
   use_env()
@@ -254,7 +98,7 @@ describe('list.render_sessionlist', function()
       local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
       assert.equals(1, #marks)
       assert.equals(1, marks[1][2]) -- slug 昇順 2 行目 (d--d) が grey
-      assert.equals('ReviewSidebarStatus', marks[1][4].hl_group)
+      assert.equals('ReviewPanelMeta', marks[1][4].hl_group)
       -- row_session は grey 行では nil (= <Enter> 不可)。生存行は session を返す。
       assert.equals('a--b', (list.row_session(buf, 1) or {}).id)
       assert.is_nil(list.row_session(buf, 2))
@@ -269,5 +113,33 @@ describe('list.render_sessionlist', function()
     end
     assert.is_true(lhs['<CR>'])
     assert.is_true(lhs['q'])
+  end)
+
+  -- rhs は発火時に解決される文字列 (ui -> handlers の module-load 循環回避)。
+  -- 張付 existence だけでなく実 require 解決を検査し、未実装関数の dangling rhs を
+  -- 検出する (file panel 側は ui/filepanel_spec が同一強度の検査を持つ)。
+  it('sessionlist の全 keymap rhs は実関数として解決できる', function()
+    local buf = list.render_sessionlist {}
+    for _, key in ipairs { '<CR>', 'q' } do
+      local rhs
+      for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+        if m.lhs == key then
+          rhs = m.rhs
+        end
+      end
+      assert.is_not_nil(rhs, 'missing mapping: ' .. key)
+      local mod_path, func_name = rhs:match "require%('([^']+)'%)%.([%w_]+)%("
+      assert.is_not_nil(
+        mod_path,
+        ('rhs が require 呼び出し形でない: %s -> %s'):format(key, tostring(rhs))
+      )
+      local ok_mod, mod = pcall(require, mod_path)
+      assert.is_true(ok_mod, 'rhs の require が解決できない: ' .. mod_path)
+      assert.equals(
+        'function',
+        type(mod[func_name]),
+        ('%s.%s が関数として解決できない (key=%s)'):format(mod_path, func_name, key)
+      )
+    end
   end)
 end)

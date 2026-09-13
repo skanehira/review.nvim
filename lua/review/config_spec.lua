@@ -37,6 +37,7 @@ describe('config.get', function()
           toggle_viewed = 'x',
           close = 'q',
           filter = '/',
+          toggle_style = 'i',
         },
         sessionlist = {
           open = '<CR>',
@@ -82,6 +83,7 @@ describe('config.get', function()
           toggle_viewed = 'x',
           close = 'q',
           filter = '/',
+          toggle_style = 'i',
         },
         sessionlist = {
           open = '<CR>',

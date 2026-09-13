@@ -15,8 +15,13 @@ local DEFAULTS = {
   ReviewDiffAdd = { link = 'DiffAdd' },
   ReviewDiffDelete = { link = 'DiffDelete' },
   ReviewDiffHunk = { link = 'diffLine' },
-  ReviewSidebarFile = { link = 'Directory' },
-  ReviewSidebarStatus = { link = 'Comment' },
+  -- file panel (DESIGN「命名」basename / dir 行 / git status 記号 / 親子パス・±数)。
+  -- basename は親パス grey (Comment) と対比させて既定は無着色 = Normal link。
+  -- 選択行 hl も ReviewPanelFile (diff-review「file panel」相互ハイライト)。
+  ReviewPanelFile = { link = 'Normal' },
+  ReviewPanelDir = { link = 'Directory' },
+  ReviewPanelStatus = { link = 'Comment' },
+  ReviewPanelMeta = { link = 'Comment' },
 }
 
 function M.setup()

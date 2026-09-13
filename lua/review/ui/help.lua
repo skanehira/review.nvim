@@ -38,8 +38,9 @@ local SECTIONS = {
     title = 'file panel (変更ファイル一覧)',
     keymap = 'sidebar',
     rows = {
-      { 'open_diff', 'そのファイルを head/base 窓に開く' },
-      { 'open_file', 'そのファイルの実ファイルを開く' },
+      { 'open_diff', 'そのファイルを head/base 窓に開く (dir 行では折り畳み)' },
+      { 'open_file', 'そのファイルの実ファイルを開く (dir 行では折り畳み)' },
+      { 'toggle_style', 'list 表示 (フルパス 1 行) ⇄ tree 表示を切替' },
       { 'toggle_viewed', 'viewed 切替' },
       { 'filter', '一覧を絞り込む (空入力で解除)' },
       { 'close', 'セッションを閉じる' },

@@ -132,6 +132,7 @@ KEYMAPS						*review-keymaps*
 		sidebar = {                   -- file panel (変更ファイル一覧)
 			open_diff      = '<CR>',
 			open_file      = 'o',
+			toggle_style   = 'i',    -- list ⇄ tree 表示切替
 			toggle_viewed  = 'x',
 			filter         = '/',    -- |review-keymaps-sidebar|
 			close          = 'q',
@@ -187,16 +188,33 @@ KEYMAPS						*review-keymaps*
 
  file panel (変更ファイル一覧)			*review-keymaps-sidebar*
 
-	<CR>		そのファイルを head/base 窓に開き、focus を head 窓へ
-			移動 (viewed 自動 true)
-	o		そのファイルの実ファイルを開く (diff の o と
-			同じ規則)
-	x		viewed 切替
+	既定はフォルダツリー表示。ヘッダ 2 行 («Changes (N)» と «Showing changes
+	for: <base>..<head 表示名>»。head 表示名は通常経路 «作業ツリー»、読み取り
+	専用 scratch 縮退時み ref 名) の下にパスツリーが続く。dir 行は末尾 «/» で
+	ファイルと区別し、status は配下の集約 (全子同一記号ならそのまま、種類混在
+	は «*»)。単一 child の dir 連鎖は «a/b/c/» と連結表示する。file 行は
+	«<status> <icon?> <basename> +a -d» に親パスを grey で添える。アイコンは
+	nvim-web-devicons があるときだけ自動で出る (無くてもテキスト表示)。
+	viewed ファイルは行頭に [✓]。
+
+	<CR>		file 行 = そのファイルを head/base 窓に開き、focus を head
+			窓へ移動 (viewed 自動 true)。dir 行 = 折り畳み/展開の
+			トグル (カーソルは dir 行に残る)
+	o		file 行 = そのファイルの実ファイルを開く (diff の o と
+			同じ規則)。dir 行 = <CR> と同じ折り畳みトグル
+	i		list 表示 (フルパス 1 行) ⇄ tree 表示を切替。絞り込み・
+			折り畳み・選択行は状態として引き継ぐが、セッション
+			ファイルには保存しない (開き直しで tree 既定に戻る)
+	x		viewed 切替 (dir ヘッダ行では無動作)
 	/		一覧を絞り込む。入力 = paths の大文字小文字無視の
 			部分一致で再描画。空入力で解除、Esc で現状維持。
 			絞り込み中は <CR>/o/x/]d/[d も一致集合内だけを
 			辿る (winbar に一致数と filter が出る)
 	q		セッションを閉じる (diff の q と同じ)
+
+	panel のカーソル移動だけでは diff を切り替えない。逆にファイルを open_file
+	すると panel のカーソルがその行へ追従する (相互ハイライト: 選択行 +
+	cursorline)。
 
 セッション一覧 (:Review list)			*review-keymaps-sessionlist* *review-list*
 
