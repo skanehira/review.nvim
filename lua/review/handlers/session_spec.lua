@@ -8,6 +8,7 @@
 local cli = require 'review.git.cli'
 local config = require 'review.config'
 local paths = require 'review.store.paths'
+local commentmarks = require 'review.ui.commentmarks'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local ui_windows = require 'review.ui.windows'
@@ -2862,13 +2863,18 @@ end)
 -- ---------------------------------------------------------------------------
 -- 保存時リフレッシュ (diff-review.md「リフレッシュ (未コミット反映契約)」)。
 -- BufWritePost -> `git diff <base>` 再取得 -> 再パース -> anchor 検証 ->
--- ±カウント・panel・winbar 再適用 -> :diffupdate -> 永続化。in-flight まとめ /
--- 失敗保持 / close・切替時の active guard を応答キューで pin する。
+-- ±カウント・panel・スレッド・winbar 再適用 -> :diffupdate -> 永続化。in-flight まとめ /
+-- 失敗保持 / close・切替時の active guard を応答キューで pin する (#15 の契約移植)。
+-- 3 窓構造での観測面: winbar は w:review_winbar (窓変数)、panel 行は viewed=[✓]
+-- 表記、threads は head 実バッファ extmark、再取得で消えたファイルは files map と
+-- 一覧から落ち panel winbar 末尾 ⚠N で可視化 (#16 契約、persistence-restore
+-- 「anchor 検証」)。
 -- ---------------------------------------------------------------------------
 
 -- 保存後の作業ツリーを模擬する 2 回目の差分: a.lua は +2 増で line2 が行 4 へ
 -- 後退 (anchor ±20 補正の対象)。c.lua が新規出現、b.lua は差分から消滅
--- (outdated 化 + files の消失ファイル保持)。a.lua の ±は +1 -> +2 に動く。
+-- (outdated 化 + map / 一覧から除去 -> winbar ⚠ で可視化)。a.lua の ±は +1 -> +2
+-- に動く。
 local RAW_DIFF_V2 = table.concat({
   'diff --git a/a.lua b/a.lua',
   'index 1111111..2222222 100644',
@@ -2888,6 +2894,10 @@ local RAW_DIFF_V2 = table.concat({
   '+c1',
   '',
 }, '\n')
+
+-- 保存後に a.lua の実バッファが見る内容 (RAW_DIFF_V2 の new 側 = 4 行)。head 窓は
+-- 実ファイルなので、単体でも保存後のディスク状態をバッファへ反映して張返を pin する。
+local A_SAVED_LINES = { 'line1', 'insA', 'insB', 'line2' }
 
 -- install_git の `git diff` のみ on_exit を遅延発火するスタブ (DESIGN「既知の
 -- 制約」: 既定注入スタブは同期なので in-flight まとめ / close 中解決の順序契約
@@ -2925,11 +2935,11 @@ local function install_git_deferred_diff(responses)
   end)
 end
 
--- 保存されたセッションファイル実体の fake バッファ (review:// 以外の名前が
--- auto refresh の会員条件)。BufWritePost は exec_autocmds で発火させる
--- (headless で :w 実書き込みより決定的。契約の本体は「buffer イベント」)。
+-- 保存されたセッションファイル実体のバッファ (head 窓が張る実ファイルそのもの。
+-- state.repo 配下が auto refresh の会員条件)。BufWritePost は exec_autocmds で
+-- 発火させる (headless で :w 実書き込みより決定的。契約の本体は「buffer イベント」)。
 local function session_file_buf(path)
-  local name = REPO_TOP .. '/' .. path
+  local name = state.repo .. '/' .. path
   local buf = vim.fn.bufnr(name)
   if buf ~= -1 and vim.api.nvim_buf_is_valid(buf) then
     return buf
@@ -2975,22 +2985,41 @@ describe(
   '保存時リフレッシュ (diff-review「リフレッシュ (未コミット反映契約)」)',
   function()
     use_env()
+
+    local function panel_rows()
+      return vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
+    end
+
+    local function head_winbar()
+      local w = ui_windows.win 'head'
+      return w ~= nil and vim.w[w].review_winbar or nil
+    end
+
+    local function panel_winbar()
+      local w = ui_windows.win 'panel'
+      return w ~= nil and vim.w[w].review_winbar or nil
+    end
+
     after_each(function()
       session_handler._set_diffupdate(nil)
-      -- 疑似 repo-top バッファは tab と無関係に生きるので明示掃除
+      -- 実ファイルバッファは tab と無関係に生きるので明示掃除
       for _, buf in ipairs(vim.api.nvim_list_bufs()) do
         local name = vim.api.nvim_buf_get_name(buf)
-        if vim.api.nvim_buf_is_valid(buf) and name:sub(1, #REPO_TOP) == REPO_TOP then
+        if vim.api.nvim_buf_is_valid(buf) and name:sub(1, #state.repo) == state.repo then
           pcall(vim.api.nvim_buf_delete, buf, { force = true })
         end
       end
     end)
 
     it(
-      'BufWritePost -> git 再取得 -> parse -> anchor 検証 -> save の順 (±カウント・panel・winbar 更新)',
+      'BufWritePost -> git 再取得 -> parse -> anchor 検証 -> save の順 (±カウント・panel・winbar・extmark 再適用)',
       function()
         start_done('main', 'feature')
         seed_two_comments()
+
+        -- 保存後の実ファイルを模擬 (a.lua new 側 4 行 = RAW_DIFF_V2 の内容)。
+        local abuf = session_file_buf 'a.lua'
+        vim.api.nvim_buf_set_lines(abuf, 0, -1, false, A_SAVED_LINES)
 
         install_git {
           function()
@@ -3000,7 +3029,7 @@ describe(
           RP_HEAD_MATCH[1],
           RP_HEAD_MATCH[2],
         }
-        fire_buf_write_post(session_file_buf 'a.lua')
+        fire_buf_write_post(abuf)
 
         -- 応答キューの呼び出し順が仕様の一部 (DESIGN「development」)。差分再取得は
         -- head 解決と一致する単引数形 (作業ツリー基準)、その後 commit 比較。
@@ -3035,27 +3064,30 @@ describe(
             created_at = 101,
           },
         }, saved.comments)
+        -- 3 窓契約: 再取得で消えた b.lua は files map に合成行を作らない
+        -- (一覧も同じ集合。outdated は panel winbar ⚠N で可視化)
         assert.same({
-          ['a.lua'] = { viewed = false },
-          ['b.lua'] = { viewed = false },
+          ['a.lua'] = { viewed = true }, -- 開始時初期開きで viewed
           ['c.lua'] = { viewed = false },
         }, saved.files)
 
-        -- ±カウント・panel 再適用 (b.lua は消失ファイルとしてコメント保持側に残る)
-        assert.same(
-          { 'M a.lua +2 -0', 'M b.lua +0 -0', 'A c.lua +1 -0' },
-          vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
-        )
-        -- winbar / (threads は diff バッファの extmark として render 側で再適用)
-        assert.equals(
-          'main..feature · a.lua · +2 -0 · 1 comment',
-          vim.b[vim.fn.bufnr(DIFF_A_NAME)].review_winbar
-        )
+        -- ±カウント・panel 再適用
+        assert.same({ '[✓] M a.lua +2 -0', 'A c.lua +1 -0' }, panel_rows())
+        -- winbar: head 窓は窓変数 chrome (w:review_winbar 一本化)
+        assert.equals('main..feature · a.lua · +2 -0 · 1 comment', head_winbar())
+        -- b.lua outdated (head 窓の解らないファイル) は panel winbar 末尾 ⚠1
+        assert.equals('main..feature · 2 files · 2 comments · ⚠1', panel_winbar())
+
+        -- スレッド extmark は補正後行 4 (0-based 3) へ張返 (実ファイル窓の
+        -- mark を捨てて session から再構成 — diff-review「コメント表示」)
+        local marks = vim.api.nvim_buf_get_extmarks(abuf, commentmarks.ns(), 0, -1, {})
+        assert.equals(1, #marks)
+        assert.equals(3, marks[1][2])
       end
     )
 
     it(
-      'in-flight 中の保存は dirty まとめ (再取得 1 本のまま)、完了後の追い fetch は 1 回だけ',
+      'in-flight 中の保存は dirtyまとめ (再取得 1 本のまま)、完了後の追い fetch は 1 回だけ',
       function()
         start_done('main', 'feature')
         install_git_deferred_diff {
@@ -3084,10 +3116,7 @@ describe(
         assert.equals(2, state.diff_calls)
         -- 適用は 1 回まとめの最終状態で完了 (b.lua はコメントのない消失ファイル =
         -- 一覧からも落ちる。補正詳細は BufWritePost 側のテストで pin)。
-        assert.same(
-          { 'M a.lua +2 -0', 'A c.lua +1 -0' },
-          vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
-        )
+        assert.same({ '[✓] M a.lua +2 -0', 'A c.lua +1 -0' }, panel_rows())
         assert.equals(0, #state.notifications)
       end
     )
@@ -3098,7 +3127,7 @@ describe(
         start_done('main', 'feature')
         seed_two_comments()
         local before_saved = load_saved()
-        local before_sidebar = vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
+        local before_sidebar = panel_rows()
 
         install_git {
           function()
@@ -3122,8 +3151,38 @@ describe(
         }, state.notifications[1])
         assert.equals(1, #state.notifications)
         assert.same(before_saved, load_saved())
-        local after_sidebar = vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
-        assert.same(before_sidebar, after_sidebar)
+        assert.same(before_sidebar, panel_rows())
+      end
+    )
+
+    it(
+      'セッション外保存と scratch 窓の保存は何もしない (会員実ファイルのみ自動リフレッシュ)',
+      function()
+        start_done('main', 'feature')
+        -- 応答なしのスタブ = 会員外で git が走ればその場で error (検出)。
+        install_git {}
+        -- base scratch (review://base/…): 実ファイルでない = 会員外
+        fire_buf_write_post(vim.fn.bufnr('review://base/' .. SLUG .. '/a.lua'))
+        -- セッション外の実ファイル名バッファ (repo 根の外)
+        local obuf = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_buf_set_name(obuf, '/tmp/review-spec-outside/a.lua')
+        fire_buf_write_post(obuf)
+        assert.equals(0, #state.git_calls)
+        assert.equals(0, #state.notifications)
+        pcall(vim.api.nvim_buf_delete, obuf, { force = true })
+
+        -- 陽性対照: 会員実ファイルの保存は再取得が走る («会員判定が常に false で
+        -- 何も起きない» 壊れ方を通過させない — 無条件 return の空実装は通らない)。
+        install_git {
+          function()
+            return diff_ok(RAW_DIFF_V2)
+          end,
+          RP_HEAD_MATCH[1],
+          RP_HEAD_MATCH[2],
+        }
+        fire_buf_write_post(session_file_buf 'a.lua')
+        assert.same({ 'git', 'diff', 'main' }, state.git_calls[1])
+        assert.equals(3, #state.git_calls)
       end
     )
 
@@ -3144,11 +3203,40 @@ describe(
         assert.equals(1, state.diff_calls) -- 結果破棄 = 追い fetch も走らない
         assert.equals('closed', load_saved().status)
         assert.same(
-          { ['a.lua'] = { viewed = false }, ['b.lua'] = { viewed = false } },
+          { ['a.lua'] = { viewed = true }, ['b.lua'] = { viewed = false } },
           load_saved().files -- c.lua 再パース結果が書き戻されていない
         )
         assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME)) -- 再描画で窓も復活しない
         assert.equals(0, #state.notifications)
+      end
+    )
+
+    it(
+      '現在の開きファイルが再取得差分から消滅: 窓はそのまま +0 -0 でゼロ化、panel 行は map から落ちる',
+      function()
+        start_done('main', 'feature') -- 初期開き a.lua
+        session_handler.open_file 'b.lua' -- b.lua を実ファイル窓へ張り替え
+        assert.equals('main..feature · b.lua · +1 -0 · 0 comments', head_winbar())
+
+        install_git {
+          function()
+            return diff_ok(RAW_DIFF_V2)
+          end,
+          RP_HEAD_MATCH[1],
+          RP_HEAD_MATCH[2],
+        }
+        fire_buf_write_post(session_file_buf 'b.lua')
+
+        -- 窓の張り替えはしない (head は実ファイル = ユーザーの編集対象)。±カウントは
+        -- ゼロ差分として zero clear、一覧と files map からは合成行を作らず除去
+        -- (outdated 化はコメントのあるファイル側のテストで pin)。
+        assert.equals(state.repo .. '/b.lua', head_buf_name())
+        assert.equals('main..feature · b.lua · +0 -0 · 0 comments', head_winbar())
+        assert.same({ '[✓] M a.lua +2 -0', 'A c.lua +1 -0' }, panel_rows())
+        assert.same(
+          { ['a.lua'] = { viewed = true }, ['c.lua'] = { viewed = false } },
+          load_saved().files
+        )
       end
     )
 
@@ -3238,10 +3326,7 @@ describe(
           level = vim.log.levels.INFO,
         }, state.notifications[1])
         assert.equals(1, #state.notifications)
-        assert.same(
-          { 'M a.lua +2 -0', 'A c.lua +1 -0' },
-          vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)
-        )
+        assert.same({ '[✓] M a.lua +2 -0', 'A c.lua +1 -0' }, panel_rows())
 
         -- #3: 告知済み -> rev-parse 比較は以後走らない (save ごとに同じ告知を出さ
         -- ない。余剰呼び出しは stub が error で弾く)
@@ -3257,17 +3342,18 @@ describe(
     )
 
     it(
-      ':diffupdate はセッション実ファイルの &diff 窓だけに発火 (セッション外のユーザー diff 窓は触らない)',
+      ':diffupdate はセッション実ファイルの &diff 窓にだけ発火 (head 枠と同一 buf の user 窓。base scratch・セッション外窓は不発火)',
       function()
         local fired = {}
-        started_with_worktree()
+        start_done('main', 'feature')
         session_handler._set_diffupdate(function(win)
           fired[#fired + 1] = vim.api.nvim_win_get_buf(win)
         end)
 
-        -- worktree 実ファイル (= 将来 head 窓が張る対象と同じ path 契約) を &diff で見る窓
-        local abuf = vim.api.nvim_create_buf(false, false)
-        vim.api.nvim_buf_set_name(abuf, wt_path() .. '/a.lua')
+        -- head 窓の張る実ファイル (&diff) = 発火対象。加えて同一バッファを
+        -- &diff で見るユーザー窓 (会員なので同じ buf の窓全てが対象)。
+        local abuf = vim.fn.bufnr(state.repo .. '/a.lua')
+        vim.api.nvim_set_current_tabpage(state.tab)
         vim.cmd 'vsplit'
         vim.api.nvim_win_set_buf(0, abuf)
         vim.api.nvim_win_set_option(0, 'diff', true)
@@ -3278,16 +3364,21 @@ describe(
         vim.api.nvim_win_set_buf(0, obuf)
         vim.api.nvim_win_set_option(0, 'diff', true)
 
-        -- 会員 &diff 窓のバッファへ BufWritePost -> 再取得適用後に :diffupdate が
-        -- 発火する窓は「会員 &diff 窓」だけ (ユーザー窓・scratch 窓は不発火)。
+        -- 会員実ファイルのバッファへ BufWritePost -> 再取得適用後に :diffupdate が
+        -- 発火するのは会員 &diff 窓だけ (base scratch 窓・会員外窓は不発火、
+        -- panel 窓は &diff なし)。
         install_git {
           function()
             return diff_ok(RAW_DIFF_V2)
           end,
+          RP_HEAD_MATCH[1],
+          RP_HEAD_MATCH[2],
         }
-        vim.api.nvim_exec_autocmds('BufWritePost', { buffer = abuf, modeline = false })
+        fire_buf_write_post(abuf)
 
-        assert.same({ abuf }, fired)
+        -- 2 エントリともセッション実ファイル buf = head 窓とユーザー窓の 2 つ
+        -- (会員外の obuf・base scratch が混じらないことの完全一致 assert)。
+        assert.same({ abuf, abuf }, fired)
 
         pcall(vim.api.nvim_buf_delete, obuf, { force = true })
       end

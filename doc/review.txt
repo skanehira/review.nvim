@@ -35,7 +35,10 @@ USAGE						*review-usage*
 					dirty・非ローカルブランチ・switch 失敗
 					= git show 内容の読み取り専用レビューに
 					縮退し INFO 通知)。branch レビューでは
-					worktree を作らない。同一 refs 組の
+					worktree を作らない。head 窓で :w すると
+					差分が自動で再取得されレビューに反映
+					される (|review-sessions| の
+					「保存時自動反映」)。同一 refs 組の
 					保存済みセッションがある場合は「継承
 					するか」の [y/N] 確認が出る (y で
 					comments / viewed を引き継ぎ、n で
@@ -222,6 +225,16 @@ SESSION 状態と復旧				*review-sessions*
 	Neovim 異常終了	 open のまま JSON が data dir に残り、次回起動時に
 			「続けられます」通知 (:Review で復元 / worktree
 			残骸は起動 scan が掃除)
+
+	保存時自動反映	 保存した差分は自動でレビューに反映される。レビュー
+			対象ファイルの保存 (head 窓でもユーザー窓の :w でも
+			可。縮退中の読み取り専用 scratch は対象外) で差分を
+			再取得し、±カウント・コメント位置 (anchor 補正 /
+			outdated)・スレッド・:Review prompt が直近保存基準で
+			再適用、窓 diff は保存時に再計算される。未保存の
+			バッファ編集は表示にだけ映り、カウントと prompt に
+			は入らない。再取得の失敗は WARN 通知で前の表示と
+			コメントを保持する
 
 outdated 認定 (差分の揺れで対象行を特定できないコメント) は head バッファで
  解ける位置にあえば行末 `(💬 N (⚠M))` と gray スレッド、head 窓に解けない分は

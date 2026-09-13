@@ -9,6 +9,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 - 差分は専有 tabpage の 3 窓 (file panel │ base │ head) の**窓 diff** で確認。head 窓は実ファイルなので編集も LSP も効いたままレビューできる。file panel はトグル可
 - ブランチレビューは head を worktree にしない (現在のチェックアウトの作業ツリーが対象)。`head 省略 = 現在のブランチを自動採用`
 - コメント・viewed 状態をセッションとして自動保存。再起動後に `:Review` で復元 (`stdpath("data")` 配下に JSON、Neovim が異常終了しても起動時に検出して通知)
+- 保存した差分は自動でレビューに反映。レビュー対象ファイルを保存 (`:w`。head 窓でもユーザー窓でも可、縮退 scratch は対象外) すると差分を再取得し、±カウント・コメント位置 (anchor)・プロンプトが直近保存基準で更新され、窓 diff も保存時に再計算される。未保存のバッファ編集は表示にだけ映る
 - `:Review pr <番号|URL>` で gh 連携。head を worktree に展開し、レビュー tab はその worktree に tcd される (head 窓 = worktree 内の実ファイル。レビュー終了時に worktree はクリーンアップされる)
 - コメントを `@path#L<行>` 形式のプロンプトとしてクリップボード / レジスタへコピー
 - ランタイム依存ゼロ (Neovim 標準 API のみ)
@@ -47,6 +48,8 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 :Review start main              " head 省略 = 現在のブランチを自動採用・保存
                                 " (ブランチ名は <Tab> で branches -> tags 順に補完)
                                 " 作業ツリー基準なので未コミット変更もレビュー対象
+                                " head 窓で :w すると差分を自動再取得
+                                " (カウント・プロンプトは保存済み内容基準)
                                 " :Review delete の <id> と :Review pr の番号も <Tab> で補完
                                 " 同一 refs 組の保存済みセッションがある場合は
                                 " 「継承して comments/viewed を引き継ぐか」の [y/N] 確認が出る
