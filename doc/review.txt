@@ -122,16 +122,24 @@ KEYMAPS						*review-keymaps*
 			open_file      = 'o',
 			close          = 'q',
 			help           = '<F1>',
-			next_file      = ']d',
-			prev_file      = '[d',
-			focus_sidebar  = 'S',
+			next_file      = '<Tab>',
+			prev_file      = '<S-Tab>',
+			first_file     = '[F',
+			last_file      = ']F',
+			refresh        = 'R',
 			focus_panel    = '<leader>e',
 			toggle_panel   = '<leader>b',
 			view_comments  = 'i',
 		},
 		sidebar = {                   -- file panel (変更ファイル一覧)
 			open_diff      = '<CR>',
-			open_file      = 'o',
+			open_file      = 'o',     -- <CR> と同じ «entry を開く»
+			open_entry     = 'l',     -- 同上
+			next_file      = '<Tab>',
+			prev_file      = '<S-Tab>',
+			first_file     = '[F',
+			last_file      = ']F',
+			refresh        = 'R',
 			toggle_style   = 'i',    -- list ⇄ tree 表示切替
 			toggle_viewed  = 'x',
 			filter         = '/',    -- |review-keymaps-sidebar|
@@ -176,12 +184,16 @@ KEYMAPS						*review-keymaps*
 			tab) で開く。削除ファイルは «開けません» の WARN
 	q		セッションを閉じる (コメント 0 件は無確認)
 	<F1>		キーバインドの help float
-	]d		次のファイルを開く (head/base を張り替え。パス昇順の並び。
-			端では無動作。viewed 更新と save は一覧の <CR> と同じ)
-	[d		前のファイルを開く (上記と同じ規則)
-	S		file panel (変更ファイル一覧) へ移動 (窓が閉じて
+	<Tab>		次のファイルを開く (head/base を張り替え。パス昇順・絞り込み後の
+			並び。端では無動作。viewed 更新と save は一覧の <CR> と同じ)
+	<S-Tab>		前のファイルを開く (上記と同じ規則)
+	[F		最初のファイルを開く (現対象が最初のとき無動作)
+	]F		最後のファイルを開く (現対象が最後のとき無動作)
+	R		差分を再取得 (git diff 再実行 -> 再パース -> anchor 検証 ->
+			±カウント・スレッド・panel 更新 -> :diffupdate)。窓の役割が
+			壊れたとき復旧する経路でもある
+	<leader>e	file panel (変更ファイル一覧) へ移動 (窓が閉じて
 			いれば左に再建してから移動)
-	<leader>e	file panel へ移動 (S と同一処理)
 	<leader>b	file panel の表示トグル (閉じても tab とレビュー窓は残る)
 	i		カーソル行のコメント全文を read-only 窓で閲覧
 			(編集は e)。q / <Esc> で閉じる
@@ -200,16 +212,24 @@ KEYMAPS						*review-keymaps*
 	<CR>		file 行 = そのファイルを head/base 窓に開き、focus を head
 			窓へ移動 (viewed 自動 true)。dir 行 = 折り畳み/展開の
 			トグル (カーソルは dir 行に残る)
-	o		file 行 = そのファイルの実ファイルを開く (diff の o と
-			同じ規則)。dir 行 = <CR> と同じ折り畳みトグル
+	o		<CR> と同じ «entry を開く»。panel の o は開くキーで、
+			レビュー窓の o (実ファイルを別 tab で開く) とは意味が
+			違う
+	l		<CR> と同じ «entry を開く» (ツリー UI の慣習のエイリアス)
+	<Tab>		次のファイル (一覧順 = <CR> と同一処理。端は無動作)
+	<S-Tab>		前のファイル (同上)
+	[F		最初のファイル (上記と同じ規則)
+	]F		最後のファイル (上記と同じ規則)
+	R		差分を再取得 (レビュー窓の R と同一)
 	i		list 表示 (フルパス 1 行) ⇄ tree 表示を切替。絞り込み・
 			折り畳み・選択行は状態として引き継ぐが、セッション
 			ファイルには保存しない (開き直しで tree 既定に戻る)
 	x		viewed 切替 (dir ヘッダ行では無動作)
 	/		一覧を絞り込む。入力 = paths の大文字小文字無視の
 			部分一致で再描画。空入力で解除、Esc で現状維持。
-			絞り込み中は <CR>/o/x/]d/[d も一致集合内だけを
-			辿る (winbar に一致数と filter が出る)
+			絞り込み中は <CR>/o/l/x/<Tab>/<S-Tab>/[F/]F も
+			一致集合内だけを辿る (winbar に一致数と filter が
+			出る)
 	q		セッションを閉じる (diff の q と同じ)
 
 	panel のカーソル移動だけでは diff を切り替えない。逆にファイルを open_file

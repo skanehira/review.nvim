@@ -345,7 +345,7 @@ describe('filepanel キー割り当て', function()
   use_env()
 
   it(
-    '<CR>/o/x///i/q が buffer-local に張り付き rhs が実関数として解決できる',
+    'DESIGN キー表の file panel 全キーが buffer-local に張り付き rhs が実関数として解決できる',
     function()
       local buf = filepanel.render(session_stub(), { f('a.lua', 'M', 1, 0) }, TREE_OPTS)
       local by_lhs = {}
@@ -356,6 +356,12 @@ describe('filepanel キー割り当て', function()
       for _, name in ipairs {
         'open_diff',
         'open_file',
+        'open_entry',
+        'next_file',
+        'prev_file',
+        'first_file',
+        'last_file',
+        'refresh',
         'toggle_viewed',
         'filter',
         'close',
@@ -377,6 +383,50 @@ describe('filepanel キー割り当て', function()
       assert.equals('i', k.toggle_style)
     end
   )
+
+  it(
+    'entry 開く <CR>/o/l は open_selected_file を指す (panel o = 開く。実ファイル o ではない)',
+    function()
+      local buf = filepanel.render(session_stub(), { f('a.lua', 'M', 1, 0) }, TREE_OPTS)
+      local by_lhs = {}
+      for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+        by_lhs[m.lhs] = m.rhs
+      end
+      local k = config.get().keymaps.sidebar
+      for _, name in ipairs { 'open_diff', 'open_file', 'open_entry' } do
+        local rhs = by_lhs[k[name]]
+        assert.is_not_nil(rhs, 'keymap 未張付: ' .. name)
+        assert.is_true(
+          rhs:find('open_selected_file', 1, true) ~= nil,
+          name .. ' の rhs が open_selected_file でない: ' .. rhs
+        )
+      end
+    end
+  )
+
+  it('移動系 <Tab>/<S-Tab>/[F/]F と R は handlers.session の対応関数を指す', function()
+    local buf = filepanel.render(session_stub(), { f('a.lua', 'M', 1, 0) }, TREE_OPTS)
+    local by_lhs = {}
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+      by_lhs[m.lhs] = m.rhs
+    end
+    local k = config.get().keymaps.sidebar
+    local want = {
+      next_file = 'next_file',
+      prev_file = 'prev_file',
+      first_file = 'first_file',
+      last_file = 'last_file',
+      refresh = 'refresh',
+    }
+    for name, fn in pairs(want) do
+      local rhs = by_lhs[k[name]]
+      assert.is_not_nil(rhs, 'keymap 未張付: ' .. name .. ' (' .. k[name] .. ')')
+      assert.is_true(
+        rhs:find('.' .. fn .. '()', 1, true) ~= nil,
+        ('%s の rhs が %s を指さない: %s'):format(name, fn, rhs)
+      )
+    end
+  end)
 
   it(
     'config.keymaps.sidebar.toggle_style の override が張付キーに反映される',

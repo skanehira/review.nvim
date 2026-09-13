@@ -25,8 +25,10 @@ local SECTIONS = {
       { 'help', 'このヘルプ' },
       { 'next_file', '次のファイルへ (端では無動作)' },
       { 'prev_file', '前のファイルへ (端では無動作)' },
-      { 'focus_sidebar', 'file panel (変更ファイル一覧) へ移動' },
-      { 'focus_panel', 'file panel へ移動 (S と同一処理)' },
+      { 'first_file', '最初のファイルへ' },
+      { 'last_file', '最後のファイルへ' },
+      { 'refresh', '差分を再取得 (リフレッシュ)' },
+      { 'focus_panel', 'file panel (変更ファイル一覧) へ移動' },
       {
         'toggle_panel',
         'file panel の表示トグル (閉じても tab とレビュー窓は残る)',
@@ -39,7 +41,19 @@ local SECTIONS = {
     keymap = 'sidebar',
     rows = {
       { 'open_diff', 'そのファイルを head/base 窓に開く (dir 行では折り畳み)' },
-      { 'open_file', 'そのファイルの実ファイルを開く (dir 行では折り畳み)' },
+      {
+        'open_file',
+        '<CR> と同じ (file panel の o = 開く。diff 窓の o とは意味が違う)',
+      },
+      { 'open_entry', '<CR> と同じ (entry を開く)' },
+      -- 移動系・refresh の文案は doc/review.txt sidebar 節と同文。diff 節と同一文に
+      -- すると help_spec の has_line 完全一致が節を区別できず (検出能力ゼロ)、
+      -- 節の行数が減ってもテストが緑になる。文言を一意化している。
+      { 'next_file', '次のファイル (一覧順 = <CR> と同一処理。端は無動作)' },
+      { 'prev_file', '前のファイル (上記と同じ規則)' },
+      { 'first_file', '最初のファイル (上記と同じ規則)' },
+      { 'last_file', '最後のファイル (上記と同じ規則)' },
+      { 'refresh', '差分を再取得 (レビュー窓の R と同一)' },
       { 'toggle_style', 'list 表示 (フルパス 1 行) ⇄ tree 表示を切替' },
       { 'toggle_viewed', 'viewed 切替' },
       { 'filter', '一覧を絞り込む (空入力で解除)' },
@@ -68,6 +82,20 @@ local SECTIONS = {
       },
       { '<C-y>', '確定 (insert)' },
       { '<Esc>', 'Normal へ戻るだけ (窓は閉じない)' },
+    },
+  },
+  {
+    -- DESIGN 決定表 «gate 不成立窓では 1 キーストロークが built-in になる副作用
+    -- は user doc (help) に明記» の help float 側文案 (doc/review.txt と同文)。
+    title = '注記',
+    keymap = nil,
+    rows = {
+      {
+        '注:',
+        'レビュー窓のキーは buffer-local + 押下時点の窓 role gate。gate を通らない窓 '
+          .. '(ユーザーが自分の窓で開いた同じ実ファイルなど) では 1 キーストロークが '
+          .. 'built-in 動作に戻る',
+      },
     },
   },
 }

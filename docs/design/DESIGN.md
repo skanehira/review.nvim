@@ -205,11 +205,12 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - `setreg` の第 1 引数 List は E730 になる。複数レジスタ書込は個別呼び出し
 - 標準 API に sha1 は無い。repo-hash は sha1 先頭 16 桁の独自実装 (`store/paths.lua`)。算法を差し換えると既存セッションが到達不能になる
 - LuaJIT `string.format('%x')` は負の int32 を 16 桁符号拡張で出す。32bit 演算結果は出力直前 0..2^32-1 へ正規化 (`u32`)
-- headless のキー投入は `:normal` が唯一の安定経路 (`nvim_input` / `feedkeys` は `vim.wait` で消費されない)。`:normal` 内で error が出ると hit-enter でハングするため driver は pcall + `cquit`。視覚選択は `Vj` 移動と `c` を分割投入
+- headless のキー投入は `:normal` が唯一の安定経路 (`nvim_input` / `feedkeys` は `vim.wait` で消費されない)。`:normal` 内で error が出ると hit-enter でハングするため driver は pcall + `cquit`。視覚選択は `Vj` 移動と `c` を分割投入。`<Tab>` / `<S-Tab>` の投入は `nvim_replace_termcodes` 後 **`0` 等の非空白プレフィックスを付けて** `:normal` へ渡す (`:normal` の引数頭が空白扱いで食われる = 0.13 実測。素の `<S-Tab>` は内部 key 128,k,B として発火確認済み)。`<leader>` キーは `[[normal \e]]` のロングブラケットで (Lua 文字列の `\e` は不正 escape)
 - `vim.wait` を起動 `-c` 内で使うと `VimEnter` が発火しない。起動後イベント依存のスクリプトは `defer_fn` で逃がす
 - Neovim に `BufWipedout` autocmd は無い (wipe でも `BufUnload`)。バッファ付随 module state の掃除は `BufUnload` で受ける。`nvim_buf_set_extmark` の `end_col` に `-1` は不正 (行末バイト数を明示)
 - `:tcd` は存在しない dir に対して E344 を投げる (0.10 実測)。レビュー tab 開通の tcd はこれを pcall で吸収する (開通を中断すると tab だけ残ってレビュー不能になる)。spec / e2e で「tcd 漏れなし」を比較する側は dir 実在を前提にする
 - `bufadd` / `:edit` は buffer 名を symlink 解決後の正規パスで持つ (macOS の mktemp は `/var` -> `/private/var`。0.10 実測)。head 実ファイル窓の buf 名を assert する spec / e2e は期待値を `fs_realpath` 経由で比較する。git に渡す cwd は記録された path のままなので正規化されない (2 つを混同しない)
+- 手動 tmux 実測の `nvim --server ... --remote-expr` は editor.lua の関数 shim 経由で評価され、**list index が 0 base** (`tabpagebuflist(2)[2]` = 3 番窓 / 3 窓の tab で `[3]` は E684。関数呼び出しは shim 経由で動き `mode()` 等は使える)。同一状態で `getbufline('<bufname>')` は `[]` を返し `luaeval` + `nvim_buf_get_lines` では内容が読める (0.13 実測・issue #18) — 窓 buffer 特定は index、buffer 内容の実測は luaeval 経由で行うこと (無音の false PASS を防ぐ)
 
 ## 未解決の論点
 

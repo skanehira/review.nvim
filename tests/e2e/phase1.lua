@@ -3,8 +3,9 @@
 -- head 窓は実ファイル (a.lua 実パス・編集可) -> head 窓で c キー (keygate 実経路)
 -- -> 実ファイルへの extmark (件数 eol + 行下スレッド) と w:review_winbar ->
 -- panel <CR> で b.lua へ (追加ファイル: base=null scratch, focus は head) ->
--- panel o で前行儀 tab に実ファイル (編集可) -> [d/i/S の窓移動 -> 視覚選択で
--- range コメント -> y で "0 -> :Review prompt 全文一致 -> 正常終了 (status=open)。
+-- head 窓 o で前行儀 tab に実ファイル (編集可) -> <S-Tab>/]F/[F/i/<leader>e の
+-- 窓移動 (最終キー表 #18) -> panel l で entry 開く -> 視覚選択で range コメント ->
+-- y で "0 -> :Review prompt 全文一致 -> 正常終了 (status=open)。
 -- 失敗は E2E-FAIL を stdout へ出して cquit する (-c 実行中に error を素出しすると
 -- headless nvim が入力待ちになりハングするため pcall で正規化する)。
 -- buffer 名比較は実パス正規化 (macOS /var -> /private/var) を吸収するよう
@@ -255,9 +256,14 @@ local function run()
     fail('sidebar viewed 切り替え後の行不一致: ' .. tostring(sb_lines[brow]))
   end
 
-  -- panel o: 前行儀 tab に実ファイルを開く (review tab を壊さず・編集可)。
-  -- (縮退/checkout 側に無いファイルの git show read-only fallback は unit pin)
-  vim.api.nvim_set_current_win(windows.win 'panel')
+  -- head 窓 o: 前行儀 tab に実ファイルを開く (review tab を壊さず・編集可)。
+  -- #18 で panel の o は <CR>/l と同じ «entry を開く» になったため、実ファイル
+  -- 導線の押下は head 窓で行う (<CR> 後の focus は head 窓)。(縮退/checkout 側に
+  -- 無いファイルの git show read-only fallback は unit pin)
+  expect(
+    win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'b.lua')),
+    '<CR> 後の focus が b.lua の head 窓でない'
+  )
   local tabs_before = #vim.api.nvim_list_tabpages()
   vim.cmd 'normal o'
   wait_for(function()
@@ -287,12 +293,38 @@ local function run()
     'o の tab を閉じた後にレビュー tab の 3 窓が壊れた'
   )
 
-  -- [d で a.lua に戻り、i で閲覧 float -> 閉じる -> S で panel focus
+  -- 移動キー (最終キー表 #18): <S-Tab> で a.lua -> ]F 最後 (src/deep/new.lua) ->
+  -- [F 最初 (a.lua) -> i で閲覧 float -> 閉じる -> <leader>e で panel focus
   vim.api.nvim_set_current_win(windows.win 'head')
-  vim.cmd 'normal [d'
+  local stab = vim.api.nvim_replace_termcodes('<S-Tab>', true, true, true)
+  vim.cmd('normal ' .. stab)
   wait_for(function()
     return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'a.lua'))
-  end, '[d で a.lua head 実ファイル')
+  end, '<S-Tab> で a.lua head 実ファイル')
+  print 'E2E-M1 S-Tab=prev'
+  vim.cmd 'normal ]F'
+  wait_for(function()
+    return win_buf_name(vim.api.nvim_get_current_win())
+      == realpath(vim.fs.joinpath(top, 'src/deep/new.lua'))
+  end, ']F で最後のファイル src/deep/new.lua')
+  print 'E2E-M2 ]F=last'
+  vim.cmd 'normal [F'
+  wait_for(function()
+    return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'a.lua'))
+  end, '[F で最初のファイル a.lua')
+  print 'E2E-M3 [F=first'
+  -- <Tab> 次ファイル (押下は 0 接頭で渡す = :normal の引数先頭 whitespace 回避。
+  -- 実測で 0<Tab> 注入の発火を確認済み)。b.lua へ進み、<S-Tab> で戻る。
+  local tab_key = vim.api.nvim_replace_termcodes('<Tab>', true, false, true)
+  vim.cmd('normal 0' .. tab_key)
+  wait_for(function()
+    return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'b.lua'))
+  end, '<Tab> で b.lua')
+  print 'E2E-M4 Tab=next'
+  vim.cmd('normal 0' .. stab)
+  wait_for(function()
+    return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'a.lua'))
+  end, '<S-Tab> で a.lua 復帰')
   vim.api.nvim_win_set_cursor(vim.api.nvim_get_current_win(), { 3, 0 })
   vim.cmd 'normal i'
   wait_for(function()
@@ -304,20 +336,23 @@ local function run()
   wait_for(function()
     return #vim.api.nvim_tabpage_list_wins(0) == 3
   end, 'comment view close')
-  vim.cmd 'normal S'
+  -- <leader>e (= \ + e)。[[..]] のロングブラケットで Lua エスケープ不经由にする
+  -- ("\e" は Lua では不正 escape で spec 側が壊れるため)
+  vim.cmd [[normal \e]]
   wait_for(function()
     return vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
       == 'review://sidebar/main--feature'
-  end, 'S で panel focus')
+  end, '<leader>e で panel focus')
 
   -- --- prompt yank (ai-prompt.md テスト方針 golden path) -------------------
   -- b.lua (head 実ファイル) で視覚選択 range コメントを作り (既知の制約: :normal
   -- の視覚選択は Vj -> c の分割投入が単位)、y で "0、:Review prompt で全文照合。
   -- 期待値は docs/design/features/ai-prompt.md の書式から手で書いた正本
   -- (生成 code を呼ばない = 循環検証回避)。b.lua 恒等行: 1 / 2 行とも new 側。
+  -- panel の `l` (<CR>/o/l = entry を開く #18) で b.lua を開く経路を使う。
   vim.api.nvim_set_current_win(windows.win 'panel')
   vim.api.nvim_win_set_cursor(windows.win 'panel', { panel_row('file', 'b.lua'), 0 })
-  vim.cmd('normal ' .. cr)
+  vim.cmd 'normal l'
   wait_for(function()
     return win_buf_name(vim.api.nvim_get_current_win()) == b_real
   end, 'b.lua head 実ファイル (range 用)')

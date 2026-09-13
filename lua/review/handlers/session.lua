@@ -487,7 +487,8 @@ end
 -- panel 一覧と窓装飾 (chrome: w:review_winbar 一本化)
 -- ============================================================================
 
--- panel 絞り込みの可視 files。render 側と ]d/[d の進む順が必ず同じ集合を
+-- panel 絞り込みの可視 files。render 側と移動系 (<Tab>/<S-Tab>/[F/]F) の進む順が
+-- 必ず同じ集合を
 -- 向くよう、可視一覧はこの 1 関数からのみ供給する (filter は view state で
 -- session JSON に載せない — 復元・開き直し後は全一覧が正しい)。
 local function visible_files()
@@ -740,7 +741,8 @@ local function open_head_real(full)
   return buf
 end
 
---- 移動系 (panel <CR> / panel o 以外の開く導線・]d [d・開始/復元時の初期開き) が
+--- 移動系 (panel <CR>/o/l 以外の開く導線・<Tab>/<S-Tab>/[F/]F・開始/復元時の
+--- 初期開き) が
 --- 必ず通る単一经路 (diff-review「open_file(path)」)。種別解決 → 窓に base/head を
 --- 張り、chrome 再適用、viewed=true、save、panel 再描画、コメント extmark 再適用。
 local function resolve_and_open(path)
@@ -841,7 +843,7 @@ local function resolve_and_open(path)
   apply_chrome()
 end
 
---- panel 外導線 (open_selected_file / ]d / [d / API) 共通の open_file。
+--- panel 外導線 (open_selected_file / <Tab>/<S-Tab>/[F/]F / API) 共通の open_file。
 --- active が無いか path が現差分に一覧化されていない場合は WARN/no-op。
 function M.open_file(path)
   if active == nil then
@@ -1521,7 +1523,7 @@ function M.resume_into(session, files, worktree, degraded)
 end
 
 -- ============================================================================
--- panel 操作と移動系 (c/e/d/y/i/o/q/R の導線は ui/keygate 経由。R は別 issue)
+-- panel 操作と移動系 (c/e/d/y/i/o/q/R の導線は ui/keygate 経由)
 -- ============================================================================
 
 --- panel <CR>: 一覧のそのファイルを open_file (移動系と同一処理)。focus は
@@ -1572,16 +1574,21 @@ local function current_path()
   return active ~= nil and active.current ~= nil and active.current.path or nil
 end
 
--- ]d / [d: 一覧 (パス昇順) を辿って head/base ペアを進める/戻す (端は無動作)。
--- 処理は panel <CR> と同一 open_file。
-local function step_file(delta)
-  if active == nil then
-    return
-  end
+-- 移動系 (<Tab>/<S-Tab>/[F/]F): 一覧 (パス昇順・絞り込み後の集合) から次の
+-- 対象を解決し open_file (処理は panel <CR> と同一)。次/前は端は無動作。
+local function visible_order()
   local order = {}
+  if active == nil then
+    return order
+  end
   for _, e in ipairs(visible_files()) do
     order[#order + 1] = e.path
   end
+  return order
+end
+
+local function step_file(delta)
+  local order = visible_order()
   if #order == 0 then
     return
   end
@@ -1600,17 +1607,37 @@ local function step_file(delta)
   M.open_file(order[ni])
 end
 
---- `]d`: 次のファイルへ。
+--- `<Tab>`: 次のファイルへ。
 function M.next_file()
   step_file(1)
 end
 
---- `[d`: 前のファイルへ。
+--- `<S-Tab>`: 前のファイルへ。
 function M.prev_file()
   step_file(-1)
 end
 
---- `S` / `<leader>e`: panel へ focus を移す。窓が閉じられていた場合は左に再建し
+--- `[F`: 最初のファイルへ (現対象が最初なら無動作)。
+function M.first_file()
+  local order = visible_order()
+  local target = order[1]
+  if target == nil or target == current_path() then
+    return
+  end
+  M.open_file(target)
+end
+
+--- `]F`: 最後のファイルへ (現対象が最後なら無動作)。
+function M.last_file()
+  local order = visible_order()
+  local target = order[#order]
+  if target == nil or target == current_path() then
+    return
+  end
+  M.open_file(target)
+end
+
+--- `<leader>e`: panel へ focus を移す。窓が閉じられていた場合は左に再建し
 --- render し直す (sidebar buf は bufhidden=wipe で表示窓と共に消える — AGENTS)。
 function M.focus_sidebar()
   if active == nil then
@@ -1931,7 +1958,7 @@ local function notify_head_switch_once(current)
   end)
 end
 
---- `R` / BufWritePost 共通のリフレッシュ調停 (`R` キー登録は別 issue。ハンドラ
+--- `R` / BufWritePost 共通のリフレッシュ調停 (`R` キーは ui/keygate と panel から
 --- 直接呼出で起動できることが契約)。`git diff` 再取得は開始時 head 解に一致する
 --- 引数形 (通常 = 作業ツリー基準の単引数 / scratch 縮退 = `<base> <head>` /
 --- pr = cwd worktree の単引数) -> 再パース -> anchor 検証 -> ±カウント・panel・

@@ -29,7 +29,7 @@ vim.defer_fn(function()
       return vim.fn.bufexists 'review://sidebar/pr-7' == 1
     end, 'pr sidebar')
 
-    -- sidebar o -> worktree 実ファイル -> 編集 -> 保存
+    -- panel o (#18 で entry を開く) -> head 窓 = worktree 実ファイル -> 編集 -> 保存
     local sidebar = vim.fn.bufnr 'review://sidebar/pr-7'
     local win = vim.fn.win_findbuf(sidebar)[1]
     vim.api.nvim_set_current_win(win)

@@ -25,15 +25,17 @@ local COMMENT_OPS = {
   view_comments = { mode = 'n', fn = 'view_current' },
 }
 
--- op -> (handler module, 関数名)。focus_sidebar (S) と focus_panel (<leader>e) は
--- 同一処理 (panel への focus・閉じていれば再建)。S の廃止は(issue-5)。
+-- op -> (handler module, 関数名)。focus_panel (<leader>e) は panel への focus
+-- (閉じていれば再建)。旧 S / ]d / [d は issue #18 で廃止 (DESIGN キー表)。
 local DISPATCH = {
   open_file = { 'review.handlers.session', 'open_file_current' },
   close = { 'review.handlers.session', 'close_by_key' },
   help = { 'review.ui.help', 'open' },
   next_file = { 'review.handlers.session', 'next_file' },
   prev_file = { 'review.handlers.session', 'prev_file' },
-  focus_sidebar = { 'review.handlers.session', 'focus_sidebar' },
+  first_file = { 'review.handlers.session', 'first_file' },
+  last_file = { 'review.handlers.session', 'last_file' },
+  refresh = { 'review.handlers.session', 'refresh' },
   focus_panel = { 'review.handlers.session', 'focus_sidebar' },
   toggle_panel = { 'review.handlers.session', 'toggle_panel' },
   -- comment ops は handlers.comments へ comment_dispatch で寄る
@@ -174,7 +176,9 @@ function M.install(buf, session_id)
   install_one(buf, 'n', k.help, 'help')
   install_one(buf, 'n', k.next_file, 'next_file')
   install_one(buf, 'n', k.prev_file, 'prev_file')
-  install_one(buf, 'n', k.focus_sidebar, 'focus_sidebar')
+  install_one(buf, 'n', k.first_file, 'first_file')
+  install_one(buf, 'n', k.last_file, 'last_file')
+  install_one(buf, 'n', k.refresh, 'refresh')
   if k.focus_panel ~= nil then
     install_one(buf, 'n', k.focus_panel, 'focus_panel')
   end

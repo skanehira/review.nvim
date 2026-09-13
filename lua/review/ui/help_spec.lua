@@ -54,10 +54,12 @@ describe('help.open', function()
         'd カーソル行のコメントを削除 (arming: 同じ行でもう一度 d)'
       )
     )
-    assert.is_true(has_line(lines, ']d 次のファイルへ (端では無動作)'))
-    assert.is_true(has_line(lines, '[d 前のファイルへ (端では無動作)'))
-    assert.is_true(has_line(lines, 'S file panel (変更ファイル一覧) へ移動'))
-    assert.is_true(has_line(lines, '<leader>e file panel へ移動 (S と同一処理)'))
+    assert.is_true(has_line(lines, '<Tab> 次のファイルへ (端では無動作)'))
+    assert.is_true(has_line(lines, '<S-Tab> 前のファイルへ (端では無動作)'))
+    assert.is_true(has_line(lines, '[F 最初のファイルへ'))
+    assert.is_true(has_line(lines, ']F 最後のファイルへ'))
+    assert.is_true(has_line(lines, 'R 差分を再取得 (リフレッシュ)'))
+    assert.is_true(has_line(lines, '<leader>e file panel (変更ファイル一覧) へ移動'))
     assert.is_true(
       has_line(
         lines,
@@ -75,9 +77,39 @@ describe('help.open', function()
         '<CR> そのファイルを head/base 窓に開く (dir 行では折り畳み)'
       )
     )
+    assert.is_true(
+      has_line(
+        lines,
+        'o <CR> と同じ (file panel の o = 開く。diff 窓の o とは意味が違う)'
+      )
+    )
+    assert.is_true(has_line(lines, 'l <CR> と同じ (entry を開く)'))
+    -- file panel 節の移動系・refresh (review-18-r1 high 対策)。diff 節と同一文だと
+    -- has_line 全文一致が節を区別できず、panel 側の 5 行を消しても緑になる
+    -- (検出能力ゼロ)。doc/review.txt sidebar 節の文案で文言を一意化している。
+    assert.is_true(
+      has_line(
+        lines,
+        '<Tab> 次のファイル (一覧順 = <CR> と同一処理。端は無動作)'
+      )
+    )
+    assert.is_true(has_line(lines, '<S-Tab> 前のファイル (上記と同じ規則)'))
+    assert.is_true(has_line(lines, '[F 最初のファイル (上記と同じ規則)'))
+    assert.is_true(has_line(lines, ']F 最後のファイル (上記と同じ規則)'))
+    assert.is_true(has_line(lines, 'R 差分を再取得 (レビュー窓の R と同一)'))
     assert.is_true(has_line(lines, 'i list 表示 (フルパス 1 行) ⇄ tree 表示を切替'))
     assert.is_true(has_line(lines, '/ 一覧を絞り込む (空入力で解除)'))
     assert.is_true(has_line(lines, 'x viewed 切替'))
+    -- gate 不成立窓の 1 keystroke built-in 副作用の help 明記契約 (DESIGN 決定表
+    -- 「review キーの実装」)。文案の正本はこの行。
+    assert.is_true(
+      has_line(
+        lines,
+        '注: レビュー窓のキーは buffer-local + 押下時点の窓 role gate。gate を'
+          .. '通らない窓 (ユーザーが自分の窓で開いた同じ実ファイルなど) では'
+          .. ' 1 キーストロークが built-in 動作に戻る'
+      )
+    )
     -- コメント入力 float の操作 (ui/input.lua の契約と同一文言。確定/閉じるの
     -- discoverability を help 側でも保証する)
     assert.is_true(has_line(lines, '[コメント入力 (c/e で開く)]'))
