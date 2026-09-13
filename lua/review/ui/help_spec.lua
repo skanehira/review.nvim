@@ -42,8 +42,12 @@ describe('help.open', function()
     help.open()
     assert.equals(2, tab_wins())
     local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-    assert.is_true(has_line(lines, 'c 作成コメント (visual-line で範囲指定)'))
-    assert.is_true(has_line(lines, 'e カーソル行のコメントを編集'))
+    assert.is_true(has_line(lines, '[レビュー窓 (head / base)]'))
+    assert.is_true(has_line(lines, '[file panel (変更ファイル一覧)]'))
+    assert.is_true(
+      has_line(lines, 'c 作成コメント (visual-line で範囲指定・head 窓のみ)')
+    )
+    assert.is_true(has_line(lines, 'e カーソル行のコメントを編集 (head 窓のみ)'))
     assert.is_true(
       has_line(
         lines,
@@ -52,13 +56,20 @@ describe('help.open', function()
     )
     assert.is_true(has_line(lines, ']d 次のファイルへ (端では無動作)'))
     assert.is_true(has_line(lines, '[d 前のファイルへ (端では無動作)'))
-    assert.is_true(has_line(lines, 'S sidebar (変更ファイル一覧) へ移動'))
+    assert.is_true(has_line(lines, 'S file panel (変更ファイル一覧) へ移動'))
+    assert.is_true(has_line(lines, '<leader>e file panel へ移動 (S と同一処理)'))
+    assert.is_true(
+      has_line(
+        lines,
+        '<leader>b file panel の表示トグル (閉じても tab とレビュー窓は残る)'
+      )
+    )
     assert.is_true(has_line(lines, 'i カーソル行のコメントを閲覧 (read-only)'))
     assert.is_true(has_line(lines, 'y カーソル行のコメントのプロンプトを yank'))
-    assert.is_true(has_line(lines, 'o その行の実ファイルを開く'))
-    assert.is_true(has_line(lines, 'q セッションを閉じる'))
+    assert.is_true(has_line(lines, 'o そのファイルの実ファイルを別 tab で開く'))
+    assert.is_true(has_line(lines, 'q セッションを閉じる (レビュー tab を閉じる)'))
     assert.is_true(has_line(lines, '<F1> このヘルプ'))
-    assert.is_true(has_line(lines, '<CR> そのファイルの diff へ移動'))
+    assert.is_true(has_line(lines, '<CR> そのファイルを head/base 窓に開く'))
     assert.is_true(has_line(lines, '/ 一覧を絞り込む (空入力で解除)'))
     assert.is_true(has_line(lines, 'x viewed 切替'))
     -- コメント入力 float の操作 (ui/input.lua の契約と同一文言。確定/閉じるの
@@ -95,8 +106,12 @@ describe('help.open', function()
     config.setup { keymaps = { diff = { add_comment = 'gc' } } }
     help.open()
     local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-    assert.is_true(has_line(lines, 'gc 作成コメント (visual-line で範囲指定)'))
-    assert.is_false(has_line(lines, 'c 作成コメント (visual-line で範囲指定)'))
+    assert.is_true(
+      has_line(lines, 'gc 作成コメント (visual-line で範囲指定・head 窓のみ)')
+    )
+    assert.is_false(
+      has_line(lines, 'c 作成コメント (visual-line で範囲指定・head 窓のみ)')
+    )
     vim.cmd 'normal q'
   end)
 end)

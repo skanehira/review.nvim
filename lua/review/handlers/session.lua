@@ -1,13 +1,19 @@
 -- セッション開始・切替・終了・削除の調整役 (docs/design/features/diff-review.md
--- 「開始」「開始と既存セッションの継承」/ persistence-restore.md「復元手順」共通部 /
--- pr-worktree.md「worktree 作成判断」「セッションとレビューの終了」「セッションの削除」)。
+-- 「開始」「レイアウト (専有 tabpage 3 窓)」「head / base 窓の中身」「open_file」
+-- 「コメント表示」「review tab の消滅経路」「開始と既存セッションの継承」/
+-- persistence-restore.md「復元手順」共通部 / pr-worktree.md「worktree 作成判断」
+-- 「セッションとレビューの終了」「セッションの削除」)。
 -- 契約の要点:
 --   * 戻り値は同期に判定できる失敗のみ (git を伴う成否は notify / UI で返す)
 --   * INV-1: active セッションは高々 1 つ。切替は必ず save -> close を経る
 --   * INV-3: worktree を削除してよいのは created_by_us=true の記録のある分だけ
---   * INV-4: CRUD・viewed 切替の直後に store.save (失敗時はメモリ保持 + WARN)
--- 終了手順の順序原則 (pr-worktree.md): ユーザーデータを失いうる操作の判定と確認を、
--- 状態変更より前に行う (close/delete は worktree status -> 確認 -> save/detach -> 掃除)。
+--   * INV-4: CRUD・viewed 切替の効果直後に store.save
+--   * レイアウトは ui/windows、scratch buffer は ui/scratchwin、窓 role gate と
+--     キーは ui/keygate、コメント extmark は ui/commentmarks。この層は「どの
+--     バッファをどちらの窓に張るか」の解決と保存だけを持つ (open_file = 移動系
+--     の唯一経路)。
+--   * 行写像は恒等: コメントの new 側行番号 = head バッファ (実ファイル /
+--     縮退 head scratch) の行番号そのもの (INV-2。unified 行写像は廃止)。
 local git_diff = require 'review.git.diff'
 local git_ref = require 'review.git.ref'
 local git_repo = require 'review.git.repo'
@@ -17,24 +23,32 @@ local anchor = require 'review.core.anchor'
 local result = require 'review.core.result'
 local store = require 'review.store.session'
 local ui_chrome = require 'review.ui.chrome'
-local ui_diffbuffer = require 'review.ui.diffbuffer'
+local ui_commentmarks = require 'review.ui.commentmarks'
 local ui_fileview = require 'review.ui.fileview'
+local ui_keygate = require 'review.ui.keygate'
 local ui_list = require 'review.ui.list'
+local ui_scratchwin = require 'review.ui.scratchwin'
+local ui_windows = require 'review.ui.windows'
 local usermsg = require 'review.handlers.usermsg'
 
 local M = {}
 
 local now = os.time
 
--- 時刻の境界 (created_at)。テストは固定値を注入する。
 function M._set_now(fn)
   now = fn or os.time
 end
 
--- active = { session, files_by_path, file_order, degraded, head_info_shown,
---            sidebar_buf, sidebar_win, diff_win, diff_bufs = { [path] = bufnr } }
+-- 差分がまるごと消えた開通の情報プレースホルダ path (diff-review「セッション開始時の
+-- 初期開き」: open_file の代わりに「変更なし」scratch を base/head 窓へ張り、
+-- outdated 集約もそこへ出す)。
+M.NO_CHANGES = '(no-changes)'
+
+-- active = { session, files_by_path, file_order, file_order_sorted, panel_buf,
+--            current = { path, file, kind, base_buf, head_buf }, degraded,
+--            fill_token, owned_bufs = { [bufnr]=true }, scratch_bufs = {} }
 local active = nil
-local sidebar_filter = nil -- sidebar 絞り込み (view state、session JSON に載せない)
+local sidebar_filter = nil -- panel 絞り込み (view state、session JSON に載せない)
 
 -- リフレッシュ in-flight まとめ (diff-review「リフレッシュ」): git diff 同時 1 本。
 -- in-flight 中は二重発火せず dirty マークだけ立て、完了後に追い fetch 1 回。
@@ -47,10 +61,15 @@ local function reset_refresh_state()
   refresh_dirty = false
 end
 
+--forward decl (循環: UI <-> 開始手続き)
+local begin_session
+local open_session_ui
+
 function M._reset()
   active = nil
   sidebar_filter = nil
   reset_refresh_state()
+  ui_windows.reset()
 end
 
 --- 起動中のセッション (UI が開いているもの)。無ければ nil (INV-1 で高々 1)。
@@ -120,7 +139,7 @@ local function dir_exists(path)
   return vim.uv.fs_stat(path) ~= nil
 end
 
--- JSON  round-trip 済みの worktree 記録テーブル (無ければ nil)。
+-- JSON round-trip 済みの worktree 記録テーブル (無ければ nil)。
 -- (vim.NIL / nil / 非 table を まとめて無記録に潰す)
 local function worktree_of(session)
   local wt = session.worktree
@@ -149,7 +168,7 @@ end
 
 -- 作成するのは mode=pr のみ。branch は現在のチェックアウト (作業ツリー) を
 -- 直接レビューし、head が現在の HEAD と違うときは worktree で回避せずに
--- switch 提案 / scratch 縮退で対応する (diff-review「head 解決」、DESIGN 決定表
+-- switch 提案 / scratch 縮退で対応する (diff-review「開始」2、DESIGN 決定表
 -- 「worktree 作成条件」)。branch で created_by_us 記録が残っている分
 -- (旧契約の名残) は作成スキップ時の掃除 (cleanup_skipped_record) で回収する。
 local function creation_needed(args)
@@ -319,7 +338,11 @@ local function close_buffer(bufnr)
   end
 end
 
--- window / buffer を掃除して active を外す (save しない。delete 経路用)。
+-- レビューが所有するバッファを掃除して active を外す (save しない。close/delete
+-- 経路用)。head の実ファイルバッファはユーザーの所有物 — 開いたままのもの
+-- (modified を含む) は消さない (diff-review「review tab の消滅経路」)。review://*
+-- (panel / base / head 縮退 scratch / null / 告知 / fileview) はここで消す。
+-- extmark / キーマップはこの時点で張った全バッファから除く (残骸 0 契約)。
 local function detach()
   if active == nil then
     return
@@ -330,15 +353,15 @@ local function detach()
   -- close / 切替時の in-flight・dirty 無効化 (リフレッシュ契約)。解決済み
   -- コールバック側の破棄は active 同一性比較 (refresh の guard) が担う。
   reset_refresh_state()
-  close_buffer(current.sidebar_buf)
-  for _, buf in pairs(current.diff_bufs) do
+  ui_commentmarks.clear_tracked()
+  for buf in pairs(current.owned_bufs) do
+    ui_keygate.uninstall(buf)
+  end
+  ui_windows.close()
+  for _, buf in ipairs(current.scratch_bufs) do
     close_buffer(buf)
   end
-  for _, win in ipairs { current.sidebar_win, current.diff_win } do
-    if vim.api.nvim_win_is_valid(win) then
-      pcall(vim.api.nvim_win_close, win, true)
-    end
-  end
+  close_buffer(current.panel_buf)
 end
 
 -- remove 失敗時の二段目: 自前 dir を prune + 再帰削除で消す。それでも残るなら
@@ -449,8 +472,11 @@ local function close_with_worktree(cb, after_remove)
   end)
 end
 
---- sidebar を現在のセッション状態から再描画し、元の window に載せ直す。
--- sidebar 絞り込みの可視 files。render 側と ]d/[d の進む順が必ず同じ集合を
+-- ============================================================================
+-- panel 一覧と窓装飾 (chrome: w:review_winbar 一本化)
+-- ============================================================================
+
+-- panel 絞り込みの可視 files。render 側と ]d/[d の進む順が必ず同じ集合を
 -- 向くよう、可視一覧はこの 1 関数からのみ供給する (filter は view state で
 -- session JSON に載せない — 復元・開き直し後は全一覧が正しい)。
 local function visible_files()
@@ -467,16 +493,121 @@ local function visible_files()
   return out
 end
 
-local function refresh_sidebar()
-  active.sidebar_buf =
-    ui_list.render_sidebar(active.session, visible_files(), { filter = sidebar_filter })
-  if vim.api.nvim_win_is_valid(active.sidebar_win) then
-    vim.api.nvim_win_set_buf(active.sidebar_win, active.sidebar_buf)
-    ui_chrome.window(active.sidebar_win)
+local function plural(n, word)
+  return ('%d %s%s'):format(n, word, n == 1 and '' or 's')
+end
+
+local function comments_for(session, path)
+  local n = 0
+  for _, c in ipairs(session.comments or {}) do
+    if c.file == path then
+      n = n + 1
+    end
+  end
+  return n
+end
+
+-- head 窓 winbar (diff-review「窓装飾 (chrome)」)。告知窓 (binary/deleted) は
+-- +a -d / 件数を持たないので告知語に差し替える。
+local function head_winbar_text(session, cur)
+  local refs = ('%s..%s'):format(session.base or '', session.head or '')
+  if cur.kind == 'no-changes' then
+    return refs .. ' · 変更なし'
+  end
+  if cur.kind == 'binary' then
+    return ('%s · %s · binary'):format(refs, cur.path)
+  end
+  if cur.kind == 'deleted' then
+    return ('%s · %s · deleted'):format(refs, cur.path)
+  end
+  return ('%s · %s · +%d -%d · %s'):format(
+    refs,
+    cur.path,
+    cur.file and cur.file.added or 0,
+    cur.file and cur.file.deleted or 0,
+    plural(comments_for(session, cur.path), 'comment')
+  )
+end
+
+local function base_winbar_text(cur)
+  if cur.kind == 'no-changes' then
+    return '変更なし'
+  end
+  if cur.kind == 'binary' then
+    return ('base · %s (binary)'):format(cur.path)
+  end
+  if cur.kind_base_null == true then
+    return ('base · %s (new file)'):format(cur.path)
+  end
+  return ('base · %s (git show)'):format(cur.path)
+end
+
+-- 集約先 (head バッファ) の無い outdated の件数 — panel winbar 末尾 `⚠N`
+-- (diff-review「窓装飾」/ persistence-restore「anchor 検証」)。告知窓ファイル
+-- (deleted / binary) と、いまの差分に現れないコメントファイル。差分まるごと
+-- 消滅開通は placeholder が全 outdated の集約先になるので 0。
+local function hidden_outdated_count()
+  if active == nil then
+    return 0
+  end
+  if active.current ~= nil and active.current.kind == 'no-changes' then
+    return 0
+  end
+  local n = 0
+  for _, c in ipairs(active.session.comments or {}) do
+    if c.state == 'outdated' then
+      local f = active.files_by_path[c.file]
+      if f == nil or f.status == 'D' or f.binary == true then
+        n = n + 1
+      end
+    end
+  end
+  return n
+end
+
+-- 3 窓の chrome 再適用 (render 直後の handlers 側再適用 — diff-review「窓装飾」。
+-- 窓 number は窓ローカル、winbar 文字列は w:review_winbar のみで持つ)。
+local function apply_chrome()
+  if active == nil then
+    return
+  end
+  local pw = ui_windows.win 'panel'
+  local bw = ui_windows.win 'base'
+  local hw = ui_windows.win 'head'
+  ui_chrome.window(pw)
+  ui_chrome.window(bw)
+  ui_chrome.window(hw)
+  if pw ~= nil and active.panel_buf ~= nil and vim.api.nvim_buf_is_valid(active.panel_buf) then
+    ui_chrome.winbar(
+      pw,
+      ui_list.sidebar_winbar(active.session, visible_files(), {
+        filter = sidebar_filter,
+        hidden_outdated = hidden_outdated_count(),
+      })
+    )
+  end
+  if active.current ~= nil then
+    if hw ~= nil then
+      ui_chrome.winbar(hw, head_winbar_text(active.session, active.current))
+    end
+    if bw ~= nil then
+      ui_chrome.winbar(bw, base_winbar_text(active.current))
+    end
   end
 end
 
---- `/`: sidebar 一覧を絞り込む。空入力 = 解除、キャンセル (Esc) = 現状維持。
+local function refresh_panel()
+  if active == nil then
+    return
+  end
+  active.panel_buf = ui_list.render_sidebar(active.session, visible_files())
+  ui_keygate.install(active.panel_buf)
+  active.owned_bufs[active.panel_buf] = true
+  ui_windows.set_panel_buf(active.panel_buf)
+  apply_chrome()
+end
+
+--- `/`: panel 一覧を絞り込む。空入力 = 解除、キャンセル (Esc) = 現状維持。
 --- 一致 0 件でも一覧は開いたまま (winbar に解除手順を出す)。
 function M.filter_sidebar()
   if active == nil then
@@ -487,272 +618,228 @@ function M.filter_sidebar()
       return
     end
     sidebar_filter = (text == '') and nil or text
-    refresh_sidebar()
+    refresh_panel()
   end)
 end
 
--- diff 役の窓を「有効 + 内容が diff らしい」に揃える。<C-w>o / :q で窓が側に
--- 消えるケースに加え、:buffer 等で**窓 id は生き残ったまま内容だけ差し替わる**
--- drift がある (UX review F1 の真因: id 実体だけ見て set_buf すると、sidebar を
--- 表示中の窓が diff に化けて一覧が失われ、1 窓 UI になる)。役割は window id で
--- なく実際に何を表示しているから導く。
-local function diff_win_ok()
-  local w = active.diff_win
-  if w == nil or not vim.api.nvim_win_is_valid(w) then
-    return false
+-- ============================================================================
+-- 窓へ張るバッファの解決 (head / base 窓の中身分岐) と開き直し破棄
+-- ============================================================================
+
+-- head 実ファイル / 縮退 scratch の基準 dir: branch = repo、PR = 自前 worktree。
+local function review_dir()
+  local wt = worktree_of(active.session)
+  if wt ~= nil and wt.created_by_us == true and dir_exists(wt.path) then
+    return wt.path
   end
-  local b = vim.api.nvim_win_get_buf(w)
-  if active.sidebar_buf ~= nil and b == active.sidebar_buf then
-    return false -- diff 役の顔に sidebar が乗っている = 役割がずれている
-  end
-  local name = vim.api.nvim_buf_get_name(b)
-  if name:match '^review://' ~= nil then
-    return true
-  end
-  -- 作りたての空窓 (直前の vsplit が確保した diff 役) はそのまま許容する。
-  -- ユーザー buffer が乗った窓 (内容あり or 名前あり) だけを drift とみなす。
-  local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
-  return name == ''
-    and vim.bo[b].buftype == ''
-    and (#lines == 0 or (#lines == 1 and lines[1] == ''))
+  return active.session.repo
 end
 
--- 実際に sidebar buf を見せている窓 (diff 役候補を優先的に除外して探す)
-local function sidebar_display_win(exclude)
-  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    if vim.api.nvim_win_get_buf(w) == active.sidebar_buf and w ~= exclude then
-      return w
-    end
-  end
-  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    if vim.api.nvim_win_get_buf(w) == active.sidebar_buf then
-      return w
-    end
-  end
-  return nil
+local function track_scratch(bufnr)
+  active.scratch_bufs[#active.scratch_bufs + 1] = bufnr
+  active.owned_bufs[bufnr] = true
+  ui_keygate.install(bufnr)
 end
 
-local function ensure_diff_win()
-  if diff_win_ok() then
+-- git show 充填の非同期コールバックが old open のものだった場合の破棄
+-- (高速 <CR> 連打 / close 後着。fill_token で世代管理)。
+local function fill_show(bufnr, ref, path, token)
+  git_ref.show_text({ ref = ref, path = path, cwd = review_dir() }, function(res)
+    if active == nil or active.fill_token ~= token then
+      return -- 開き直し済み / close 済み: 結果を捨てて窓の状態を守る
+    end
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    ui_scratchwin.set_content(bufnr, res.ok and res.data or {})
+  end)
+end
+
+-- base 窓 = git show <base>:<リゾルブ後 path> scratch。追加ファイル (A) は
+-- 0 行の review://null、rename は旧パスの中身、旧パス自体が新規なら git 失敗
+-- で null 相当 (空) になる (diff-review「head / base 窓の中身」)。
+local function open_base_scratch(cur, file, token)
+  local sid = active.session.id
+  if file ~= nil and file.status == 'A' then
+    cur.kind_base_null = true
+    cur.base_buf = ui_scratchwin.buffer { kind = 'null', session_id = sid, path = cur.path }
+    track_scratch(cur.base_buf)
     return
   end
-  local stale_dw = active.diff_win
-  local anchor_win = nil
-  if active.sidebar_buf ~= nil and vim.api.nvim_buf_is_valid(active.sidebar_buf) then
-    anchor_win = sidebar_display_win(stale_dw)
-    if anchor_win ~= nil then
-      -- 役割を実在窓へ再紐付け (以後の refresh_sidebar も正しい窓を打つ)
-      active.sidebar_win = anchor_win
-    end
-  end
-  if anchor_win == nil then
-    if stale_dw ~= nil and vim.api.nvim_win_is_valid(stale_dw) then
-      anchor_win = stale_dw
-    elseif active.sidebar_win ~= nil and vim.api.nvim_win_is_valid(active.sidebar_win) then
-      anchor_win = active.sidebar_win
-    else
-      anchor_win = vim.api.nvim_get_current_win()
-    end
-  end
-  vim.api.nvim_set_current_win(anchor_win)
-  vim.cmd 'vsplit'
-  -- 新窓は splitleft/splitright の設定次第で左右どちらにも出るので、設計どおり
-  -- 「sidebar 左 / diff (再建窓) 右」へ寄せる (UX review: ユーザー環境で一覧が右に
-  -- 出て視線移動が GitHub Files changed と逆になった)
-  vim.cmd 'wincmd L'
-  active.diff_win = vim.api.nvim_get_current_win()
+  cur.base_buf = ui_scratchwin.buffer { kind = 'base', session_id = sid, path = cur.path }
+  -- 窓の中身表 «filetype detect» (内容と同じ名前の path から判定)。null (追加) は
+  -- 0 行なので detect しない。告知窓 (deleted/binary) も告知 1 行のまま。
+  ui_scratchwin.detect_filetype(cur.base_buf, cur.path)
+  track_scratch(cur.base_buf)
+  local base_path = (file ~= nil and file.old_path) or cur.path
+  fill_show(cur.base_buf, active.session.base, base_path, token)
 end
 
--- skip_ensure: open_session_ui 専用 (直前に vsplit で diff 役を確保済み)。
--- vsplit は現窓の buffer を継承するため、中身のある窓が起点だと new 窓も同じ
--- buffer を持ってしまい、drift 判定が二重 split する (開通時は窓の存在自体が
--- 保証されているので判定を迂回する)。
-local function render_diff_file(path, skip_ensure)
-  if not skip_ensure then
-    ensure_diff_win()
+-- head 実ファイル窓: 同名バッファがあれば再利用 (ユーザーが自分の窓で開いて
+-- いても同一バッファ)、無ければ bufadd + bufload (:edit 相当。窓を作らずに
+-- buffer だけ用意し、窓への掲示は windows.bind の set_buf に一本化する =
+-- 「窓を作ってから set_buf」契約)。filetype / LSP は BufRead 系の標準経路。
+local function open_head_real(full)
+  local existing = vim.fn.bufnr(full)
+  if existing ~= -1 and vim.api.nvim_buf_is_valid(existing) then
+    -- 再利用分岐でも張込と所有登録は必須 (窓の中身表 «既にユーザーが開いていれば
+    -- 同一バッファを再利用» は「中身が同じ」だけで「head 窓のキーが効く」ではない —
+    -- 張込を飛ばすと c/e/d/y/i/o/q が全滅)。張込は冪等 (自前マップは衝突と数えない /
+    -- install_one は同 rhs 再設定)、所有登録で close / tab 消滅の uninstall が
+    -- ユーザーバッファに残骸 0 契約として届くようになる。
+    active.owned_bufs[existing] = true
+    ui_keygate.install(existing)
+    return existing
   end
-  if path == nil then
-    -- 復元時に差分がまるごと消滅し、しかもコメント由来の消失ファイルも無いとき
-    -- 右ペインは「変更なし」プレースホルダを開く (persistence-restore.md、開くことを拒否しない)。
-    local buf = ui_diffbuffer.render_no_changes(active.session, { winid = active.diff_win })
-    active.diff_bufs[ui_diffbuffer.NO_DIFF_PATH] = buf
-    vim.api.nvim_win_set_buf(active.diff_win, buf)
-    ui_chrome.window(active.diff_win)
-    return buf
-  end
-  local file = active.files_by_path[path]
-    or { path = path, status = 'M', binary = false, added = 0, deleted = 0, hunks = {} }
-  local buf = ui_diffbuffer.render(active.session, file, { winid = active.diff_win })
-  active.diff_bufs[path] = buf
-  vim.api.nvim_win_set_buf(active.diff_win, buf)
-  -- render 後も diff 窓が差し替わる経路 (drift 再 split 等) があるため、buf を
-  -- 当てたこの時点で chrome を確実に適用する (set_buf する側が窓の装飾も持つ)。
-  ui_chrome.window(active.diff_win)
+  local buf = vim.fn.bufadd(full)
+  pcall(vim.fn.bufload, buf)
+  active.owned_bufs[buf] = true
+  ui_keygate.install(buf)
   return buf
 end
 
--- 開通時に review UI 由緒でない「空の [No Name] 窓」を回収する (UX review F1:
--- list 経由の再開で余剰の空窓がレイアウトに残って迷う症状)。条件は厳しく
--- (無名・buftype 空・modifiable・中身空行・review meta なし・レビュー 2 窓以外)
--- して、内容のある窓や review:// 窓には触れない。
-local function sweep_empty_wins()
-  local keep = { [active.sidebar_win] = true, [active.diff_win] = true }
-  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    if vim.api.nvim_win_is_valid(w) and not keep[w] then
-      local b = vim.api.nvim_win_get_buf(w)
-      local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
-      local empty = #lines == 0 or (#lines == 1 and lines[1] == '')
-      if
-        vim.api.nvim_buf_get_name(b) == ''
-        and vim.bo[b].buftype == ''
-        and vim.bo[b].modifiable
-        and empty
-        and vim.b[b].review_meta == nil
-      then
-        pcall(vim.api.nvim_win_close, w, false)
+--- 移動系 (panel <CR> / panel o 以外の開く導線・]d [d・開始/復元時の初期開き) が
+--- 必ず通る単一经路 (diff-review「open_file(path)」)。種別解決 → 窓に base/head を
+--- 張り、chrome 再適用、viewed=true、save、panel 再描画、コメント extmark 再適用。
+local function resolve_and_open(path)
+  if active == nil then
+    return
+  end
+  local session = active.session
+  local cur = { path = path }
+  active.fill_token = active.fill_token + 1
+  local token = active.fill_token
+  local file = active.files_by_path[path]
+  cur.file = file
+
+  if path == M.NO_CHANGES then
+    cur.kind = 'no-changes'
+    local buf = ui_scratchwin.buffer { kind = 'base', session_id = session.id, path = path }
+    ui_scratchwin.set_content(buf, { '変更なし' })
+    track_scratch(buf)
+    cur.base_buf = buf
+    cur.head_buf = buf
+    ui_windows.bind(buf, buf, { diffoff = 'both' })
+    active.current = cur
+    -- 張り先が無い outdated (全ファイル消滅) は placeholder に集約する
+    ui_commentmarks.clear_tracked()
+    ui_commentmarks.apply(session, buf, M.NO_CHANGES)
+    apply_chrome()
+    return
+  end
+
+  -- 種別の解決 (head 側 → base 側の順。「head / base 窓の中身」表)
+  if file ~= nil and file.binary == true then
+    cur.kind = 'binary'
+    local buf = ui_scratchwin.buffer { kind = 'binary', session_id = session.id, path = path }
+    ui_scratchwin.set_content(buf, ui_scratchwin.NOTIFY.binary)
+    track_scratch(buf)
+    cur.base_buf = buf
+    cur.head_buf = buf
+    ui_windows.bind(buf, buf, { diffoff = 'both' })
+  elseif file ~= nil and file.status == 'D' then
+    -- 削除: head 窓に告知 scratch + diffoff (:edit 不可 — DESIGN「既知の制約」)。
+    cur.kind = 'deleted'
+    local hb = ui_scratchwin.buffer { kind = 'deleted', session_id = session.id, path = path }
+    ui_scratchwin.set_content(hb, ui_scratchwin.NOTIFY.deleted)
+    track_scratch(hb)
+    cur.head_buf = hb
+    open_base_scratch(cur, file, token)
+    ui_windows.bind(cur.base_buf, hb, { diffoff = 'head' })
+  else
+    open_base_scratch(cur, file, token)
+    if active.degraded then
+      -- scratch 縮退: head も git show <head>:<path> の読み取り専用 scratch。
+      cur.kind = 'degraded'
+      local hb = ui_scratchwin.buffer { kind = 'head', session_id = session.id, path = path }
+      ui_scratchwin.detect_filetype(hb, path)
+      track_scratch(hb)
+      cur.head_buf = hb
+      fill_show(hb, session.head, path, token)
+      ui_windows.bind(cur.base_buf, hb)
+    else
+      local full = vim.fs.joinpath(review_dir(), path)
+      if vim.uv.fs_stat(full) == nil then
+        -- head 解決後は通常実在するが、外部で消された場合のみ告知窓へ倒す
+        -- (:edit すると :w で空ファイルが復活する経路を作らない — 削除と同型)。
+        cur.kind = 'deleted'
+        local hb = ui_scratchwin.buffer { kind = 'deleted', session_id = session.id, path = path }
+        ui_scratchwin.set_content(hb, ui_scratchwin.NOTIFY.deleted)
+        track_scratch(hb)
+        cur.head_buf = hb
+        ui_windows.bind(cur.base_buf, hb, { diffoff = 'head' })
+      else
+        cur.kind = 'real'
+        cur.head_buf = open_head_real(full)
+        ui_windows.bind(cur.base_buf, cur.head_buf, { head_kind = 'real' })
       end
     end
   end
+
+  active.current = cur
+
+  -- extmark 再適用: 常に session から捨てて再構成。「同一バッファの全窓に
+  -- スレッドが見える」仕様なので掃除済み残骸の再適用のみここで行う
+  -- (ui/commentmarks が張った全バッファを tracking し、close / 切替で clear)。
+  ui_commentmarks.clear_tracked()
+  if cur.kind == 'real' or cur.kind == 'degraded' or cur.kind == 'no-changes' then
+    ui_commentmarks.apply(active.session, cur.head_buf, path)
+  end
+
+  -- viewed=true + save + panel 再描画 (移動系すべてで同一。「既読」状態の更新)。
+  local entry = session.files[path]
+  if entry == nil then
+    entry = { viewed = false }
+    session.files[path] = entry
+  end
+  entry.viewed = true
+  refresh_panel()
+  persist() -- INV-4: viewed 更新の直後 (open_file 共通処理)
+  apply_chrome()
 end
 
-local function open_session_ui()
-  active.sidebar_buf =
-    ui_list.render_sidebar(active.session, active.file_order_sorted, { filter = sidebar_filter })
-  local sw = vim.api.nvim_get_current_win()
-  -- 先に vsplit して diff 役の窓 ([No Name] のまま) を確保し、その後に sidebar を
-  -- 流し込む。set_buf から先に入れると vsplit の新窓が sidebar buf を継承して
-  -- [No Name] でなくなり、ensure_diff_win の drift 判定が再 split して余剰窓が
-  -- 残る (UX review F1 の「余剰の空窓」の正体)。
-  vim.cmd 'vsplit'
-  vim.cmd 'wincmd L' -- sidebar 左 / diff 右を splitright 設定に依らせない
-  active.diff_win = vim.api.nvim_get_current_win()
-  active.sidebar_win = sw
-  vim.api.nvim_win_set_buf(active.sidebar_win, active.sidebar_buf)
-  pcall(vim.api.nvim_win_set_width, active.sidebar_win, 30)
-  ui_chrome.window(active.sidebar_win)
-  -- 「右ペインには一覧の先頭ファイルの diff を開く」= 一覧はパス昇順なので
-  -- sorted 先頭を使う (core/diff の parse 出現順ではない)。
-  -- sorted が空 = 差分消滅復元で消失ファイルですらない (nil -> プレースホルダ)。
-  local first = active.file_order_sorted[1]
-  render_diff_file(first and first.path or nil, true)
-  sweep_empty_wins()
+--- panel 外導線 (open_selected_file / ]d / [d / API) 共通の open_file。
+--- active が無いか path が現差分に一覧化されていない場合は WARN/no-op。
+function M.open_file(path)
+  if active == nil then
+    notify_warn 'アクティブなセッションがありません'
+    return
+  end
+  if path == nil or (active.files_by_path[path] == nil and active.session.files[path] == nil) then
+    return
+  end
+  resolve_and_open(path)
 end
 
--- 直近 parse (new 側) 差分 files からファイル状態を組み替える: files_by_path /
--- file_order / session.files (viewed とコメント由来の消失ファイルを保持) /
--- sidebar 昇順一覧。anchor 検証と「差分がまるごと消滅 -> 全コメント outdated」は
--- text_map 経路ここだけ (persistence-restore「anchor 検証」= 復元とリフレッシュで
--- 同一。開始 / 復元 / リフレッシュの 3 経路で規則を重複させない)。
--- session.files を更新し、(files_by_path, file_order, sorted) を返す。
-local function build_file_state(session, files)
-  local files_by_path = {}
-  local file_order = {}
-  for _, file in ipairs(files) do
-    files_by_path[file.path] = file
-    file_order[#file_order + 1] = file.path
-  end
-  anchor.verify(session.comments, files_by_path)
-  if #files == 0 then
-    -- 「差分がまるごと消滅」: 再取得差分が 0 ファイルなら anchor 照合の余地が
-    -- 無いので全コメントを outdated 化する (persistence-restore.md。anchor 欠損
-    -- で検証スキップの active を残さない)。
-    for _, comment in ipairs(session.comments) do
-      comment.state = 'outdated'
-    end
-  end
+-- ============================================================================
+-- review tab の消滅経路 (b): ユーザーが :tabclose / :tabonly 等で直接閉じる
+-- ============================================================================
 
-  -- files = 差分に出る全ファイル + コメントを持つ消失ファイル (outdated 表示先)。
-  local old_files = session.files or {}
-  local new_files = {}
-  for _, path in ipairs(file_order) do
-    local old = old_files[path]
-    new_files[path] = { viewed = old ~= nil and old.viewed or false }
+-- close と違い status=open を維持したまま save し、UI 側掃除 (extmark /
+-- キー) だけ行う (diff-review「review tab の消滅経路」。契約化された close で
+-- ある q / :Review close は finish_close 側)。worktree には触らない。
+local function on_review_tab_closed()
+  local current = active
+  if current == nil then
+    return
   end
-  for _, comment in ipairs(session.comments) do
-    if new_files[comment.file] == nil then
-      local old = old_files[comment.file]
-      new_files[comment.file] = { viewed = old ~= nil and old.viewed or false }
-    end
-  end
-  session.files = new_files
-
-  local sorted = {}
-  for _, file in ipairs(files) do
-    sorted[#sorted + 1] = file
-  end
-  for path in pairs(new_files) do
-    if files_by_path[path] == nil then
-      sorted[#sorted + 1] = {
-        path = path,
-        status = 'M',
-        binary = false,
-        added = 0,
-        deleted = 0,
-        hunks = {},
-        -- 今回の差分に現れない消失ファイル (outdated コメントの表示先)。
-        -- diff バッファは「変更なし」を描画する。
-        vanished = true,
-      }
-      files_by_path[path] = sorted[#sorted]
-    end
-  end
-  -- 一覧の先頭 = 右ペイン既定のファイルなので、pairs 順のまま繋ぐと復元経路だけ順序が揺れる。
-  table.sort(sorted, function(a, b)
-    return a.path < b.path
-  end)
-  return files_by_path, file_order, sorted
-end
-
--- args = { repo, id, mode, base, head, pr, info?, degraded? } (pr-worktree.md
--- 「PR 解決」3 の開始時に handler が組み立てる)。worktree は解決済み値
--- (記録 | vim.NIL) を受ける。degraded = head 解決の scratch 縮退解 (リフレッシュの
--- 再取得引数形を開始時解決と一致させるため active に保持する。session JSON には
--- 載せない — 復元時に head 解決フローを毎回再評価する)。
-local function begin_session(args, files, existing, worktree)
-  local session = existing
-  if session == nil then
-    session = {
-      id = args.id,
-      repo = args.repo,
-      mode = args.mode,
-      base = args.base,
-      head = args.head,
-      pr = args.pr or vim.NIL,
-      worktree = vim.NIL,
-      status = 'open',
-      files = {},
-      comments = {},
-      created_at = now(),
-    }
-  end
-  session.status = 'open'
-  -- 作成判断の解を毎回上書き (crash 後の記録陳腐化を許さない — pr-worktree.md 異常終了回復)。
-  session.worktree = worktree
-
-  local files_by_path, file_order, sorted = build_file_state(session, files)
-
-  -- 開き直し = 全一覧が正しい (前回の絞り込みを持ち込まない)
+  active = nil
   sidebar_filter = nil
-  reset_refresh_state()
-  active = {
-    session = session,
-    files_by_path = files_by_path,
-    file_order = file_order,
-    file_order_sorted = sorted,
-    degraded = args.degraded == true,
-    -- リフレッシュ時 head commit 比較の INFO を 1 回に抑えるラッチ (セッション別)
-    head_info_shown = false,
-    sidebar_buf = nil,
-    sidebar_win = nil,
-    diff_win = nil,
-    diff_bufs = {},
-  }
-  persist()
-  open_session_ui()
-  if args.info ~= nil then
-    -- PR タイトルは開始時 INFO のみ (セッションに永続化しない — pr-worktree.md)。
-    vim.notify('review.nvim: ' .. args.info, vim.log.levels.INFO)
+  ui_commentmarks.clear_tracked()
+  for buf in pairs(current.owned_bufs) do
+    ui_keygate.uninstall(buf)
   end
+  -- 開いていた窓は消えている (tab 全体)。scratch buffer は hide 状態で残るが、
+  -- 開き直し時に同一名的のまま中身再充填るので残置 (セッション open のまま、が
+  -- 定義)。extmark だけ実ファイル窓から確実に消す (上の clear_tracked)。
+  local res = store.save(current.session)
+  if not res.ok then
+    notify_warn(res.error)
+  end
+  vim.notify(
+    'review.nvim: レビュー tab を閉じました (セッションは保存済み・`:Review` で開き直し可)',
+    vim.log.levels.INFO
+  )
 end
 
 -- ============================================================================
@@ -760,8 +847,7 @@ end
 -- HEAD と違うとき」/ docs/design/features/diff-review.md「入出力と振る舞い」2)
 -- ============================================================================
 
--- 縮退の確定文言 (diff-review「開始」2 «…» の通り。UI に触れないこの issue でも
--- 通知では確定形を使う)。
+-- 縮退の確定文言 (diff-review「開始」2 «…» の通り)。
 local DEGRADED_INFO =
   'head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします'
 
@@ -967,17 +1053,7 @@ local function fetch_and_begin(args, existing)
       end
       return
     end
-    begin_session({
-      repo = args.repo,
-      id = args.id,
-      mode = args.mode,
-      base = args.base,
-      head = args.head,
-      pr = args.pr,
-      info = args.info,
-      -- リフレッシュの再取得引数形を開始時解決に一致させる解 (active に保持)
-      degraded = res.data.degraded == true,
-    }, res.data.files, existing, res.data.worktree)
+    begin_session(args, res.data.files, existing, res.data.worktree, res.data.degraded)
   end)
 end
 
@@ -1109,7 +1185,7 @@ function M.start(opts)
         notify_warn(res.error)
         return
       end
-      -- detached HEAD は literal "HEAD" がそのまま返る (保存後も同じ解決経路で复原可)
+      -- detached HEAD は literal "HEAD" がそのまま返る (保存後も同じ解決経路で復元可)
       start_with(res.data)
     end)
   end)
@@ -1144,7 +1220,8 @@ function M.close()
   return result.ok()
 end
 
---- diff / sidebar の q キー。:Review close と同一。
+--- head/base/panel 窓の q キー。:Review close と同一 (tab を閉じる。ユーザー窓・
+--- 開いたままの実ファイルバッファ (modified を含む) は消さない)。
 function M.close_by_key()
   local res = M.close()
   if not res.ok then
@@ -1261,7 +1338,148 @@ function M.delete(id)
   return result.ok()
 end
 
---- sidebar <CR>: 右ペインをそのファイルの diff に差し替え、viewed=true + save。
+-- ============================================================================
+-- セッション組み立てと UI 開通
+-- ============================================================================
+
+-- 直近 parse (new 側) 差分 files からファイル状態を組み替える: files_by_path /
+-- file_order / session.files / sidebar 昇順一覧。anchor 検証と「差分がまるごと
+-- 消滅 -> 全コメント outdated」は text_map 経路ここだけ (persistence-restore
+-- 「anchor 検証」= 開始 / 復元 / リフレッシュで同一。規則を 3 経路に重複させない)。
+-- session.files を更新し、(files_by_path, file_order, sorted) を返す。
+local function build_file_state(session, files)
+  local files_by_path = {}
+  local file_order = {}
+  for _, file in ipairs(files) do
+    files_by_path[file.path] = file
+    file_order[#file_order + 1] = file.path
+  end
+  anchor.verify(session.comments, files_by_path)
+  if #files == 0 then
+    -- 「差分がまるごと消滅」: 再取得差分が 0 ファイルなら anchor 照合の余地が
+    -- 無いので全コメントを outdated 化する (persistence-restore.md。anchor 欠損
+    -- で検証スキップの active を残さない)。
+    for _, comment in ipairs(session.comments) do
+      comment.state = 'outdated'
+    end
+  end
+
+  -- files = 差分に出る全ファイル (DESIGN.md「データスキーマ」)。再取得で消えた
+  -- コメント付きファイルは map にも一覧にも合成行を作らない: window diff の
+  -- 張り先が無いファイルの outdated は panel winbar 末尾 ⚠N とプロンプト除外
+  -- INFO で可視化する (persistence-restore「anchor 検証」「差分がまるごと消滅」。
+  -- 合成 scratch kind を review:// 契約 (base/head/null/deleted/binary) に足さない)。
+  local old_files = session.files or {}
+  local new_files = {}
+  for _, path in ipairs(file_order) do
+    local old = old_files[path]
+    new_files[path] = { viewed = old ~= nil and old.viewed or false }
+  end
+  session.files = new_files
+
+  local sorted = {}
+  for _, file in ipairs(files) do
+    sorted[#sorted + 1] = file
+  end
+  -- 一覧の先頭 = 初期開きファイルなので、pairs 順のまま繋ぐと復元経路だけ順序が揺れる。
+  table.sort(sorted, function(a, b)
+    return a.path < b.path
+  end)
+  return files_by_path, file_order, sorted
+end
+
+-- begin_session: diff パース結果からセッションを組み立て UI を開く。
+-- args = { repo, id, mode, base, head, pr, info? } (pr-worktree.md「PR 解決」3 の
+-- 開始時に handler が組み立てる)。worktree は解決済み値 (記録 | vim.NIL)、
+-- degraded は head 解決フローの解 (scratch 縮退時 true。リフレッシュの再取得
+-- 引数形を開始時解決と一致させるため active に保持する。session JSON には
+-- 載せない — 復元時に head 解決フローを毎回再評価する)。
+begin_session = function(args, files, existing, worktree, degraded)
+  local session = existing
+  if session == nil then
+    session = {
+      id = args.id,
+      repo = args.repo,
+      mode = args.mode,
+      base = args.base,
+      head = args.head,
+      pr = args.pr or vim.NIL,
+      worktree = vim.NIL,
+      status = 'open',
+      files = {},
+      comments = {},
+      created_at = now(),
+    }
+  end
+  session.status = 'open'
+  -- 作成判断の解を毎回上書き (crash 後の記録陳腐化を許さない — pr-worktree.md 異常終了回復)。
+  session.worktree = worktree
+
+  local files_by_path, file_order, sorted = build_file_state(session, files)
+
+  -- 開き直し = 全一覧が正しい (前回の絞り込みを持ち込まない)
+  sidebar_filter = nil
+  reset_refresh_state()
+  active = {
+    session = session,
+    files_by_path = files_by_path,
+    file_order = file_order,
+    file_order_sorted = sorted,
+    panel_buf = nil,
+    current = nil,
+    degraded = degraded == true,
+    -- リフレッシュ時 head commit 比較の INFO を 1 回に抑えるラッチ (セッション別)
+    head_info_shown = false,
+    fill_token = 0,
+    owned_bufs = {},
+    scratch_bufs = {},
+  }
+  persist()
+  open_session_ui()
+  if args.info ~= nil then
+    -- PR タイトルは開始時 INFO のみ (セッションに永続化しない — pr-worktree.md)。
+    vim.notify('review.nvim: ' .. args.info, vim.log.levels.INFO)
+  end
+end
+
+open_session_ui = function()
+  active.panel_buf = ui_list.render_sidebar(active.session, active.file_order_sorted)
+  ui_keygate.install(active.panel_buf)
+  active.owned_bufs[active.panel_buf] = true
+  -- vsplit 継承 drift 回避と tcd は windows.open 内 (レビュー 3 窓を作ってから
+  -- 内容を張る順序契約)。focus は head 窓で開始する。
+  ui_windows.open { dir = review_dir(), on_tab_closed = on_review_tab_closed }
+  ui_windows.set_panel_buf(active.panel_buf)
+  local first = active.file_order_sorted[1]
+  -- 「一覧先頭ファイルの open_file」(セッション開始時の初期開き)。files が
+  -- 空 (復元で差分消滅) は NO_CHANGES プレースホルダを開く。
+  resolve_and_open((first and first.path) or M.NO_CHANGES)
+  ui_windows.sweep()
+end
+
+--- 読み込み済みセッションを new 側差分とともに開始処理へ引き継ぐ (restore ルート:
+--- anchor 検証 -> files map 再構築 -> UI -> open save)。worktree の解決は
+--- fetch_prepared 側で済んでいるため、解 (記録 | vim.NIL) を受ける。
+--- 復元時の head 解決 (switch 提案 / scratch 縮退) も fetch_prepared が走る
+--- (DESIGN.md 決定表「起動時復元」)。
+function M.resume_into(session, files, worktree, degraded)
+  begin_session({
+    repo = session.repo,
+    id = session.id,
+    mode = session.mode,
+    base = session.base,
+    head = session.head,
+    pr = session.pr,
+  }, files, session, worktree, degraded)
+end
+
+-- ============================================================================
+-- panel 操作と移動系 (c/e/d/y/i/o/q/R の導線は ui/keygate 経由。R は別 issue)
+-- ============================================================================
+
+--- panel <CR>: 一覧のそのファイルを open_file (移動系と同一処理)。focus は
+--- windows.bind が head 窓へ送る (sidebar に残ったままだと以降の c/e が
+--- 一覧側に効かず無反応に見える — UX review F12)。
 function M.open_selected_file()
   if active == nil then
     notify_warn 'アクティブなセッションがありません'
@@ -1278,73 +1496,32 @@ function M.open_selected_file()
   if path == nil then
     return
   end
-  local entry = active.session.files[path]
-  if entry == nil then
-    entry = { viewed = false }
-    active.session.files[path] = entry
-  end
-  entry.viewed = true
-  render_diff_file(path)
-  -- 「そのファイルの diff へ移動」の語感どおり focus を diff へ送る。
-  -- sidebar に残ったままだと直後の c/e/y が一覧側に該当作用を持たず無反応に
-  -- 見える (UX review F12)。
-  vim.api.nvim_set_current_win(active.diff_win)
-  persist()
-  refresh_sidebar()
+  M.open_file(path)
 end
 
---- コメント CRUD 直後の再永続化 + 表示更新 (INV-4、diff-review「右ペインは
---- 状態から再構成」)。開いている diff バッファのみ再 render する。
+--- コメント CRUD 直後の再永続化 + 表示更新 (INV-4、diff-review「コメント表示」
+--- 再構成契約)。head 窓 extmark と winbar 件数、panel winbar を更新する。
+--- 開いている head 窓が無い / 告知窓なら save と panel winbar のみ。
 function M.commit_comment_change()
   if active == nil then
     return
   end
   persist()
-  for path, buf in pairs(active.diff_bufs) do
-    if vim.api.nvim_buf_is_valid(buf) and #vim.fn.win_findbuf(buf) > 0 then
-      if path == ui_diffbuffer.NO_DIFF_PATH then
-        ui_diffbuffer.render_no_changes(active.session)
-      else
-        local file = active.files_by_path[path]
-          or { path = path, status = 'M', binary = false, added = 0, deleted = 0, hunks = {} }
-        ui_diffbuffer.render(active.session, file, {})
-      end
+  if active.current ~= nil then
+    ui_commentmarks.clear_tracked()
+    if active.current.kind == 'real' or active.current.kind == 'degraded' then
+      ui_commentmarks.apply(active.session, active.current.head_buf, active.current.path)
     end
   end
+  apply_chrome()
 end
 
---- 読み込み済みセッションを new 側差分とともに開始処理へ引き継ぐ (restore ルート:
---- anchor 検証 -> files map 再構築 -> UI -> open save)。worktree の解決は
---- fetch_prepared 側で済んでいるため、解 (記録 | vim.NIL) を受ける。
---- 復元時の head 解決 (switch 提案 / scratch 縮退) も fetch_prepared が走る
---- (DESIGN.md 決定表「起動時復元」)。degraded = その解で決まった縮退フラグ
---- (リフレッシュの再取得引数形を開始時解決に一致させる)。
-function M.resume_into(session, files, worktree, degraded)
-  begin_session({
-    repo = session.repo,
-    id = session.id,
-    mode = session.mode,
-    base = session.base,
-    head = session.head,
-    pr = session.pr,
-    degraded = degraded == true,
-  }, files, session, worktree)
+local function current_path()
+  return active ~= nil and active.current ~= nil and active.current.path or nil
 end
 
--- 現在 diff バッファの path (meta.kind=diff のとき)。NO_DIFF プレースホルダは
--- 一覧に無いので「先頭扱い」の根拠に使う。
-local function current_diff_path()
-  local meta = vim.b[vim.api.nvim_get_current_buf()].review_meta or {}
-  if meta.kind == 'diff' then
-    return meta.path
-  end
-  return nil
-end
-
--- ]d / [d: 一覧 (パス昇順) を辿って右ペインのファイルを進める/戻す。
--- 処理は sidebar <CR> と同一 (viewed=true + save + 再描画)。focus は diff 窓に
--- 留まる (キーを押している場所が diff なので移動先も diff = [c/]c と同じ感覚)。
--- 端では何もしない (]c が最終 hunk で止まる標準と同じ)。
+-- ]d / [d: 一覧 (パス昇順) を辿って head/base ペアを進める/戻す (端は無動作)。
+-- 処理は panel <CR> と同一 open_file。
 local function step_file(delta)
   if active == nil then
     return
@@ -1356,7 +1533,7 @@ local function step_file(delta)
   if #order == 0 then
     return
   end
-  local cur = current_diff_path()
+  local cur = current_path()
   local idx = 0
   for i, p in ipairs(order) do
     if p == cur then
@@ -1368,16 +1545,7 @@ local function step_file(delta)
   if ni < 1 or ni > #order then
     return
   end
-  local path = order[ni]
-  local entry = active.session.files[path]
-  if entry == nil then
-    entry = { viewed = false }
-    active.session.files[path] = entry
-  end
-  entry.viewed = true
-  render_diff_file(path)
-  persist()
-  refresh_sidebar()
+  M.open_file(order[ni])
 end
 
 --- `]d`: 次のファイルへ。
@@ -1390,52 +1558,42 @@ function M.prev_file()
   step_file(-1)
 end
 
---- `S`: sidebar (変更ファイル一覧) へ focus を移す。一覧窓が側から閉じられて
---- いた場合は diff 窓の隣 (左) に再建する (回線の向きは設計どおり sidebar 左)。
+--- `S` / `<leader>e`: panel へ focus を移す。窓が閉じられていた場合は左に再建し
+--- render し直す (sidebar buf は bufhidden=wipe で表示窓と共に消える — AGENTS)。
 function M.focus_sidebar()
   if active == nil then
     return
   end
-  -- sidebar buf は scratch (bufhidden=wipe) で、表示窓が閉じられると消える
-  -- (only / :bdelete 経由)。その場合は状態から描き直して作り直す。
-  if active.sidebar_buf == nil or not vim.api.nvim_buf_is_valid(active.sidebar_buf) then
-    active.sidebar_buf =
-      ui_list.render_sidebar(active.session, visible_files(), { filter = sidebar_filter })
-    active.sidebar_win = nil
+  if active.panel_buf == nil or not vim.api.nvim_buf_is_valid(active.panel_buf) then
+    active.panel_buf = nil
+    local buf = ui_list.render_sidebar(active.session, visible_files())
+    ui_keygate.install(buf)
+    active.owned_bufs[buf] = true
+    active.panel_buf = buf
+    active.scratch_bufs[#active.scratch_bufs + 1] = buf
   end
-  local sw = nil
-  if active.sidebar_win ~= nil and vim.api.nvim_win_is_valid(active.sidebar_win) then
-    sw = active.sidebar_win
-  end
-  local shows_sb = sw ~= nil and vim.api.nvim_win_get_buf(sw) == active.sidebar_buf
-  if not shows_sb then
-    sw = sidebar_display_win(nil)
-    shows_sb = sw ~= nil
-  end
-  if shows_sb then
-    active.sidebar_win = sw
-    vim.api.nvim_set_current_win(sw)
-    return
-  end
-  local sb_anchor
-  if active.diff_win ~= nil and vim.api.nvim_win_is_valid(active.diff_win) then
-    sb_anchor = active.diff_win
-  else
-    sb_anchor = vim.api.nvim_get_current_win()
-  end
-  vim.api.nvim_set_current_win(sb_anchor)
-  vim.cmd 'vsplit'
-  vim.cmd 'wincmd H'
-  active.sidebar_win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(active.sidebar_win, active.sidebar_buf)
-  pcall(vim.api.nvim_win_set_width, active.sidebar_win, 30)
-  ui_chrome.window(active.sidebar_win)
+  ui_windows.show_panel(active.panel_buf)
+  apply_chrome()
 end
 
---- `o`: 現在バッファ (diff / sidebar) に行っているファイルの実体を開く。
---- worktree あり = worktree 基準の実ファイル (編集可) / なし = git show read-only
---- (ui/fileview)。削除ファイルと diff 削除行 (new 側に無い) はコンテキストへ
---- 寄せず WARN (pr-worktree.md「実ファイル参照」)。
+--- `<leader>b`: panel 表示トグル (panel を閉じても tab とレビュー窓は残る)。
+--- 開いていれば窓を閉じる、無ければ再建して focus (diff-review「操作」表)。
+function M.toggle_panel()
+  if active == nil then
+    return
+  end
+  if ui_windows.win 'panel' ~= nil then
+    ui_windows.hide_panel()
+    return
+  end
+  M.focus_sidebar()
+end
+
+--- 実ファイル参照 `o` (`o` の現窓解決: panel 行 or head/base 窓 = current_path)。
+--- 前行儀 tab で repo/worktree 基準の実ファイルを開く (ui/fileview)。削除ファイルは
+--- WARN (pr-worktree「実ファイル参照」)。scratch 縮退時は現在のチェックアウトの
+--- 実ファイルである旨を INFO。checkout 側に無いファイルは fileview が git show
+--- read-only へ倒す。
 function M.open_file_current()
   if active == nil then
     notify_warn 'アクティブなセッションがありません'
@@ -1444,23 +1602,16 @@ function M.open_file_current()
   local win = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_win_get_buf(win)
   local meta = vim.b[buf].review_meta or {}
-  local path
-  local row = vim.api.nvim_win_get_cursor(win)[1]
-  if meta.kind == 'diff' then
-    path = meta.path
-    -- その行が new 側に無い (削除行) = 対応するファイル行が存在しない。
-    -- コンテキストへ寄せず WARN (pr-worktree.md「実ファイル参照」)。
-    if ui_diffbuffer.row_is_deleted(buf, row) then
-      notify_warn '削除行の上のためファイルを開けません (new 側に該当行がありません)'
+  local path = current_path()
+  if meta.kind == 'sidebar' then
+    local row = vim.api.nvim_win_get_cursor(win)[1]
+    path = ui_list.row_file(buf, row)
+    if path == nil then
       return
     end
-  elseif meta.kind == 'sidebar' then
-    path = ui_list.row_file(buf, row)
-  else
-    notify_warn 'diff / sidebar バッファではありません'
-    return
   end
   if path == nil then
+    notify_warn '対象ファイルが解決できません'
     return
   end
   local file = active.files_by_path[path]
@@ -1468,23 +1619,26 @@ function M.open_file_current()
     notify_warn(('削除ファイル %s は開けません'):format(path))
     return
   end
+  if active.degraded then
+    vim.notify(
+      ('review.nvim: %s は現在のチェックアウトの実ファイルです (head の状態は縮退中)'):format(
+        path
+      ),
+      vim.log.levels.INFO
+    )
+  end
   local wt = worktree_of(active.session)
   ui_fileview.open({
     repo = active.session.repo,
     head = active.session.head,
     id = active.session.id,
     path = path,
-    win = win,
-    -- worktree ありなら worktree 基準の実ファイル (編集可)。記録があっても
-    -- dir が無い場合は従来経路 (git show) に倒すと古い head 内容を取り違えるため
-    -- fileview 側の stat 失敗として WARN 通知になる。
     worktree = wt ~= nil and wt.path or nil,
-    -- read-only 参照窓だけ winbar 文言を出す (編集可の窓はユーザーのファイル)。
-    winbar = wt == nil and ('%s..%s · %s · read-only (git show)'):format(
+    winbar = ('%s..%s · %s · read-only (git show)'):format(
       active.session.base or '',
       active.session.head or '',
       path
-    ) or nil,
+    ),
   }, function(err)
     if err ~= nil then
       notify_warn(err.error)
@@ -1492,7 +1646,7 @@ function M.open_file_current()
   end)
 end
 
---- sidebar x: viewed 切替 -> 直後に save (INV-4)。
+--- panel x: viewed 切替 -> 直後に save (INV-4)。
 function M.toggle_viewed_current()
   if active == nil then
     notify_warn 'アクティブなセッションがありません'
@@ -1513,7 +1667,75 @@ function M.toggle_viewed_current()
   entry.viewed = not entry.viewed
   active.session.files[path] = entry
   persist()
-  refresh_sidebar()
+  refresh_panel()
+end
+
+-- ============================================================================
+-- handlers/comments への行解決の提供 (行写像 = head バッファ恒等)
+-- ============================================================================
+
+--- コメント操作 (c/e/d/y/i) が効く対象を解決する。ui/keygate が発火を gate 済み
+--- だが、直接呼び出し (API・cmdline) でも同じ契約を守るためここで再度 window
+--- role + 告知 scratch を弾く。head 実窓 / 縮退 head scratch の行番号が new 側
+--- 行そのもの (INV-2) なので行変換はしない。
+--- 返り値: target = { session,buf,path,commentable=true } か、
+---        コメント不可理由つき { session, reason } か、session 不在 nil。
+function M.comment_target()
+  if active == nil then
+    return nil
+  end
+  local cur = active.current
+  if cur == nil then
+    return { session = active.session, reason = 'window' }
+  end
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_win_get_buf(win)
+  -- 押下時点 gate: head 窓枠 + window gate 成立 + 表示バッファが current の
+  -- head_buf と同一 (フィンガープリント)。base / panel / 告知窓はコメント不可。
+  local role = ui_windows.role_of(win)
+  if
+    role ~= 'head'
+    or vim.w[win].review_key_gate ~= win
+    or buf ~= cur.head_buf
+    -- placeholder / 告知 scratch は行参照先ファイルが存在しないのでコメント不可
+    -- (旧契約「行写像が空 = 行参照操作は拒否」の置き換え)。
+    or (cur.kind ~= 'real' and cur.kind ~= 'degraded')
+  then
+    return { session = active.session, reason = 'window' }
+  end
+  return { session = active.session, path = cur.path, buf = cur.head_buf, commentable = true }
+end
+
+--- 選択/カーソル行 range を new 側行 range (恒等) に解決する。head 実ファイル窓・
+--- 縮退 scratch の現在の行番号がそのまま new 側。0 行数窓/告知では nil (呼び出し側
+--- が «この窓にはコメントを付けられません» で弾く — c は存在行範囲のみ作成可)。
+function M.ident_range(r1, r2)
+  local target = M.comment_target()
+  if target == nil or not target.commentable then
+    return nil
+  end
+  local line_count = vim.api.nvim_buf_line_count(target.buf)
+  if line_count == 0 then
+    return nil
+  end
+  local lo = math.max(1, math.min(r1, r2, line_count))
+  local hi = math.max(1, math.min(math.max(r1, r2), line_count))
+  if r1 > line_count or r2 > line_count or r1 < 1 or r2 < 1 then
+    return nil
+  end
+  return lo, hi, target
+end
+
+--- anchor: head バッファ (恒等行) の before/line/after テキスト。範囲外は vim.NIL。
+function M.anchor_lines(buf, line)
+  local line_count = vim.api.nvim_buf_line_count(buf)
+  local function text(l)
+    if l < 1 or l > line_count then
+      return vim.NIL
+    end
+    return vim.api.nvim_buf_get_lines(buf, l - 1, l, false)[1]
+  end
+  return { before = text(line - 1), line = text(line), after = text(line + 1) }
 end
 
 -- ============================================================================
@@ -1524,7 +1746,7 @@ end
 -- 窓 diff は `:w` 単体で再計算されない (DESIGN「既知の制約」huge-file-window-diff-
 -- perf 実測) ため、再取得適用後に &diff の実ファイル窓へ :diffupdate を明示発火
 -- する。窓 scan と呼ぶ側が契約で、実発火は注入可能 (spec は窓 diff の再計算自体で
--- なく「対象窓への発火」を pin する。3 窓レイアウト導入前は該当窓は通常 0 個)。
+-- なく「対象窓への発火」を pin する)。
 local function default_diffupdate(win)
   vim.api.nvim_win_call(win, function()
     pcall(vim.cmd, 'diffupdate')
@@ -1539,9 +1761,9 @@ end
 
 --- バッファがセッションレビュー対象ファイルの実体 (repo / worktree 配下の
 -- レビュー対象 path) なら repo 相対パス、そうでなければ nil を返す。
--- review:// scratch・セッション外・対象外ファイルは全部 nil。realpath を両側に
--- かます (macOS /var のシンボリックリンク等の系差)。存在しないパス (unit の fake top) は
--- 素の正規化文字列に倒す。
+-- review:// scratch (base / 縮退 head / 告知窓)・セッション外・対象外ファイルは
+-- 全部 nil。realpath を両側にかます (macOS /var のシンボリックリンク等の系差)。
+-- 存在しないパスは素の正規化文字列に倒す。
 local function session_file_of(current, bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return nil
@@ -1575,31 +1797,37 @@ end
 
 -- 再取得結果を active に適用する (diff-review「リフレッシュ」の順序: 再パース ->
 -- anchor 検証 -> ±カウント・panel・スレッド・winbar 再適用 -> :diffupdate -> 永続化)。
--- 開いている diff は状態から捨てて再構成 (commit_comment_change と同じ契約)。
+-- 3 窓は head/base が張りっぱなしの実窓なので窓そのものは組み替えず、ファイル
+-- 状態と表示だけを捨てて再構成する (commit_comment_change と同じ契約)。
 local function apply_refresh(current, files)
   local session = current.session
   local files_by_path, file_order, sorted = build_file_state(session, files)
   current.files_by_path = files_by_path
   current.file_order = file_order
   current.file_order_sorted = sorted
-  for path, buf in pairs(current.diff_bufs) do
-    if vim.api.nvim_buf_is_valid(buf) and #vim.fn.win_findbuf(buf) > 0 then
-      if path == ui_diffbuffer.NO_DIFF_PATH then
-        ui_diffbuffer.render_no_changes(session)
-      else
-        ui_diffbuffer.render(session, current.files_by_path[path] or {
-          path = path,
-          status = 'M',
-          binary = false,
-          added = 0,
-          deleted = 0,
-          hunks = {},
-          vanished = true,
-        }, {})
-      end
-    end
+  local cur = current.current
+  if cur ~= nil and (cur.kind == 'real' or cur.kind == 'degraded') then
+    -- 開き中のファイルの ±カウントを new 側 parse に差し替える (winbar / extmark
+    -- 再適用の源)。再取得で消えたファイルは表示継続: head はユーザーの編集対象の
+    -- 実ファイルなので窓を張り替えず、当該ファイルをゼロ差分 (+0 -0) として扱う
+    -- (一覧と files map からは合成行を作らず除去 — 消失ファイルの outdated は
+    -- panel winbar 末尾 ⚠N で可視化)。
+    cur.file = files_by_path[cur.path]
+      or {
+        path = cur.path,
+        status = 'M',
+        binary = false,
+        added = 0,
+        deleted = 0,
+      }
   end
-  refresh_sidebar()
+  -- extmark 再適用: 常に session から捨てて再構成 (resolve_and_open と同一契約)。
+  -- 告知窓 (deleted / binary) は張替先を持たないので掃除のみ。
+  ui_commentmarks.clear_tracked()
+  if cur ~= nil and (cur.kind == 'real' or cur.kind == 'degraded' or cur.kind == 'no-changes') then
+    ui_commentmarks.apply(session, cur.head_buf, cur.path)
+  end
+  refresh_panel()
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     if
       vim.api.nvim_win_is_valid(win)
@@ -1641,8 +1869,8 @@ local function notify_head_switch_once(current)
   end)
 end
 
---- `R` / BufWritePost 共通のリフレッシュ調停 (キー登録は別 issue。ハンドラ直接
---- 呼出で起動できることが契約)。`git diff` 再取得は開始時 head 解に一致する
+--- `R` / BufWritePost 共通のリフレッシュ調停 (`R` キー登録は別 issue。ハンドラ
+--- 直接呼出で起動できることが契約)。`git diff` 再取得は開始時 head 解に一致する
 --- 引数形 (通常 = 作業ツリー基準の単引数 / scratch 縮退 = `<base> <head>` /
 --- pr = cwd worktree の単引数) -> 再パース -> anchor 検証 -> ±カウント・panel・
 --- スレッド・winbar 再適用 -> :diffupdate -> 永続化。
@@ -1699,7 +1927,8 @@ end
 -- BufWritePost 自動リフレッシュ (diff-review「リフレッシュ」1)。head 窓での保存も、
 -- 同一バッファがユーザー窓から書かれたときも同じ buffer イベントなのでグローバル
 -- 登録し、コールバックで active とセッション会員を判定して弾く (非レビュー中の
--- 保存は何もしない = ユーザー操作への影響ゼロ)。
+-- 保存は何もしない = ユーザー操作への影響ゼロ。縮退 head の scratch は
+-- review:// 名のためセッション員に満たず無視)。
 vim.api.nvim_create_autocmd('BufWritePost', {
   desc = 'review.nvim: 保存した差分の自動リフレッシュ',
   callback = function(ev)

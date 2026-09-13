@@ -2,7 +2,6 @@
 -- 両者は filetype `review-list` を共有する (DESIGN.md「横断規約」UI)。挙動の分岐は
 -- buffer に付けた review_meta で行う (FileType autocmd 分岐は使わない)。
 -- 行 -> データの引き渡しは行番号写像 (render ごとに再構築、バッファ側に値を持たない)。
-local chrome = require 'review.ui.chrome'
 local config = require 'review.config'
 
 local M = {}
@@ -50,10 +49,10 @@ end
 
 --- session と parse 済み File 一覧を sidebar に描画する。
 --- 1 行 `<status> <path> +<a> -<d>`、パス昇順、viewed は行頭に `[✓]`。
---- opts = { filter = string|nil } (絞り込み語。winbar に載せるだけ = 行フィルタ
---- は呼び出し側 (handlers) が適用済みの files を渡す責任)。
-function M.render_sidebar(session, files, opts)
-  opts = opts or {}
+--- 行フィルタは呼び出し側 (handlers) が適用済みの files を渡す責任。winbar 文字列は
+--- 窓側 (handlers が panel 窓へ chrome.winbar で当てる — b: に持つと実ファイル窓
+--- 経由でユーザー窓へ漏れる。diff-review「窓装飾 (chrome)」)。
+function M.render_sidebar(session, files)
   local sorted = {}
   for _, file in ipairs(files) do
     sorted[#sorted + 1] = file
@@ -75,20 +74,6 @@ function M.render_sidebar(session, files, opts)
     )
     rows[#lines] = file.path
   end
-  local bar = ('%s..%s · %d %s · %d %s'):format(
-    session.base or '',
-    session.head or '',
-    #lines,
-    #lines == 1 and 'file' or 'files',
-    #(session.comments or {}),
-    #(session.comments or {}) == 1 and 'comment' or 'comments'
-  )
-  if opts.filter ~= nil and opts.filter ~= '' then
-    -- 一致 0 なら「閉じた?」と誤解されないよう解除手順をその場に出す
-    bar = bar
-      .. (' · filter=%s%s'):format(opts.filter, #lines == 0 and ' (空入力で解除)' or '')
-  end
-  chrome.bar(buf, bar)
   local k = config.get().keymaps.sidebar
   return paint(buf, lines, { kind = 'sidebar', session_id = session.id }, rows, {
     { k.open_diff, "require('review.handlers.session').open_selected_file()" },
@@ -101,6 +86,32 @@ function M.render_sidebar(session, files, opts)
   })
 end
 
+--- sidebar (file panel) の winbar 文字列。handlers が panel 窓に当てる。
+--- `base..head · N files · M comments [· filter=…] [· ⚠N]` — `⚠N` は
+--- opts.hidden_outdated (集約先 head 窓の無い outdated 件数。告知窓ファイルと
+--- 差分消失ファイルの分で、呼び出し側 handlers が算出)。0 / 省略なら非表示
+--- (diff-review「窓装飾」)。
+function M.sidebar_winbar(session, files, opts)
+  opts = opts or {}
+  local bar = ('%s..%s · %d %s · %d %s'):format(
+    session.base or '',
+    session.head or '',
+    #files,
+    #files == 1 and 'file' or 'files',
+    #(session.comments or {}),
+    #(session.comments or {}) == 1 and 'comment' or 'comments'
+  )
+  if opts.filter ~= nil and opts.filter ~= '' then
+    -- 一致 0 なら「閉じた?」と誤解されないよう解除手順をその場に出す
+    bar = bar
+      .. (' · filter=%s%s'):format(opts.filter, #files == 0 and ' (空入力で解除)' or '')
+  end
+  if opts.hidden_outdated ~= nil and opts.hidden_outdated > 0 then
+    bar = bar .. (' · ⚠%d'):format(opts.hidden_outdated)
+  end
+  return bar
+end
+
 --- sidebar の行 -> ファイルパス (範囲外は nil)。
 function M.row_file(bufnr, row)
   local st = rendered[bufnr]
@@ -110,7 +121,13 @@ function M.row_file(bufnr, row)
   return st.rows[row]
 end
 
---- 保存済みセッション一覧を描画する。opts = { is_grey(sess)->bool? }。
+--- セッション一覧の winbar 文字列 (handlers が窓に chrome.winbar で当てる)。
+function M.sessionlist_winbar(sessions)
+  local n = #(sessions or {})
+  return ('review.nvim · %d %s'):format(n, n == 1 and 'session' or 'sessions')
+end
+
+--- 保存済みセッション一覧を描画する。opts = {} | { is_grey(sess)->bool? }。
 --- 1 行 `<slug>  <status>  <mode>  <base>..<head>  <N> comments  <ローカル時刻 + %Z tz>`、
 --- slug 昇順。grey 行 (repo 消失) は row_session が nil = <Enter> 不可。
 function M.render_sessionlist(sessions, opts)
@@ -154,7 +171,6 @@ function M.render_sessionlist(sessions, opts)
       rows[#lines] = s
     end
   end
-  chrome.bar(buf, ('review.nvim · %d %s'):format(#lines, #lines == 1 and 'session' or 'sessions'))
   local k = config.get().keymaps.sessionlist
   local drawn = paint(buf, lines, { kind = 'sessionlist' }, rows, {
     { k.open, "require('review.handlers.sessions_list').open_current()" },

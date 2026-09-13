@@ -1,8 +1,12 @@
--- E2E PR phase 1 (DoD シナリオ 1+2)。cwd = fixture repo (PR クローン) で実行。
--- :Review pr 7 -> sidebar -> <Enter> で diff -> 追加行の `o` で worktree の
--- 実ファイルが開く (content = head の実物 / 編集可) -> :Review close (clean) ->
+-- E2E PR phase 1 (DoD シナリオ 1+2 / 3 窓)。cwd = fixture repo (PR クローン)。
+-- :Review pr 7 -> worktree 作成 -> 専有 tab はその worktree に tcd され、head 窓は
+-- worktree 内の実ファイル (content = head 実物・編集可) -> `o` はレビュー tab の外
+-- (前行儀) に worktree 基準パスの実ファイルを開く -> :Review close (clean) ->
 -- worktree dir 消滅 (ref は残る側は shell assert)。
+-- buffer/dir 比較は realpath (macOS /var -> /private/var 正規化)。
 -- 失敗は E2E-FAIL + cquit (raw error は headless でハングするため正規化)。
+
+local windows = require 'review.ui.windows'
 
 local function fail(why)
   print('E2E-FAIL: ' .. why)
@@ -15,6 +19,15 @@ local function wait_for(pred, why)
   end
 end
 
+-- 比較は symlink 解決後の実パスで行う (macOS /var -> /private/var)。gsub の
+-- 多値戻りを実関数に直接渡さない。
+local function realpath(p)
+  local s = (p or ''):gsub('[\r\n]+$', '')
+  return vim.uv.fs_realpath(s) or s
+end
+
+-- worktree dir はレビュー開始時に作られる (起動時点では未存在)。realpath は
+-- 生成後に解決する必要があるので raw のまま保持し、比較箇所で lazy resolve する。
 local wt_root = assert(os.getenv 'REVIEW_E2E_WT', 'REVIEW_E2E_WT 未設定')
 
 local run = function()
@@ -23,41 +36,36 @@ local run = function()
     return vim.fn.bufexists 'review://sidebar/pr-7' == 1
   end, 'PR sidebar')
 
-  -- sidebar <Enter> -> diff a.lua -> 追加行で o (DoD は diff 上の o を名指し)
-  local sidebar = vim.fn.bufnr 'review://sidebar/pr-7'
-  local sb_win = vim.fn.win_findbuf(sidebar)[1]
-  vim.api.nvim_set_current_win(sb_win)
-  vim.api.nvim_win_set_cursor(sb_win, { 1, 0 })
-  local cr = vim.api.nvim_replace_termcodes('<CR>', true, false, true)
-  vim.cmd('normal ' .. cr)
-  wait_for(function()
-    return vim.fn.bufexists 'review://diff/pr-7/a.lua' == 1
-  end, 'a.lua diff')
+  local st = windows.state()
+  if st == nil or #vim.api.nvim_tabpage_list_wins(st.tab) ~= 3 then
+    fail 'PR レビューの専有 tab 3 窓が開かない'
+  end
 
-  local diff_buf = vim.fn.bufnr 'review://diff/pr-7/a.lua'
-  local diff_win = vim.fn.win_findbuf(diff_buf)[1]
-  vim.api.nvim_set_current_win(diff_win)
-  local add_row
-  for i, line in ipairs(vim.api.nvim_buf_get_lines(diff_buf, 0, -1, false)) do
-    if line:sub(1, 1) == '+' and line ~= '+++ b/a.lua' then
-      add_row = i
-      break
+  -- tab は worktree に tcd (head 実ファイル + LSP の cwd 根拠)
+  local review_tabnr = nil
+  for i, t in ipairs(vim.api.nvim_list_tabpages()) do
+    if t == st.tab then
+      review_tabnr = i
     end
   end
-  if add_row == nil then
-    fail 'diff に追加行が無い'
+  if realpath(vim.fn.getcwd(-1, review_tabnr)) ~= realpath(wt_root) then
+    fail(
+      'PR tab の tcd が worktree でない: got='
+        .. realpath(vim.fn.getcwd(-1, review_tabnr))
+        .. ' want='
+        .. tostring(realpath(wt_root))
+        .. ' raw='
+        .. tostring(wt_root)
+    )
   end
-  vim.api.nvim_win_set_cursor(diff_win, { add_row, 0 })
-  vim.cmd 'normal o'
-  wait_for(function()
-    return vim.fn.bufexists(vim.fs.joinpath(wt_root, 'a.lua')) == 1
-  end, 'worktree 実ファイルバッファ')
 
-  local fname = vim.uv.fs_realpath(vim.fs.joinpath(wt_root, 'a.lua'))
-  local wbuf = vim.fn.bufnr(fname)
-  if wbuf == -1 then
-    fail('worktree file buffer が実パスで無い: ' .. fname)
+  -- head 窓 = worktree 内の実ファイル (初期開き = 一覧先頭 a.lua)
+  local head_win = windows.win 'head'
+  local fname = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(head_win))
+  if fname ~= realpath(vim.fs.joinpath(wt_root, 'a.lua')) then
+    fail('head 窓が worktree 実ファイルでない: ' .. tostring(fname))
   end
+  local wbuf = vim.api.nvim_win_get_buf(head_win)
   local lines = vim.api.nvim_buf_get_lines(wbuf, 0, -1, false)
   if lines[1] ~= 'PR HEAD content' or lines[2] ~= 'second' then
     fail('worktree 実ファイル内容不一致: ' .. table.concat(lines, ' / '))
@@ -65,7 +73,23 @@ local run = function()
   if vim.bo[wbuf].readonly then
     fail 'worktree 実ファイルが read-only (編集可でなければならない)'
   end
-  print('E2E-PR1 open=' .. fname)
+
+  -- head 窓 o: レビュー tab の外 (前行儀 tab) に worktree 基準パスで開く
+  local tabs_before = #vim.api.nvim_list_tabpages()
+  vim.api.nvim_win_set_cursor(head_win, { 1, 0 })
+  vim.cmd 'normal o'
+  wait_for(function()
+    return #vim.api.nvim_list_tabpages() == tabs_before + 1
+  end, 'o で前行儀 tab 增加')
+  if vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf()) ~= fname then
+    fail(
+      'o 先が worktree 基準の実ファイルパスでない: '
+        .. vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+    )
+  end
+  vim.cmd 'tabclose'
+  vim.api.nvim_set_current_tabpage(st.tab)
+  print('E2E-PR1 wt-file=' .. fname)
 
   vim.cmd 'Review close'
   wait_for(function()

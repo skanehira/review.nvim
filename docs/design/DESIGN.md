@@ -179,8 +179,8 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 
 実装が必ず従う、検証済みのプラットフォーム上限・ライブラリの性質 (根拠 = FEASIBILITY.md「PoC 結果」と実測コミット):
 
-- **キー**: window-local keymap API は Neovim に存在しない (`nvim_win_set_keymap` は nil。keymap API は global 3 + buffer 3 のみ、0.10/0.13 実測)。実ファイル窓の review キーは buffer-local + window role gate で実装する。副作用として gate 不成立窓ではユーザーの同キー既存マップが再現されず 1 キーストロークが built-in になる (help に明記)。ユーザー buffer-local の同キーマップは張込みで恒久失効するため張込前検出し衝突キーはスキップする
-- **窓 diff**: `:w` 単体では Neovim は窓 diff を**再計算しない** (BufWritePost で `:diffupdate` を明示発火するまで fold が古い。実測 3s 収束せず)。binary 注釈窓・削除告知 scratch など窓 diff から外す窓は必ず `diffoff` (退避は `foldclosed()` が -1 になることで検証可)。`:diffoff` は `foldmethod` を元へ戻さない
+- **キー**: window-local keymap API は Neovim に存在しない (`nvim_win_set_keymap` は nil。keymap API は global 3 + buffer 3 のみ、0.10/0.13 実測)。実ファイル窓の review キーは buffer-local + window role gate で実装する。副作用として gate 不成立窓ではユーザーの同キー既存マップが再現されず 1 キーストロークが built-in になる (help に明記)。ユーザー buffer-local の同キーマップは張込みで恒久失効するため張込前検出し衝突キーはスキップする。なお衝突判定で読む `nvim_buf_get_keymap` の entry は **Lua 関数形のキーマップ (`vim.keymap.set` に関数を渡すと) では `rhs` フィールドが無く `callback` に Lua 関数が載る** (0.10/stable 実測) — `m.rhs` を index する前に `type(m.rhs) ~= 'string'` を衝突 (ユーザーマップとして温存) 扱いで弾かないと張込が例外で途中中断する。expr キーマップの rhs は **textlock 下で評価**され、その場で窓作成 / バッファ変更を行うと E565 になる (0.13-nightly 実測。textlock を問う API は無い)。review キーの dispatch 本体 (float・窓操作を伴う handlers) は `vim.schedule` でロック解除直後のイベントループへ回して発火する (expr の返り値でキーストロークは確定消費され built-in 化しない)
+- **窓 diff**: `:w` 単体では Neovim は窓 diff を**再計算しない** (BufWritePost で `:diffupdate` を明示発火するまで fold が古い。実測 3s 収束せず)。binary 注釈窓・削除告知 scratch など窓 diff から外す窓は必ず `diffoff` (退避は `foldclosed()` が -1 になることで検証可 — 但し `:diffoff` / `foldmethod=manual` へ切り替えても diff 由来の**保存 fold は残る**ため `zE` で解消してから測る。0.13 実測)。窓 diff opts (`setl diff foldmethod=diff`) を**空 [No Name] 共有の雛形窓に先に当てると、その後の set_buf で fold が再計算されず foldclosed() が永久に -1 になる** (0.13 実測。bind = buf 張付と同時に適用する)
 - **窓 diff 性能** (Apple M3 Ultra / nvim 0.13-nightly / -u NONE / 3 回中位数): 初回計算 50k 行×hunk50 = 24ms、50k×1 = 19.6ms、20k = 11ms、2k = 1.7ms。保存 1 行後の `:diffupdate` 再計算 ≤ 24.2ms、scrollbind 連打 ≤ 0.03ms/key。UI 実負荷・CI マシンは未計測だが 60 倍の余裕がある
 - **diff ペアの併存**: review 窓とユーザーの窓 diff ペアを同一 tabpage に併存させると pairing が混線する (実測) — レビューは専有 tab に開く。`diffopt` は global option で伝播するためレビュー側から値を変えない (変える変更は終了時復元 + 波及遅延の注記を要する)
 - **LSP root**: root_dir は開いたファイルパス起点の root marker 遡上で決まり、cwd/tcd は root_dir 決定に関与しない (server プロセスの spawn cwd にのみ効く)。worktree には `.git` が **ファイル** (gitdir: pointer) で置かれるため、ユーザーの root_markers が dir 限定形式 `.git/` のみだと worktree 実ファイルに LSP がアタッチしない (tcd で救われない。README/この節で注意喚起。worktree にコミット済みマーカー (go.mod 等) があれば解決)
@@ -208,6 +208,8 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - headless のキー投入は `:normal` が唯一の安定経路 (`nvim_input` / `feedkeys` は `vim.wait` で消費されない)。`:normal` 内で error が出ると hit-enter でハングするため driver は pcall + `cquit`。視覚選択は `Vj` 移動と `c` を分割投入
 - `vim.wait` を起動 `-c` 内で使うと `VimEnter` が発火しない。起動後イベント依存のスクリプトは `defer_fn` で逃がす
 - Neovim に `BufWipedout` autocmd は無い (wipe でも `BufUnload`)。バッファ付随 module state の掃除は `BufUnload` で受ける。`nvim_buf_set_extmark` の `end_col` に `-1` は不正 (行末バイト数を明示)
+- `:tcd` は存在しない dir に対して E344 を投げる (0.10 実測)。レビュー tab 開通の tcd はこれを pcall で吸収する (開通を中断すると tab だけ残ってレビュー不能になる)。spec / e2e で「tcd 漏れなし」を比較する側は dir 実在を前提にする
+- `bufadd` / `:edit` は buffer 名を symlink 解決後の正規パスで持つ (macOS の mktemp は `/var` -> `/private/var`。0.10 実測)。head 実ファイル窓の buf 名を assert する spec / e2e は期待値を `fs_realpath` 経由で比較する。git に渡す cwd は記録された path のままなので正規化されない (2 つを混同しない)
 
 ## 未解決の論点
 

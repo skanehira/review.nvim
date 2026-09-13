@@ -29,6 +29,8 @@ function M.open()
     local buf = ui_list.render_sessionlist(sessions, { is_grey = repo_missing })
     vim.api.nvim_win_set_buf(0, buf)
     chrome.window(0)
+    -- winbar 文字列は窓変数 (b: にしない — chrome 決定)
+    chrome.winbar(0, ui_list.sessionlist_winbar(sessions))
   end)
 end
 

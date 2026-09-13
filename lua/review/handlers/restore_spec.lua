@@ -10,6 +10,7 @@ local restore = require 'review.handlers.restore'
 local session_handler = require 'review.handlers.session'
 local sessions_list = require 'review.handlers.sessions_list'
 local store = require 'review.store.session'
+local ui_windows = require 'review.ui.windows'
 
 -- repo path の実在チェック (sessions_list の grey 判定) があるため、
 -- 偽パスでなく mktemp の実ディレクトリを repo として使う。
@@ -71,6 +72,17 @@ local function use_env()
     vim.ui.select = function(items, _opts, on_choice)
       on_choice(items[state.select_answer])
     end
+    -- 3 窓 UI は窓・tab・buf がプロセス共有 (session_spec use_env と同型の掃除)
+    if ui_windows.state() ~= nil then
+      ui_windows.close()
+    end
+    ui_windows.reset()
+    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+      if vim.api.nvim_tabpage_is_valid(tab) then
+        vim.api.nvim_set_current_tabpage(tab)
+        pcall(vim.cmd, 'tabclose!')
+      end
+    end
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
         vim.api.nvim_buf_delete(buf, { force = true })
@@ -97,13 +109,23 @@ local function use_env()
     state.tab = vim.api.nvim_get_current_tabpage()
   end)
   after_each(function()
+    if ui_windows.state() ~= nil then
+      ui_windows.close()
+    end
+    ui_windows.reset()
     if vim.api.nvim_tabpage_is_valid(state.tab) then
       vim.api.nvim_set_current_tabpage(state.tab)
       vim.cmd 'tabclose!'
     end
+    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+      if vim.api.nvim_tabpage_is_valid(tab) then
+        vim.api.nvim_set_current_tabpage(tab)
+        pcall(vim.cmd, 'tabclose!')
+      end
+    end
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
       end
     end
     vim.notify = REAL_NOTIFY
@@ -309,7 +331,7 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
   end
 
   it(
-    'comments あり: UI を開く + diff バッファ「変更なし」+ 全コメント outdated をヘッダ virt text',
+    'comments あり: 3 窓を開き placeholder に全 outdated を集約 (panel 空一覧・files map 純粋)',
     function()
       local sess = save_vanishing_session {
         files = { ['a.lua'] = { viewed = true } },
@@ -319,42 +341,55 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
 
       restore.resume_session(sess)
 
-      -- 「開くことを拒否せず」UI が開く
+      -- 「開くことを拒否せず」UI が開く (panel / base / head の 3 窓)
       local active = session_handler.active()
       assert.is_true(active ~= nil)
       assert.not_equals(-1, vim.fn.bufnr 'review://sidebar/main--feature')
-      -- 消失ファイルは合成 entry で diff バッファが開き、「変更なし」表示
-      local dbuf = vim.fn.bufnr 'review://diff/main--feature/a.lua'
-      assert.not_equals(-1, dbuf)
-      assert.same(
-        { '■ M a.lua +0 -0', '変更なし' },
-        vim.api.nvim_buf_get_lines(dbuf, 0, -1, false)
-      )
-      assert.equals('main..feature · a.lua · +0 -0 · 1 comment', vim.b[dbuf].review_winbar)
-      -- 全コメント outdated -> ヘッダ行 virt text 一覧 (通常時と同じ規則)
+
+      -- open_file の代わりに「変更なし」プレースホルダを base/head 窓へ張る
+      local ph = 'review://base/main--feature/(no-changes)'
+      local pbuf = vim.fn.bufnr(ph)
+      assert.not_equals(-1, pbuf)
+      assert.same({ '変更なし' }, vim.api.nvim_buf_get_lines(pbuf, 0, -1, false))
+      assert.equals(pbuf, vim.api.nvim_win_get_buf(ui_windows.win 'base'))
+      assert.equals(pbuf, vim.api.nvim_win_get_buf(ui_windows.win 'head'))
+
+      -- panel 空一覧 (消失ファイルの合成行を作らない — files=0 の開通は空一覧)
+      local sb_lines =
+        vim.api.nvim_buf_get_lines(vim.fn.bufnr 'review://sidebar/main--feature', 0, -1, false)
+      assert.same({ '' }, sb_lines)
+
+      -- 全コメント outdated -> placeholder 1 行目の virt_lines_above に集約一覧
       local ns = vim.api.nvim_get_namespaces()['review_comment']
-      local marks = vim.api.nvim_buf_get_extmarks(dbuf, ns, 0, -1, { details = true })
-      assert.equals(1, #marks)
-      local virt = marks[1][4].virt_text
-          and marks[1][4].virt_text[1]
-          and marks[1][4].virt_text[1][1]
-        or ''
-      -- eol は集約カウント、本文は行下 thread (thread 化後の契約)
-      assert.equals(' ⚠ 1 outdated (prompt 除外中)', virt)
-      local vl = marks[1][4].virt_lines
+      local above = nil
+      for _, m in ipairs(vim.api.nvim_buf_get_extmarks(pbuf, ns, 0, -1, { details = true })) do
+        if m[4].virt_lines_above then
+          above = m
+        end
+      end
+      assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
+      assert.equals(' ⚠ 1 outdated (prompt 除外中)', above[4].virt_lines[1][1][1])
       assert.is_true(
-        vl ~= nil and vl[1] ~= nil and vl[1][1][1]:find('[c1]', 1, true) ~= nil,
-        vim.inspect(marks[1][4].virt_lines)
+        above[4].virt_lines[2][1][1]:find('[c1]', 1, true) ~= nil,
+        vim.inspect(above[4].virt_lines)
       )
-      -- outdated 化の結果が save される (status=open 含む)
+
+      -- 集約先 (placeholder 窓) が見えるので panel winbar に ⚠N は出さない
+      assert.equals(
+        'main..feature · 0 files · 1 comment',
+        vim.w[ui_windows.win 'panel'].review_winbar
+      )
+
+      -- outdated 化の結果が save される (status=open / files = 差分に出る全ファイル)
       local reloaded = store.load(REPO_TOP, 'main--feature').data
       assert.equals('open', reloaded.status)
       assert.equals('outdated', reloaded.comments[1].state)
+      assert.same({}, reloaded.files)
     end
   )
 
   it(
-    'comments 0: nil 参照で落ちず、「変更なし」プレースホルダの diff バッファで UI を開く',
+    'comments 0: nil 参照で落ちず、「変更なし」プレースホルダの 3 窓で UI を開く',
     function()
       local sess = save_vanishing_session {}
       state.git_stdout = ''
@@ -364,15 +399,27 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
       local active = session_handler.active()
       assert.is_true(active ~= nil)
       assert.not_equals(-1, vim.fn.bufnr 'review://sidebar/main--feature')
-      local placeholder = vim.fn.bufnr 'review://diff/main--feature/(no-diff)'
+      local placeholder = vim.fn.bufnr 'review://base/main--feature/(no-changes)'
       assert.not_equals(-1, placeholder)
       assert.same({ '変更なし' }, vim.api.nvim_buf_get_lines(placeholder, 0, -1, false))
+      -- 両窓 diffoff で窓 diff から退避 (「変更なし」プレースホルダは窓 diff に
+      -- 参加しない) + foldclosed()==-1 (DESIGN「既知の制約」の退避検証形。
+      -- foldclosed は窓ローカルなので nvim_win_call で測る)
+      local hw, bw = ui_windows.win 'head', ui_windows.win 'base'
+      assert.equals(false, vim.wo[hw].diff)
+      assert.equals(false, vim.wo[bw].diff)
+      assert.equals(
+        -1,
+        vim.api.nvim_win_call(hw, function()
+          return vim.fn.foldclosed(1)
+        end)
+      )
       assert.equals('open', store.load(REPO_TOP, 'main--feature').data.status)
     end
   )
 
   it(
-    '複数ファイル消失: 右ペインには sidebar パス昇順先頭のファイルが開く (diff-review 先頭ファイル規則)',
+    '複数ファイル消失: プレースホルダ 1 個に全 outdated を集約 (先頭ファイル合成開きはしない)',
     function()
       local sess = save_vanishing_session {
         files = { ['z.lua'] = { viewed = false }, ['a.lua'] = { viewed = false } },
@@ -385,13 +432,34 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
 
       restore.resume_session(sess)
 
-      assert.not_equals(-1, vim.fn.bufnr 'review://diff/main--feature/a.lua')
-      local sb = vim.fn.bufnr 'review://sidebar/main--feature'
-      assert.not_equals(-1, sb)
-      local sidebar_lines = vim.api.nvim_buf_get_lines(sb, 0, -1, false)
-      assert.equals(2, #sidebar_lines)
-      assert.is_truthy(sidebar_lines[1]:find('a.lua', 1, true))
-      assert.is_falsy(sidebar_lines[1]:find('z.lua', 1, true))
+      local pbuf = vim.fn.bufnr 'review://base/main--feature/(no-changes)'
+      assert.not_equals(-1, pbuf)
+      -- どの消失ファイルの合成 scratch も作らない (review:// 契約 kind は固定)
+      assert.equals(-1, vim.fn.bufnr 'review://base/main--feature/a.lua')
+      assert.equals(-1, vim.fn.bufnr 'review://base/main--feature/z.lua')
+
+      local ns = vim.api.nvim_get_namespaces()['review_comment']
+      local above = nil
+      for _, m in ipairs(vim.api.nvim_buf_get_extmarks(pbuf, ns, 0, -1, { details = true })) do
+        if m[4].virt_lines_above then
+          above = m
+        end
+      end
+      assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
+      assert.equals(' ⚠ 2 outdated (prompt 除外中)', above[4].virt_lines[1][1][1])
+      local bodies = {}
+      for i = 2, #above[4].virt_lines do
+        bodies[#bodies + 1] = above[4].virt_lines[i][1][1]
+      end
+      assert.equals(3, #bodies, vim.inspect(bodies)) -- c1 + 区切り + c2
+      assert.is_true(bodies[1]:find('[c1]', 1, true) ~= nil)
+      assert.is_true(bodies[3]:find('[c2]', 1, true) ~= nil)
+
+      -- panel winbar: 集約先 placeholder が見える = ⚠N なし
+      assert.equals(
+        'main..feature · 0 files · 2 comments',
+        vim.w[ui_windows.win 'panel'].review_winbar
+      )
     end
   )
 end)

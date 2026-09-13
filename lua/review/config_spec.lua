@@ -14,6 +14,7 @@ describe('config.get', function()
       git_bin = 'git',
       gh_bin = 'gh',
       auto_notify_resume = true,
+      panel_width = 35,
       keymaps = {
         diff = {
           add_comment = 'c',
@@ -26,6 +27,8 @@ describe('config.get', function()
           next_file = ']d',
           prev_file = '[d',
           focus_sidebar = 'S',
+          focus_panel = '<leader>e',
+          toggle_panel = '<leader>b',
           view_comments = 'i',
         },
         sidebar = {
@@ -56,6 +59,7 @@ describe('config.get', function()
       git_bin = 'git',
       gh_bin = 'gh',
       auto_notify_resume = true,
+      panel_width = 35,
       keymaps = {
         diff = {
           add_comment = 'c',
@@ -68,6 +72,8 @@ describe('config.get', function()
           next_file = ']d',
           prev_file = '[d',
           focus_sidebar = 'S',
+          focus_panel = '<leader>e',
+          toggle_panel = '<leader>b',
           view_comments = 'i',
         },
         sidebar = {
