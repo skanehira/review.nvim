@@ -1,5 +1,6 @@
 -- handlers/session: セッション開始 / 終了 / 削除と active 排他 (INV-1)、専有 tab
--- 3 窓 UI open / panel 操作 / ]d [d / viewed / tab 消滅経路の save トリガ (INV-4)、
+-- 3 窓 UI open / panel 操作 / <Tab> <S-Tab> [F ]F / viewed / tab 消滅経路の save
+-- トリガ (INV-4)、
 -- head 解決フロー、pr worktree の作成・掃除・直列化 (pr-worktree.md)、絞り込み。
 -- git 注入スタブ (git/cli_spec と同期 on_exit パターン) で開始〜窓張付を同期駆動し、
 -- save は paths._set_data_dir 注入の tmpdir へ実ファイルを書いて検証する (INV-4 =
@@ -778,7 +779,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       }
       session_handler.start { base = 'main', head = 'feature' }
 
-      -- 一覧先頭 = bin.dat (パス昇順) -> ]d で c.lua へ
+      -- 一覧先頭 = bin.dat (パス昇順) -> <Tab> で c.lua へ
       assert.equals('review://binary/' .. SLUG .. '/bin.dat', head_buf_name())
       session_handler.next_file() -- c.lua
 
@@ -1724,7 +1725,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     assert.equals('head', ui_windows.role_of(ui_windows.win 'head'))
   end)
 
-  it(']d で次ファイルへ open_file (viewed save / focus は head)', function()
+  it('<Tab> で次ファイルへ open_file (viewed save / focus は head)', function()
     start_done('main', 'feature') -- 先頭 a.lua
     session_handler.next_file()
 
@@ -1732,7 +1733,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     assert.equals(true, load_saved().files['b.lua'].viewed)
   end)
 
-  it('[d で前ファイルに戻る (base git show 再充填)', function()
+  it('<S-Tab> で前ファイルに戻る (base git show 再充填)', function()
     start_done('main', 'feature')
     session_handler.next_file()
     session_handler.prev_file()
@@ -1741,7 +1742,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     assert.is_true(has_call 'git show main:a.lua')
   end)
 
-  it('端では ]d/[d は無動作 (最後の次へを進まない)', function()
+  it('端では <Tab>/<S-Tab> は無動作 (最後の次へを進まない)', function()
     start_done('main', 'feature')
     session_handler.next_file() -- b
     session_handler.next_file() -- 端 = noop
@@ -1749,6 +1750,29 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     session_handler.prev_file()
     session_handler.prev_file() -- 端 = noop
     assert.equals(state.repo .. '/a.lua', ex_bufname())
+  end)
+
+  it(
+    '[F で最初 / ]F で最後のファイルを open_file (端での再押下も同一対象)',
+    function()
+      start_done('main', 'feature') -- 先頭 a.lua
+      session_handler.next_file() -- b.lua
+      session_handler.first_file()
+      assert.equals(state.repo .. '/a.lua', ex_bufname())
+      assert.equals(ui_windows.win 'head', vim.api.nvim_get_current_win())
+      session_handler.last_file()
+      assert.equals(state.repo .. '/b.lua', ex_bufname())
+      session_handler.last_file() -- 端の再押下 = 同一対象を維持 (無動作)
+      assert.equals(state.repo .. '/b.lua', ex_bufname())
+    end
+  )
+
+  it('[F/]F は viewed 更新と save を伴う (panel <CR> と同一処理)', function()
+    start_done('main', 'feature') -- 先頭 a.lua (開始 open で viewed)
+    assert.is_true(load_saved().files['a.lua'].viewed)
+    assert.is_false(load_saved().files['b.lua'].viewed)
+    session_handler.last_file() -- b.lua
+    assert.is_true(load_saved().files['b.lua'].viewed)
   end)
 
   it(
@@ -2862,11 +2886,24 @@ describe('panel 絞り込み (`/`)', function()
     }, panel_lines())
   end)
 
-  it(']d は絞り込み後の並びを進む (非一致ファイルを跨がない)', function()
+  it(
+    '<Tab>/<S-Tab> は絞り込み後の並びを進む (非一致ファイルを跨がない)',
+    function()
+      start_done('main', 'feature') -- 先頭 a.lua
+      inputs.result = 'b.lua'
+      session_handler.filter_sidebar()
+      session_handler.next_file()
+      assert.equals(state.repo .. '/b.lua', head_buf_name())
+    end
+  )
+
+  it('[F/]F は絞り込み後、一致集合の最初/最後を開く', function()
     start_done('main', 'feature') -- 先頭 a.lua
     inputs.result = 'b.lua'
     session_handler.filter_sidebar()
-    session_handler.next_file()
+    session_handler.first_file()
+    assert.equals(state.repo .. '/b.lua', head_buf_name())
+    session_handler.last_file()
     assert.equals(state.repo .. '/b.lua', head_buf_name())
   end)
 
@@ -3535,7 +3572,7 @@ describe('file panel ツリー / view state (issue-17)', function()
     end
   )
 
-  it(']d (next_file) でも panel カーソルが逆追従する', function()
+  it('<Tab> (next_file) でも panel カーソルが逆追従する', function()
     start_trees()
     session_handler.next_file() -- app/y.lua
     local pw = ui_windows.win 'panel'

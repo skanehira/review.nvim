@@ -66,7 +66,7 @@ git -C "$REPO" commit -qm feature
 # phase3 で自動採用 head とは別の ref (feature と同一ツリー)。補完候補にも出る。
 git -C "$REPO" branch hotfix
 
-# --- phase 1: 起動 -> コメント -> 切替 -> 正常終了 -------------------
+# --- phase 1: 起動 -> コメント -> 窓移動 (<S-Tab>/]F/[F/<leader>e) -> 正常終了 -------
 run_nvim() {
   local script="$1"
   ( cd "$REPO" && XDG_DATA_HOME="$DATA" REVIEW_E2E_LOG="$LOG" \
@@ -89,8 +89,24 @@ grep -q 'E2E-L1 wins=3 tcd=repo' "$OUT1" || {
 }
 grep -q 'E2E-W1 winbar=true' "$OUT1" || { echo 'e2e: phase1 winbar chrome (w: のみ) が入っていない' >&2; exit 1; }
 grep -q 'E2E-T1 thread=eol+virtlines' "$OUT1" || { echo 'e2e: コメント行下スレッド (件数 eol + virt_lines 本文) が表示されない' >&2; exit 1; }
-grep -q 'E2E-O1 fileview=real-editable' "$OUT1" || { echo 'e2e: phase1 panel o で前行儀 tab に実ファイル (編集可) が開かない' >&2; exit 1; }
-grep -q 'E2E-V1 viewwin=scratch' "$OUT1" || { echo 'e2e: phase1 ]d/[d/i/S 一連 (閲覧 float が開かない等) に失敗' >&2; exit 1; }
+grep -q 'E2E-O1 fileview=real-editable' "$OUT1" || { echo 'e2e: phase1 head 窓 o で前行儀 tab に実ファイル (編集可) が開かない' >&2; exit 1; }
+grep -q 'E2E-M1 S-Tab=prev' "$OUT1" || {
+  echo 'e2e: phase1 `<S-Tab>` 前ファイル移動が効かない (最終キー表 #18)' >&2
+  exit 1
+}
+grep -qF 'E2E-M2 ]F=last' "$OUT1" || {
+  echo 'e2e: phase1 `]F` 最後のファイル移動が効かない' >&2
+  exit 1
+}
+grep -qF 'E2E-M3 [F=first' "$OUT1" || {
+  echo 'e2e: phase1 `[F` 最初のファイル移動が効かない' >&2
+  exit 1
+}
+grep -q 'E2E-M4 Tab=next' "$OUT1" || {
+  echo 'e2e: phase1 `<Tab>` 次のファイル移動が効かない' >&2
+  exit 1
+}
+grep -q 'E2E-V1 viewwin=scratch' "$OUT1" || { echo 'e2e: phase1 <S-Tab>/]F/[F/i/<leader>e 一連 (閲覧 float が開かない等) に失敗' >&2; exit 1; }
 # prompt yank (issue #7): y で "0 = @path#L.. + 本文、:Review prompt = 全文一致
 grep -q 'E2E-Y1 yank=@path-range+body' "$OUT1" || {
   echo 'e2e: phase1 y で "0 に range コメントのプロンプトが入らない' >&2
@@ -211,6 +227,11 @@ grep -q 'E2E-R1 counts=updated' "$OUT5" || {
   echo 'e2e: 保存後の自動リフレッシュで ±カウントが変わらない (E2E-R1 欠落)' >&2
   exit 1
 }
+# 手動 R キー (#18 登録): BufWritePost を通さない再取得経路が効く
+grep -q 'E2E-R2 manual-refresh=ok' "$OUT5" || {
+  echo 'e2e: head 窓 R での手動リフレッシュが ±カウントに反映されない (E2E-R2 欠落)' >&2
+  exit 1
+}
 
 # --- PR mode (issue #6: worktree / gh スタブ + 実 git) --------------------
 # pr-worktree.md「テスト方針」E2E + DoD シナリオ 1〜5。gh は PATH スタブ、
@@ -281,7 +302,8 @@ pr_fail() { # $1=out file, $2=label
   exit 1
 }
 
-# (1)+(2) worktree 要セッション開始 -> o 実ファイル -> close (dir 消滅・ref 残存)
+# (1)+(2) worktree 要セッション開始 -> o 実ファイル (head 窓経路 / #18 の最終キー) ->
+#      close (dir 消滅・ref 残存)
 D_PR1="$WORK/d-pr1"
 OUTP1=$(mktemp "$WORK/pr1.out.XXXXXX")
 run_pr "$REPO_ROOT/tests/e2e/pr1.lua" "$D_PR1" >"$OUTP1" 2>&1 || pr_fail "$OUTP1" "pr phase1"

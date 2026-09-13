@@ -105,9 +105,17 @@ local function paint_keymaps(buf)
   -- rhs は発火時に解決 (ui -> handlers の module-load 循環回避)。keygate は
   -- ユーザー既存と扱って上書きスキップするため、panel の `i` はここが勝つ
   -- (head 窓の view_comments `i` は panel では発火しない)。
+  -- <CR> / o / l は同一 «entry を開く» (DESIGN キー表 «file panel 上の o = 開く。
+  -- diff 窓の o とは意味が違う»)。移動系と R はレビュー窓と同じ handlers。
   for _, kmap in ipairs {
     { k.open_diff, "require('review.handlers.session').open_selected_file()" },
-    { k.open_file, "require('review.handlers.session').open_file_current()" },
+    { k.open_file, "require('review.handlers.session').open_selected_file()" },
+    { k.open_entry, "require('review.handlers.session').open_selected_file()" },
+    { k.next_file, "require('review.handlers.session').next_file()" },
+    { k.prev_file, "require('review.handlers.session').prev_file()" },
+    { k.first_file, "require('review.handlers.session').first_file()" },
+    { k.last_file, "require('review.handlers.session').last_file()" },
+    { k.refresh, "require('review.handlers.session').refresh()" },
     { k.toggle_viewed, "require('review.handlers.session').toggle_viewed_current()" },
     { k.filter, "require('review.handlers.session').filter_sidebar()" },
     { k.toggle_style, "require('review.handlers.session').toggle_listing_style()" },

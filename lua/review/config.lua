@@ -12,6 +12,9 @@ M.defaults = {
   -- file panel (左窓) の幅 (DESIGN.md「API 一覧」config / diff-review「レイアウト」)
   panel_width = 35,
   keymaps = {
+    -- 既定値の正本は docs/design/DESIGN.md「デフォルトキーマップ」表。
+    -- 移動系は diffview 風の <Tab>/<S-Tab>/[F/]F。S / ]d / [d は廃止済みで
+    -- 復活させない (issue #18)。
     diff = {
       add_comment = 'c',
       edit_comment = 'e',
@@ -20,23 +23,33 @@ M.defaults = {
       open_file = 'o',
       close = 'q',
       help = '<F1>',
-      next_file = ']d',
-      prev_file = '[d',
-      focus_sidebar = 'S',
-      -- file panel へ focus (S と同一処理。S の廃止は移動キー置換 issue で) と
-      -- panel 表示トグル (閉じても tab とレビュー窓は残る)
+      next_file = '<Tab>',
+      prev_file = '<S-Tab>',
+      first_file = '[F',
+      last_file = ']F',
+      refresh = 'R',
+      -- file panel へ focus (閉じていれば再建) と panel 表示トグル
+      -- (閉じても tab とレビュー窓は残る)
       focus_panel = '<leader>e',
       toggle_panel = '<leader>b',
       view_comments = 'i',
     },
     sidebar = {
       open_diff = '<CR>',
+      -- panel の o / l は <CR> と同じ «entry を開く» (diff 窓の o とは意味が
+      -- 違う — DESIGN キー表)
       open_file = 'o',
+      open_entry = 'l',
+      next_file = '<Tab>',
+      prev_file = '<S-Tab>',
+      first_file = '[F',
+      last_file = ']F',
       toggle_viewed = 'x',
       close = 'q',
       filter = '/',
       -- list 表示 (フルパス 1 行) と tree 表示の切替 (view state。DESIGN キー表)
       toggle_style = 'i',
+      refresh = 'R',
     },
     sessionlist = {
       open = '<CR>',

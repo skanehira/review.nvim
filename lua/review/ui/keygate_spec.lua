@@ -153,13 +153,21 @@ describe('keygate.install / uninstall', function()
       k.help,
       k.next_file,
       k.prev_file,
-      k.focus_sidebar,
+      k.first_file,
+      k.last_file,
+      k.refresh,
       k.focus_panel,
       k.toggle_panel,
       k.view_comments,
     } do
       local lhs = expand_lhs(key)
       assert.is_true(present[lhs] == true, 'map 缺失: ' .. key)
+    end
+    -- 廃止キー残存ゼロ (issue #18 の撤去契約。上の全件 present が正のアサーション)。
+    -- 分解リテラルなのは DoD の残存検出 pattern (単一文字列リテラル形) と衝突しない
+    -- ようにするため。
+    for _, dead in ipairs { ']' .. 'd', '[' .. 'd', string.upper 's' } do
+      assert.is_nil(present[dead], '廃止キーが張られている: ' .. dead)
     end
   end)
 
@@ -241,7 +249,9 @@ describe('keygate.install / uninstall', function()
           ours = ours + 1
         end
       end
-      assert.equals(13, ours)
+      -- config.keymaps.diff の n -mode 全キー = 15 (c/e/d/y/i/o/q/<F1>/<Tab>/
+      -- <S-Tab>/[F/]F/R/<leader>e/<leader>b)。v の c は別 mode。
+      assert.equals(15, ours)
     end
   )
 
@@ -288,15 +298,81 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
     keygate.install(head_buf, 'sx')
     keygate.install(base_buf, 'sx')
     keygate.install(head_scratch, 'sx')
-    spy_session { 'next_file', 'prev_file', 'focus_sidebar', 'toggle_panel', 'close_by_key' }
+    spy_session {
+      'next_file',
+      'prev_file',
+      'first_file',
+      'last_file',
+      'refresh',
+      'focus_sidebar',
+      'toggle_panel',
+      'close_by_key',
+    }
   end)
   after_each(restore_spies)
 
-  it('実ファイル head 窓の ]d は handlers.next_file を発火する', function()
-    windows.bind(base_buf, head_buf, { head_kind = 'real' })
-    press(head_buf, ']d', windows.win 'head')
-    wait_msg 'SPY:next_file'
-  end)
+  it(
+    '実ファイル head 窓の <Tab>/<S-Tab>/[F/]F/R は対応 handlers を発火する',
+    function()
+      windows.bind(base_buf, head_buf, { head_kind = 'real' })
+      local cases = {
+        {
+          key = '<Tab>',
+          spy = 'SPY:next_file',
+        },
+        {
+          key = '<S-Tab>',
+          spy = 'SPY:prev_file',
+        },
+        {
+          key = '[F',
+          spy = 'SPY:first_file',
+        },
+        {
+          key = ']F',
+          spy = 'SPY:last_file',
+        },
+        {
+          key = 'R',
+          spy = 'SPY:refresh',
+        },
+      }
+      for _, case in ipairs(cases) do
+        state.notifications = {}
+        press(head_buf, case.key, windows.win 'head')
+        wait_msg(case.spy)
+      end
+    end
+  )
+
+  it(
+    '移動/R キーは base 窓でも発火し、gate 不成立窓 (ユーザー窓) では built-in へ戻る',
+    function()
+      windows.bind(base_buf, head_buf, { head_kind = 'real' })
+      -- base 窓: 移動系は head/base 両窓発火 (DESIGN キー表)
+      state.notifications = {}
+      press(base_buf, '[F', windows.win 'base')
+      wait_msg 'SPY:first_file'
+      -- ユーザー窓 (gate 不成立) では同じキーが built-in 化し handlers は走らない
+      -- (head 実ファイルと同じ buf をユーザー窓で見る = review で想定する事故形)
+      vim.api.nvim_win_set_buf(state.user_win, head_buf)
+      vim.api.nvim_set_current_win(state.user_win)
+      state.notifications = {}
+      local res = press(head_buf, 'R', state.user_win)
+      assert.equals('R', res, 'R の fallback が built-in へ返らない')
+      vim.wait(100, function()
+        for _, n in ipairs(state.notifications) do
+          if n.msg:find('SPY:', 1, true) ~= nil then
+            return true
+          end
+        end
+        return false
+      end, 10)
+      for _, n in ipairs(state.notifications) do
+        assert.is_true(n.msg:find('SPY:', 1, true) == nil)
+      end
+    end
+  )
 
   it(
     'gate 不成立窓 (ユーザー窓で同一 buf) では built-in へ戻り handlers は走らない',
