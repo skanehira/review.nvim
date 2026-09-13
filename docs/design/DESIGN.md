@@ -189,6 +189,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - **削除ファイル**: head 側で存在しないファイルの head 窓に実パス (`<repo>/<path>` 等) を `:edit` すると空の新規バッファになり `:w` でファイルが復活する — 削除告知 scratch (`review://deleted/...`、`diffoff`) に置換える
 - **未追跡ファイル**: `git diff <base>` は untracked を出力しないため、branch モードでも未追跡ファイルはレビュー対象にならない (`git add` 前の新ファイルは対象外。復元検証・カウント・prompt に現れない)
 - **extmark と syntax**: 同範囲の syntax 装飾と extmark は競合しうる。コメントの下線・スレッドは独立 namespace と自前 highlight で表現する (窓 diff の Diff* は Neovim 内部適用なので競合対象にしない)
+- `git show-ref --verify` は短縮名を解決しない (e2e 実測)。存在確認は `rev-parse --verify -q`、ローカルブランチ判定 (switch 提案の可否) は `refs/heads/<name>` をフルパスで組んで `show-ref --verify --quiet` に渡す (git/ref.lua `is_local_branch` の形)。短縮名をそのまま show-ref へ渡すと実在ブランチでも非ヒットになり switch 提案が黙って縮退に化ける
 - worktree・fetch のパス・権限挙動の実機検証は macOS / Linux に限られる (Windows は検証範囲外。パス連結は `vim.fs.joinpath` で吸収)
 - worktree 内に未コミット変更があると `git worktree remove` は失敗する (ユーザーの変更を黙って捨てられない)。close 時に検知して `--force` の可否をユーザーへ確認する (決定表の正本: pr-worktree「セッションとレビューの終了」)
 - kill 等で異常終了した経路では VimLeave の掃除が走らない。起動時に「記録上 open のセッションの worktree の実在」をスキャンし、残骸は通知の上で `git worktree prune` + ディレクトリを掃除する (MUST 4 の異常終了側の担保。正本: persistence-restore / pr-worktree)

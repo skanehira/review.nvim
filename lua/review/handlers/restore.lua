@@ -1,10 +1,10 @@
 -- 復元フロー (diff 再取得と anchor 検証の調停)
 -- (docs/design/features/persistence-restore.md「復元手順」「anchor 検証」「起動時」)。
 -- anchor 検証の純粋ロジックは core/anchor (session 層との循環回避)。
--- worktree 解決は session.resolve_worktree (既存 dir 再利用 / 作成・再作成、
--- pr-worktree.md「worktree 作成判断」)。
+-- diff 再取得は session.fetch_prepared 経由 (復元時も head 解決フロー = switch
+-- 提案 / scratch 縮退を通す。worktree 解決も同じ関数内、pr-worktree.md
+-- 「worktree 作成判断」)。
 local config = require 'review.config'
-local git_diff = require 'review.git.diff'
 local git_ref = require 'review.git.ref'
 local result = require 'review.core.result'
 local health = require 'review.handlers.health'
@@ -31,13 +31,30 @@ local function sort_by_slug(sessions)
 end
 
 local function fetch_and_resume(session)
-  git_diff.fetch({ base = session.base, head = session.head, cwd = session.repo }, function(res)
+  -- 復元時も開始と同じ解決経路を通す (head 解決フローで diff 引数形と worktree
+  -- 解が決まる。pr-worktree.md「worktree 作成判断」/ DESIGN「起動時復元」)。
+  session_handler.fetch_prepared({
+    repo = session.repo,
+    id = session.id,
+    mode = session.mode,
+    base = session.base,
+    head = session.head,
+    record = session.worktree,
+  }, function(res)
     if not res.ok then
+      -- E_CANCELLED はユーザー自身の中断なので通知しない (開始と同じ)。
+      if res.code == result.codes.E_CANCELLED then
+        return
+      end
       -- ref が解決不能 (force push / 削除) でも保存セッションは残す
-      notify_warn(usermsg.git_ref_error(res.error))
+      if res.code == result.codes.E_REF then
+        notify_warn(usermsg.git_ref_error(res.error))
+        return
+      end
+      notify_warn(res.error)
       return
     end
-    session_handler.resume_into(session, res.data.files)
+    session_handler.resume_into(session, res.data.files, res.data.worktree)
   end)
 end
 

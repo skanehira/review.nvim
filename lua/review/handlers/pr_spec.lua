@@ -63,9 +63,11 @@ local REAL_INPUT = vim.ui.input
 
 local function install_git(responses)
   state.git_calls = {}
+  state.git_opts = {}
   cli._set_system(function(cmd, opts, on_exit)
     local idx = #state.git_calls + 1
     table.insert(state.git_calls, cmd)
+    state.git_opts[idx] = opts
     if responses[idx] == nil then
       error('pr stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
     end
@@ -166,15 +168,15 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         return { code = 0, stdout = 'origin\nupstream\n', stderr = '' }
       end, -- 4 remotes
       git_ok, -- 5 fetch refs/pull/7/head:review-nvim/pr-7
+      git_ok, -- 6 worktree add (mode=pr は常時作成)
       function()
         return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
-      end, -- 6 diff main..review-nvim/pr-7
-      git_ok, -- 7 worktree add (mode=pr は常時作成)
+      end, -- 7 diff <base> (cwd=worktree、作業ツリー基準)
     }
   end
 
   it(
-    'gh -> rev-parse 失敗 -> origin で fetch -> diff -> worktree add -> pr-7 セッション開始 (INFO: PR タイトル)',
+    'gh -> rev-parse 失敗 -> fetch -> worktree add -> diff(cwd=wt) -> pr-7 開始 (INFO: PR タイトル)',
     function()
       install_git(fork_seq(pr_json()))
 
@@ -189,12 +191,14 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         { 'git', 'fetch', 'origin', 'refs/pull/7/head:review-nvim/pr-7' },
         state.git_calls[5]
       )
-      assert.same({ 'git', 'diff', 'main', 'review-nvim/pr-7' }, state.git_calls[6])
       local wt = paths.worktree_path(REPO_TOP, 'pr-7')
       assert.same(
         { 'git', 'worktree', 'add', '--detach', wt, 'review-nvim/pr-7' },
-        state.git_calls[7]
+        state.git_calls[6]
       )
+      -- 作業ツリー基準: add した worktree の cwd で `git diff <base>` の単引数形
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[7])
+      assert.equals(wt, state.git_opts[7].cwd)
 
       local saved = store.load(REPO_TOP, 'pr-7').data
       assert.same({
@@ -233,11 +237,11 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         function()
           return { code = 0, stdout = 'gitlab\n', stderr = '' }
         end,
-        git_ok,
+        git_ok, -- fetch
+        git_ok, -- worktree add
         function()
           return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
-        end,
-        git_ok,
+        end, -- diff
       }
 
       pr_handler.start '7'
@@ -304,17 +308,18 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
         top_ok,
         json_ok(pr_json()),
         sha_ok, -- rev-parse topic ok
+        git_ok, -- worktree add
         function()
           return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
-        end, -- diff
-        git_ok, -- worktree add
+        end, -- diff (cwd=worktree)
       }
 
       pr_handler.start '7'
 
-      assert.same({ 'git', 'diff', 'main', 'topic' }, state.git_calls[4])
       local wt = paths.worktree_path(REPO_TOP, 'pr-7')
-      assert.same({ 'git', 'worktree', 'add', '--detach', wt, 'topic' }, state.git_calls[5])
+      assert.same({ 'git', 'worktree', 'add', '--detach', wt, 'topic' }, state.git_calls[4])
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[5])
+      assert.equals(wt, state.git_opts[5].cwd)
       assert.equals(5, #state.git_calls)
       assert.equals('topic', store.load(REPO_TOP, 'pr-7').data.head)
     end
@@ -349,9 +354,6 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
         json_ok(pr_json()),
         sha_ok,
         function()
-          return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
-        end, -- diff
-        function()
           return { code = 255, stdout = '', stderr = 'fatal: collision\n' }
         end, -- add fail
         git_ok, -- prune
@@ -364,6 +366,14 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
 
       assert.equals(vim.log.levels.WARN, state.notifications[1].level)
       assert.matches('worktree を作成できません', state.notifications[1].msg)
+      -- 作成に失敗したら diff は走らない (worktree 基準の単引数形は成立しないため)
+      local has_diff = false
+      for _, cmd in ipairs(state.git_calls) do
+        if cmd[2] == 'diff' then
+          has_diff = true
+        end
+      end
+      assert.is_false(has_diff)
       assert.is_nil(store.load(REPO_TOP, 'pr-7').data)
       assert.is_nil(session_handler.active())
     end
@@ -374,10 +384,10 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
       top_ok,
       json_ok(pr_json { state = 'MERGED' }),
       sha_ok,
+      git_ok, -- worktree add
       function()
         return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
-      end,
-      git_ok,
+      end, -- diff
     }
 
     pr_handler.start '7'
@@ -424,11 +434,11 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
       function()
         return { code = 0, stdout = 'origin\n', stderr = '' }
       end,
-      git_ok,
+      git_ok, -- fetch
+      git_ok, -- worktree add (mode=pr)
       function()
         return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
-      end,
-      git_ok,
+      end, -- diff (cwd=worktree)
     }
 
     pr_handler.start '7'
@@ -451,10 +461,10 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
         top_ok,
         json_ok(pr_json { number = 12, url = 'https://github.com/acme/demo/pull/12' }),
         sha_ok,
+        git_ok, -- worktree add
         function()
           return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
-        end,
-        git_ok,
+        end, -- diff
       }
 
       pr_handler.start 'https://github.com/acme/demo/pull/12'

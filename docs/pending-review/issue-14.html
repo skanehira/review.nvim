@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>issue #14 保留レビュー項目</title>
+<style>body{font-family:system-ui;max-width:70rem;margin:2rem auto;padding:0 1rem}li{margin:.5rem 0}.cat{color:#666;font-size:.9em}pre{white-space:pre-wrap;background:#f5f5f5;padding:.5rem}</style>
+<h1>#14 保留レビュー項目 (dev-impl)</h1>
+<p>修正対象外 (high のみ修正運用) により.merge 後にユーザーが確認する項目。確認が済んだらこのファイルごと削除する。</p>
+<h2>medium</h2>
+<ul>
+  <li>
+    <label><input type="checkbox">
+      <b><span data-severity="medium">medium</span> / <span data-category="spec-compliance">spec-compliance</span> — <code>lua/review/handlers/session.lua:831</code></b><br>
+      pr モードで worktree add 成功後に diff 取得が失敗する経路 (fetch_prepared :831-834) が、作りたての created_by_us worktree を掃除も記録 save もせずに孤児化する。族として (a) begin 経路=孤児確定 / (c) 0 差分掃除の remove 失敗+新規作成=記録なしで WARN «起動 scan が回収» が不成立 の 2 箇所に残存 (r1 medium が r2 で範囲を確定して再掲)。<br>
+      <span class="cat">evidence:</span> git_diff.fetch 失敗で cb(res) すると worktree 情報を破棄。呼び出し側 fetch_and_begin (:877-888) は通知のみで掃除に到達しない。DESIGN.md «リポジトリのツリーにゴミを作らない» に対応する回収手段が新規セッション記録が無い孤児には存在しない。実害は次回同 slug 開始時の add 衝突 → E_WORKTREE 案内に落ちるため medium 維持。<br>
+      <span class="cat">fix_hint:</span> diff 失敗時に 0 差分掃除と同じ lock 下 remove で掃除し、掃除不能ならセッション JSON に記録を残して save する等「回収可能な状態」で終える方針を pr-worktree.md «0 差分時の掃除» 節と合わせて決める。(c) の WARN 文言の不成立も同一決定で整合させる。
+    </label>
+  </li>
+</ul>

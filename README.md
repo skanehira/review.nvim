@@ -2,11 +2,12 @@
 
 Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の差分をレビューし、コメントを蓄積して **AI エージェントに渡すプロンプト**として出力するプラグイン。
 
-コメントはディスクに永続化されるので、Neovim を間違えて終了しても次回起動後に `:Review` 1 操作で復元できる。レビュー開始時に head を git worktree にチェックアウトし (branch / PR どちらでも)、**実ファイルを読みながら**レビューできる (レビュー終了時に worktree はクリーンアップされる)。
+コメントはディスクに永続化されるので、Neovim を間違えて終了しても次回起動後に `:Review` 1 操作で復元できる。ブランチレビューは現在のチェックアウトの**作業ツリー** (未コミット変更を含む) を基準に行い、PR レビューは head を git worktree にチェックアウトして行う (レビュー終了時に worktree はクリーンアップされる)。明示した head が現在の checkout と違うコミットなら、確認付きでそのブランチへ `git switch` を提案し、拒否・実行不能なら `git show` 内容の読み取り専用レビューに縮退する。
 
 ## 特徴
 
 - ブランチ間 / コミット間の差分を 2 ペイン表示 (変更ファイル一覧 + unified diff) し、行指定でコメントを作成・編集・削除
+- ブランチレビューは head を worktree にしない (現在のチェックアウトの作業ツリーが対象)。`head 省略 = 現在のブランチを自動採用`
 - コメント・viewed 状態をセッションとして自動保存。再起動後に `:Review` で復元 (`stdpath("data")` 配下に JSON、Neovim が異常終了しても起動時に検出して通知)
 - `:Review pr <番号|URL>` で gh 連携。head を worktree に展開し、`o` でその行の実ファイルを開ける (差分内容と同一の実ファイルなので AI への input としてそのまま読ませられる)
 - コメントを `@path#L<行>` 形式のプロンプトとしてクリップボード / レジスタへコピー
@@ -42,15 +43,17 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 差分をレビューしたいリポジトリで Neovim を起動する:
 
 ```vim
-:Review start main feature      " main..feature の差分を開く (head 省略時は補完付きで選択)
-                                " base / head は <Tab> で branches -> tags 順に補完
+:Review start main feature      " main..feature をレビュー (head 明示)
+:Review start main              " head 省略 = 現在のブランチを自動採用・保存
+                                " (ブランチ名は <Tab> で branches -> tags 順に補完)
+                                " 作業ツリー基準なので未コミット変更もレビュー対象
                                 " :Review delete の <id> と :Review pr の番号も <Tab> で補完
                                 " 同一 refs 組の保存済みセッションがある場合は
                                 " 「継承して comments/viewed を引き継ぐか」の [y/N] 確認が出る
 :Review pr 42                   " PR #42 を worktree でレビュー
 :Review                         " 続きのセッションを復元 (複数あれば選択)
 :Review list                    " 保存済みセッション一覧から開く
-:Review close                   " 保存して閉じる (worktree はここで掃除される)
+:Review close                   " 保存して閉じる (pr の worktree はここで掃除される)
 :Review delete <id>             " 保存済みセッションを削除 (worktree 掃除含む)
 :Review prompt                  " 全コメントのプロンプトをクリップボードへ
 :Review prompt lua/foo.lua      " 指定ファイル分のみ
@@ -95,7 +98,7 @@ Review the changes in main..feature. Please address the comments below.
 setup は冪等にしたい
 ```
 
-セッションは head の worktree で動くため `@` パスは worktree 内の絶対パスになり、エージェントはその場で実ファイルを読める (レビュー中の diff と完全に同一の内容)。outdated 認定されたコメント (差分の揺れで位置が特定できないもの) は既定で除外され、diff 上はグレーアウトした `⚠` スレッドで判別できる。本文は対象行の下に全文スレッドで表示される (GitHub の Files changed と同じ向き)。短いスレッドは 10 行で折りたたまれ、全文は `i` の閲覧窓に出る。
+PR セッションは head の worktree で動くため `@` パスは worktree 内の絶対パスになり、エージェントはその場で実ファイルを読める (レビュー中の diff と完全に同一の内容)。ブランチセッションは現在のチェックアウトが対象なので `@` パスはリポジトリ相対で、レビュー中の作業ツリー (保存済み内容) の実ファイルそのものを指す。outdated 認定されたコメント (差分の揺れで位置が特定できないもの) は既定で除外され、diff 上はグレーアウトした `⚠` スレッドで判別できる。本文は対象行の下に全文スレッドで表示される (GitHub の Files changed と同じ向き)。短いスレッドは 10 行で折りたたまれ、全文は `i` の閲覧窓に出る。
 review 窓では既定で行番号を隠し、winbar に `base..head · path · +a -d · N comments` を
 表示する (GitHub Files changed 風。`setup` の `winbar` / `number` で戻せる)。
 

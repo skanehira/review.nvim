@@ -10,6 +10,7 @@
 -- 状態変更より前に行う (close/delete は worktree status -> 確認 -> save/detach -> 掃除)。
 local git_diff = require 'review.git.diff'
 local git_ref = require 'review.git.ref'
+local git_repo = require 'review.git.repo'
 local git_worktree = require 'review.git.worktree'
 local paths = require 'review.store.paths'
 local anchor = require 'review.core.anchor'
@@ -131,25 +132,16 @@ local function force_prompt(path)
 end
 
 -- ============================================================================
--- worktree 作成判断 (pr-worktree.md 決定表。ブランチ・PR 共通)
+-- worktree 作成判断 (pr-worktree.md 決定表)
 -- ============================================================================
 
--- mode=pr は常時作成。mode=branch は
--- 「rev-parse <head> == rev-parse HEAD かつ git status --porcelain 空」のときだけ不要。
-local function judge_creation_needed(args, cb)
-  if args.mode ~= 'branch' then
-    cb(true)
-    return
-  end
-  git_ref.rev_parse({ ref = args.head, cwd = args.repo }, function(h)
-    git_ref.rev_parse({ ref = 'HEAD', cwd = args.repo }, function(cur)
-      git_worktree.status({ repo = args.repo, path = args.repo }, function(st)
-        local same_commit = h.ok and cur.ok and h.data == cur.data
-        local clean_tree = st.ok and st.data.dirty == false
-        cb(not (same_commit and clean_tree))
-      end)
-    end)
-  end)
+-- 作成するのは mode=pr のみ。branch は現在のチェックアウト (作業ツリー) を
+-- 直接レビューし、head が現在の HEAD と違うときは worktree で回避せずに
+-- switch 提案 / scratch 縮退で対応する (diff-review「head 解決」、DESIGN 決定表
+-- 「worktree 作成条件」)。branch で created_by_us 記録が残っている分
+-- (旧契約の名残) は作成スキップ時の掃除 (cleanup_skipped_record) で回収する。
+local function creation_needed(args)
+  return args.mode == 'pr'
 end
 
 -- add -> (衝突時) prune 再試行 -> (自前記録あり) dir 削除して再々試行。
@@ -237,51 +229,52 @@ end
 
 --- 作成判断〜add〜cb まで (M.resolve_worktree が lock を持つ)。
 local function resolve_locked(args, cb)
+  -- record は nil | vim.NIL | JSON round-trip 済み table のどれでも飛んでくる
+  -- (restore は session.worktree をそのまま渡す)。vim.NIL を table として
+  -- index しないようここで正規化する。
   local record = args.record
-  if record ~= nil and record ~= vim.NIL and type(record) ~= 'table' then
+  if record == nil or record == vim.NIL or type(record) ~= 'table' then
     record = nil
   end
-  judge_creation_needed(args, function(needed)
-    if not needed then
-      if record ~= nil and record.created_by_us == true and dir_exists(record.path) then
-        cleanup_skipped_record({ repo = args.repo, path = record.path }, cb)
-        return
-      end
-      cb(result.ok(vim.NIL))
+  if not creation_needed(args) then
+    if record ~= nil and record.created_by_us == true and dir_exists(record.path) then
+      cleanup_skipped_record({ repo = args.repo, path = record.path }, cb)
       return
     end
-    local path = paths.worktree_path(args.repo, args.id)
-    if
-      record ~= nil
-      and record.created_by_us == true
-      and record.path == path
-      and dir_exists(path)
-    then
-      -- 既存 dir 実在 + git 登録済み => 復元でそのまま再利用 (pr-worktree.md 異常終了回復)。
-      -- list 不能は再利用不可 (= 作成手順側で衝突案内になり、実データを壊さない)。
-      git_worktree.list({ repo = args.repo }, function(res)
-        local real = vim.uv.fs_realpath(path)
-        if res.ok and real ~= nil then
-          for _, p in ipairs(res.data) do
-            if (vim.uv.fs_realpath(p) or p) == real then
-              cb(result.ok(record))
-              return
-            end
+    cb(result.ok(vim.NIL))
+    return
+  end
+  local path = paths.worktree_path(args.repo, args.id)
+  if
+    record ~= nil
+    and record.created_by_us == true
+    and record.path == path
+    and dir_exists(path)
+  then
+    -- 既存 dir 実在 + git 登録済み => 復元でそのまま再利用 (pr-worktree.md 異常終了回復)。
+    -- list 不能は再利用不可 (= 作成手順側で衝突案内になり、実データを壊さない)。
+    git_worktree.list({ repo = args.repo }, function(res)
+      local real = vim.uv.fs_realpath(path)
+      if res.ok and real ~= nil then
+        for _, p in ipairs(res.data) do
+          if (vim.uv.fs_realpath(p) or p) == real then
+            cb(result.ok(record))
+            return
           end
         end
-        add_with_recovery(args, path, record, cb)
-      end)
-      return
-    end
-    add_with_recovery(args, path, record, cb)
-  end)
+      end
+      add_with_recovery(args, path, record, cb)
+    end)
+    return
+  end
+  add_with_recovery(args, path, record, cb)
 end
 
 --- args = { repo, id, mode, head, record? } -> cb(result)。
 --- result.data = worktree 記録テーブル | vim.NIL (作らない)。
 --- 失敗 (E_WORKTREE / E_CANCELLED) は呼び出し側が通知して開始を中断する。
 --- 同一 dir path の remove/add 競合を避けるため worktree lock を取得する
---- (add 判断〜作成〜cb 完了まで lock 下。judge の読み取り git も含む)。
+--- (作成〜cb 完了まで lock 下。branch の名残掃除も同じ lock 内で走る)。
 function M.resolve_worktree(args, cb)
   local lock_path = paths.worktree_path(args.repo, args.id)
   wt_with_lock(lock_path, function()
@@ -731,10 +724,166 @@ local function begin_session(args, files, existing, worktree)
   end
 end
 
+-- ============================================================================
+-- head 解決フロー (branch のみ / docs/design/DESIGN.md 決定表「head が現在の
+-- HEAD と違うとき」/ docs/design/features/diff-review.md「入出力と振る舞い」2)
+-- ============================================================================
+
+-- 縮退の確定文言 (diff-review「開始」2 «…» の通り。UI に触れないこの issue でも
+-- 通知では確定形を使う)。
+local DEGRADED_INFO =
+  'head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします'
+
+local function degraded_notify()
+  vim.notify('review.nvim: ' .. DEGRADED_INFO, vim.log.levels.INFO)
+end
+
+local function switch_offer(head)
+  return (
+    'review.nvim: head %s は現在のチェックアウトと別のコミットです。'
+    .. 'git switch で %s に切り替えてレビューしますか? [y/N]: '
+  ):format(head, head)
+end
+
+--- branch の head 解決。cb(degraded): true = scratch 縮退 (diff は 2 引数形)。
+--- 一致 -> 通常経路 / 不一致 + ローカルブランチ + clean -> [y/N] switch 提案
+--- (承諾 -> git switch、失敗は WARN + 縮退) / 拒否・dirty・非ローカルブランチ
+--- -> 縮退 INFO。rev-parse <head> 失敗は提案も案内も出さず縮退形で diff に渡す
+--- (E_REF の通知は diff 本体が行う)。switch は確認を通過したときだけ (INV-3)。
+local function resolve_head(args, cb)
+  git_ref.rev_parse({ ref = args.head, cwd = args.repo }, function(h)
+    if not h.ok then
+      cb(true)
+      return
+    end
+    local function mismatch_path()
+      git_ref.is_local_branch({ ref = args.head, cwd = args.repo }, function(lb)
+        if not lb.ok then
+          degraded_notify()
+          cb(true)
+          return
+        end
+        git_worktree.status({ repo = args.repo, path = args.repo }, function(st)
+          -- 検知不能 (status 失敗) も dirty と同等に扱う (INV-3 の安全側)
+          if not st.ok or st.data.dirty then
+            degraded_notify()
+            cb(true)
+            return
+          end
+          confirm(switch_offer(args.head), function(yes)
+            if not yes then
+              degraded_notify()
+              cb(true)
+              return
+            end
+            git_repo.switch({ ref = args.head, cwd = args.repo }, function(sw)
+              if sw.ok then
+                cb(false)
+                return
+              end
+              notify_warn(
+                ('git switch に失敗しました。読み取り専用 scratch でレビューします: %s'):format(
+                  sw.error
+                )
+              )
+              degraded_notify()
+              cb(true)
+            end)
+          end)
+        end)
+      end)
+    end
+    git_ref.rev_parse({ ref = 'HEAD', cwd = args.repo }, function(cur)
+      if cur.ok and cur.data == h.data then
+        cb(false)
+        return
+      end
+      mismatch_path()
+    end)
+  end)
+end
+
+-- ============================================================================
+-- 差分取得の下準備 (開始 / 復元 共通)
+-- ============================================================================
+
+--- args = { repo, id, mode, base, head, record? } -> cb(result)。
+--- 成功 result.data = { files, worktree, degraded }。
+--- branch: head 解決 -> 解に一致した引数形で diff (通常 = 単引数 `git diff
+--- <base>` の作業ツリー基準 / 縮退 = `<base> <head>`) -> worktree 判断 (branch は
+--- 作らないので created_by_us 名残の掃除のみ)。pr: worktree を作ってから
+--- cwd=worktree の単引数 diff (pr-worktree「PR 解決」3)。
+--- 失敗は結果型で返す (E_REF / E_WORKTREE / E_CANCELLED)。通知は呼び出し側
+--- (開始と復元で E_REF 翻訳後の扱いが同じなので rules は fetch_and_begin 側で統一)。
+function M.fetch_prepared(args, cb)
+  if args.mode == 'pr' then
+    M.resolve_worktree({
+      repo = args.repo,
+      id = args.id,
+      mode = 'pr',
+      head = args.head,
+      record = args.record,
+    }, function(wres)
+      if not wres.ok then
+        cb(wres)
+        return
+      end
+      git_diff.fetch({ base = args.base, cwd = wres.data.path }, function(res)
+        if not res.ok then
+          cb(res)
+          return
+        end
+        cb(result.ok { files = res.data.files, worktree = wres.data, degraded = false })
+      end)
+    end)
+    return
+  end
+  resolve_head(args, function(degraded)
+    git_diff.fetch({
+      base = args.base,
+      head = degraded and args.head or nil,
+      cwd = args.repo,
+    }, function(res)
+      if not res.ok then
+        cb(res)
+        return
+      end
+      M.resolve_worktree({
+        repo = args.repo,
+        id = args.id,
+        mode = 'branch',
+        head = args.head,
+        record = args.record,
+      }, function(wres)
+        if not wres.ok then
+          cb(wres)
+          return
+        end
+        cb(result.ok { files = res.data.files, worktree = wres.data, degraded = degraded })
+      end)
+    end)
+  end)
+end
+
 local function fetch_and_begin(args, existing)
-  git_diff.fetch({ base = args.base, head = args.head, cwd = args.repo }, function(res)
+  M.fetch_prepared({
+    repo = args.repo,
+    id = args.id,
+    mode = args.mode,
+    base = args.base,
+    head = args.head,
+    record = existing ~= nil and worktree_of(existing) or nil,
+  }, function(res)
     if not res.ok then
-      notify_warn(usermsg.git_ref_error(res.error))
+      -- E_CANCELLED はユーザー自身の中断なので通知しない (close の確認と同じ)。
+      if res.code == result.codes.E_CANCELLED then
+        return
+      end
+      if res.code == result.codes.E_REF then
+        notify_warn(usermsg.git_ref_error(res.error))
+        return
+      end
+      notify_warn(res.error)
       return
     end
     if #res.data.files == 0 then
@@ -745,24 +894,49 @@ local function fetch_and_begin(args, existing)
         ),
         vim.log.levels.INFO
       )
+      -- 開始は開かない = save しない。pr は作成が diff に先行するので、作りたての
+      -- 自前 worktree をそのまま孤児にしない (記録が無いと起動 scan も拾えない)。
+      local wt = res.data.worktree
+      if type(wt) == 'table' and wt.created_by_us == true then
+        -- remove / prune も worktree 登録変更なので resolve_worktree と同じ
+        -- wt_with_lock(path) 下で走らせる (finish_close と同形、全終了経路で
+        -- 解除)。remove 最中の concurrent add は二重登録 (main--x + main--x1) の
+        -- 源で、この掃除が lock 外だと窓を reopen する (pr-worktree.md
+        -- 「worktree 登録操作の直列化」)。
+        wt_with_lock(wt.path, function()
+          git_worktree.remove({ repo = args.repo, path = wt.path }, function(rres)
+            if not rres.ok then
+              notify_warn(
+                ('0 差分セッションの worktree 掃除に失敗しました: %s'):format(
+                  rres.error
+                )
+              )
+              prune_and_rm_dir(args.repo, wt.path, function()
+                wt_unlock(wt.path)
+              end)
+              return
+            end
+            wt_unlock(wt.path)
+            -- 既存保存セッションの記録を再利用 (または旧記録と同じ path を
+            -- 再作成) していた場合、worktree を消した後に JSON が実在しない
+            -- dir を指したまま残らないよう記録を nil 化して save する
+            -- (comments / refs / status はそのまま。開始で開かない = 新規 save はしない)。
+            -- 掃除が完遂できなかった側は created_by_us 記録を残し、起動 scan が
+            -- 回収できる状態を保つ (delete の「dir を消せなければ JSON を残す」と同方針)。
+            local existing_wt = existing ~= nil and worktree_of(existing) or nil
+            if existing_wt ~= nil and existing_wt.path == wt.path then
+              existing.worktree = vim.NIL
+              local sres = store.save(existing)
+              if not sres.ok then
+                notify_warn(sres.error)
+              end
+            end
+          end)
+        end)
+      end
       return
     end
-    M.resolve_worktree({
-      repo = args.repo,
-      id = args.id,
-      mode = args.mode,
-      head = args.head,
-      record = existing ~= nil and worktree_of(existing) or nil,
-    }, function(wres)
-      if not wres.ok then
-        -- E_CANCELLED はユーザー自身の中断なので通知しない (close の確認と同じ)。
-        if wres.code ~= result.codes.E_CANCELLED then
-          notify_warn(wres.error)
-        end
-        return
-      end
-      begin_session(args, res.data.files, existing, wres.data)
-    end)
+    begin_session(args, res.data.files, existing, res.data.worktree)
   end)
 end
 
@@ -848,80 +1022,6 @@ local function proceed(args)
   go(false)
 end
 
-local function head_candidates(branches, tags)
-  local out = {}
-  for _, name in ipairs(branches) do
-    out[#out + 1] = name
-  end
-  for _, name in ipairs(tags) do
-    out[#out + 1] = name
-  end
-  return out
-end
-
--- head 選択の補完候補 (branches -> tags の順。diff-review.md「開始」手順 1)。
-local head_names
-
---- 補完関数の Lua 実体。グローバル Vim script 関数 ReviewNvimHeadComplete が
---- luaeval 経由で呼ぶ (input() は opts の Lua 関数を受理しないため、
---- completion='customlist,{関数名}' の文字形式が唯一の入力経路 —
---- DESIGN.md「既知の制約」)。
-function M.complete_head(arglead, _cmdline, _cursorpos)
-  local lead = arglead or ''
-  local out = {}
-  for _, name in ipairs(head_names or {}) do
-    if name:sub(1, #lead) == lead then
-      out[#out + 1] = name
-    end
-  end
-  return out
-end
-
--- input() が customlist で解決できる「名前のついた」グローバル Vim script 関数を
--- 定義し直す (`:function!`)。luaeval 橋渡しは全対応バージョンにある機構で、
--- opts に Lua 関数を混ぜないことが E467 回避の要点。
-local function ensure_head_completer()
-  vim.cmd [[
-function! ReviewNvimHeadComplete(arglead, cmdline, cursorpos) abort
-  return luaeval(
-    \ "require('review.handlers.session').complete_head(_A[1], _A[2], _A[3])",
-    \ [a:arglead, a:cmdline, a:cursorpos])
-endfunction
-]]
-end
-
-local function select_head(repo, base)
-  git_ref.branches({ cwd = vim.fn.getcwd() }, function(bres)
-    if not bres.ok then
-      notify_warn(bres.error)
-      return
-    end
-    git_ref.tags({ cwd = vim.fn.getcwd() }, function(tres)
-      if not tres.ok then
-        notify_warn(tres.error)
-        return
-      end
-      head_names = head_candidates(bres.data, tres.data)
-      ensure_head_completer()
-      vim.ui.input({
-        prompt = ('%s.. (review head): '):format(base),
-        completion = 'customlist,ReviewNvimHeadComplete',
-      }, function(head)
-        if head == nil or head == '' then
-          return
-        end
-        proceed {
-          repo = repo,
-          id = paths.branch_slug(base, head),
-          mode = 'branch',
-          base = base,
-          head = head,
-        }
-      end)
-    end)
-  end)
-end
-
 local function with_repo_top(cb)
   git_ref.top_level({ cwd = vim.fn.getcwd() }, function(res)
     if not res.ok then
@@ -940,6 +1040,8 @@ end
 
 --- `:Review start <base> [head]` の開始。戻り値はディスパッチ受理
 --- (git 成否は非同期 notify / UI、base 欠損だけ同期 err)。
+--- head 省略 = `rev-parse --abbrev-ref HEAD` を自動採用・保存し、入力 UI を
+--- 出さない (DESIGN.md 決定表「head 省略」/ diff-review.md「開始」1)。
 function M.start(opts)
   if type(opts) ~= 'table' or opts.base == nil or opts.base == '' then
     return result.err(
@@ -948,17 +1050,27 @@ function M.start(opts)
     )
   end
   with_repo_top(function(repo)
-    if opts.head ~= nil and opts.head ~= '' then
+    local function start_with(head)
       proceed {
         repo = repo,
-        id = paths.branch_slug(opts.base, opts.head),
+        id = paths.branch_slug(opts.base, head),
         mode = 'branch',
         base = opts.base,
-        head = opts.head,
+        head = head,
       }
-    else
-      select_head(repo, opts.base)
     end
+    if opts.head ~= nil and opts.head ~= '' then
+      start_with(opts.head)
+      return
+    end
+    git_ref.abbrev_ref_head({ cwd = repo }, function(res)
+      if not res.ok then
+        notify_warn(res.error)
+        return
+      end
+      -- detached HEAD は literal "HEAD" がそのまま返る (保存後も同じ解決経路で复原可)
+      start_with(res.data)
+    end)
   end)
   return result.ok()
 end
@@ -1160,30 +1272,20 @@ function M.commit_comment_change()
   end
 end
 
---- 読み込み済みセッションを new 側差分とともに開始処理へ引き継ぐ
---- (restore ルート: worktree 作成判断 (既存 dir は再利用 / 無ければ作成・再作成)
---- -> anchor 検証 -> files map 再構築 -> UI -> open save)。
-function M.resume_into(session, files)
-  M.resolve_worktree({
+--- 読み込み済みセッションを new 側差分とともに開始処理へ引き継ぐ (restore ルート:
+--- anchor 検証 -> files map 再構築 -> UI -> open save)。worktree の解決は
+--- fetch_prepared 側で済んでいるため、解 (記録 | vim.NIL) を受ける。
+--- 復元時の head 解決 (switch 提案 / scratch 縮退) も fetch_prepared が走る
+--- (DESIGN.md 決定表「起動時復元」)。
+function M.resume_into(session, files, worktree)
+  begin_session({
     repo = session.repo,
     id = session.id,
     mode = session.mode,
+    base = session.base,
     head = session.head,
-    record = worktree_of(session),
-  }, function(wres)
-    if not wres.ok then
-      notify_warn(wres.error)
-      return
-    end
-    begin_session({
-      repo = session.repo,
-      id = session.id,
-      mode = session.mode,
-      base = session.base,
-      head = session.head,
-      pr = session.pr,
-    }, files, session, wres.data)
-  end)
+    pr = session.pr,
+  }, files, session, worktree)
 end
 
 -- 現在 diff バッファの path (meta.kind=diff のとき)。NO_DIFF プレースホルダは

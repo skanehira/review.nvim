@@ -209,7 +209,7 @@ local function pr_number_candidates(lead)
   return out
 end
 
---- complete=customlist 用。head 選択 UI と同じ候補源 (branches -> tags、
+--- complete=customlist 用。base / head の refs 候補 (branches -> tags、
 -- diff-review.md「開始」手順 1) を cmdline customlist から返す。customlist は
 -- 同期関数なので取得は同期 (git/ref.refs_sync の待機上限 + ここでの TTL cache が
 -- 暴走防止の 2 段構え — DESIGN.md「既知の制約」補完例外行)。
