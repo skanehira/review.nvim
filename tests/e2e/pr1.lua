@@ -80,7 +80,7 @@ local run = function()
   vim.cmd 'normal o'
   wait_for(function()
     return #vim.api.nvim_list_tabpages() == tabs_before + 1
-  end, 'o で前行儀 tab 增加')
+  end, 'o で前行儀 tab 増加')
   if vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf()) ~= fname then
     fail(
       'o 先が worktree 基準の実ファイルパスでない: '
