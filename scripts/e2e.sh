@@ -13,9 +13,15 @@
 # status=closed。
 # phase3: :Review start <base> 1 引数 -> head 省略 = rev-parse --abbrev-ref HEAD
 # による自動採用・保存 (入力 UI なし) を実 git で pin (issue #14 の開始契約)。
-# phase5: 編集 :write -> BufWritePost 自動リフレッシュで panel ±カウントが
-# 変わる最小シナリオ (issue #15 未コミット反映契約)。新規 XDG data dir で
-# 開始確認を踏ませずに走る。
+# phase5: head 窓での編集 :write -> BufWritePost 自動リフレッシュで ±カウント更新
+# + anchor 検証 outdated 0 (行補正) + y の保存基準 prompt、未保存の二重基準、
+# 手動 R (issue #15/#19 未コミット反映契約)。新規 XDG data dir で開始確認を踏ませず
+# に走る。
+# head 解決フロー (issue #19): 専用 fixture REPO2 で switch (y -> 実 git switch +
+# 実ファイル窓) / scratch 縮退 (n -> 両窓 review:// scratch + INFO) / 縮退再開始
+# (継承時も再評価) / 復元時の head 解決再評価 (scratch <-> 実窓の切り替わりを
+# 跨プロセスで pin)。tabclose シナリオは :tabclose -> status=open 保存 + extmark
+# 残骸 0。
 # E2E は clipboard provider 無しで走る (クリップボード非依存、"0 レジスタ比較のみ)。
 #
 # 契約: 毎回 mktemp の一意ディレクトリに fixture repo と XDG_DATA_HOME を作り、
@@ -227,9 +233,147 @@ grep -q 'E2E-R1 counts=updated' "$OUT5" || {
   echo 'e2e: 保存後の自動リフレッシュで ±カウントが変わらない (E2E-R1 欠落)' >&2
   exit 1
 }
+# 保存時リフレッシュは anchor 検証 (直近パース結果基準) も同時走らせる:
+# outdated 0 + 行補正 (E2E-U1) と、その補正位置基準の y prompt (E2E-U2)。
+# U2 の期待行が U1 の行補正に依存しているため、検証が no-op (保存行據え置き)
+# なら U2 の grep が落ちる構成 (相互に対照)。
+grep -q 'E2E-U1 anchor=active+corrected' "$OUT5" || {
+  echo 'e2e: 保存時リフレッシュの anchor 検証 (active + 行補正) が観測できない (E2E-U1 欠落)' >&2
+  exit 1
+}
+grep -q 'E2E-U2 yank=saved-baseline' "$OUT5" || {
+  echo 'e2e: y の "0 が保存 (リフレッシュ済み) 基準の prompt でない (E2E-U2 欠落)' >&2
+  exit 1
+}
 # 手動 R キー (#18 登録): BufWritePost を通さない再取得経路が効く
 grep -q 'E2E-R2 manual-refresh=ok' "$OUT5" || {
   echo 'e2e: head 窓 R での手動リフレッシュが ±カウントに反映されない (E2E-R2 欠落)' >&2
+  exit 1
+}
+
+# --- head 解決フロー: switch / scratch 縮退 / 縮退再開始 / 復元再評価 (issue #19) --
+# 専用 fixture REPO2 (checkout=main、feature が a.lua 変更 + b.lua 追加で先行)。
+# y 応答の switch は実 checkout を動かすので、各シナリオ driver が自分で
+# checkout を正規化する (単発実行しても決定的)。データ dir / notify ログも
+# シナリオごとに分離し、縮退再開始と復元再評価だけプロセス間で共有する。
+REPO2="$WORK/repo2"
+mkdir -p "$REPO2"
+git init -q -b main "$REPO2"
+git -C "$REPO2" config user.email e2e@example.com
+git -C "$REPO2" config user.name e2e
+printf 'one\n' >"$REPO2/a.lua"
+git -C "$REPO2" add -A
+git -C "$REPO2" commit -qm headres-base
+git -C "$REPO2" checkout -qb feature
+printf 'ONE changed\n' >"$REPO2/a.lua"
+printf 'added\n' >"$REPO2/b.lua"
+git -C "$REPO2" add -A
+git -C "$REPO2" commit -qm headres-feature
+git -C "$REPO2" checkout -q main
+
+run_headres() { # $1=script $2=data dir $3=log $4..=env 追加
+  local script="$1" data="$2" log="$3"
+  shift 3
+  mkdir -p "$data"
+  : >"$log"
+  ( cd "$REPO2" && env XDG_DATA_HOME="$data" REVIEW_E2E_LOG="$log" "$@" \
+      nvim --headless --noplugin -u "$REPO_ROOT/tests/e2e_init.lua" -c "luafile $script" )
+}
+headres_fail() { # $1=out file, $2=label
+  cat "$1" >&2
+  echo "e2e: $2 失敗" >&2
+  exit 1
+}
+
+# (switch) head 明示 + y -> 実 git switch 実行・通常経路 (実ファイル窓)。
+OUTSW=$(mktemp "$WORK/headres-switch.out.XXXXXX")
+run_headres "$REPO_ROOT/tests/e2e/switch.lua" "$WORK/d-switch" "$WORK/headres-switch.log" \
+  >"$OUTSW" 2>&1 || headres_fail "$OUTSW" "head 解決 switch"
+grep -q 'E2E-SW1 switch=real' "$OUTSW" || headres_fail "$OUTSW" 'switch (E2E-SW1 欠落)'
+[ "$(git -C "$REPO2" rev-parse --abbrev-ref HEAD)" = "feature" ] || {
+  echo 'e2e: switch シナリオ後に HEAD が feature でない (git switch が走っていない)' >&2
+  exit 1
+}
+if grep -q '読み取り専用 scratch でレビューします' "$WORK/headres-switch.log"; then
+  echo 'e2e: switch 承諾経路で scratch 縮退 INFO が出た (縮退してはいけない)' >&2
+  exit 1
+fi
+
+# (縮退) 同上 n 応答 -> 両窓 review:// scratch + INFO 文言 (head 表示名は ref 名)。
+OUTDG=$(mktemp "$WORK/headres-degrade.out.XXXXXX")
+run_headres "$REPO_ROOT/tests/e2e/degrade.lua" "$WORK/d-degrade" "$WORK/headres-degrade.log" \
+  >"$OUTDG" 2>&1 || headres_fail "$OUTDG" "head 解決 縮退"
+grep -q 'E2E-DG1 scratch-pair' "$OUTDG" || headres_fail "$OUTDG" '縮退 (E2E-DG1 欠落)'
+grep -q 'head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします' \
+  "$WORK/headres-degrade.log" || {
+  echo 'e2e: 縮退 INFO 文言がログに出ない (diff-review「開始」2 の確定文言)' >&2
+  exit 1
+}
+
+# (縮退再開始) main checkout のまま同一 refs 組を再開始 -> 継承 + head 解決再評価
+# -> 再び両窓 scratch + INFO (セッションは 1 組 1 件・status=open)。
+OUTDR1=$(mktemp "$WORK/headres-dr1.out.XXXXXX")
+run_headres "$REPO_ROOT/tests/e2e/degrade_restart.lua" "$WORK/d-degrade-restart" \
+  "$WORK/headres-dr1.log" REVIEW_E2E_STEP=1 >"$OUTDR1" 2>&1 \
+  || headres_fail "$OUTDR1" "縮退再開始 STEP=1"
+grep -q 'E2E-DR1 degraded=once' "$OUTDR1" || headres_fail "$OUTDR1" '縮退再開始 STEP=1'
+OUTDR2=$(mktemp "$WORK/headres-dr2.out.XXXXXX")
+run_headres "$REPO_ROOT/tests/e2e/degrade_restart.lua" "$WORK/d-degrade-restart" \
+  "$WORK/headres-dr2.log" REVIEW_E2E_STEP=2 >"$OUTDR2" 2>&1 \
+  || headres_fail "$OUTDR2" "縮退再開始 STEP=2"
+grep -q 'E2E-DR2 restart=degraded' "$OUTDR2" || headres_fail "$OUTDR2" '縮退再開始 STEP=2'
+grep -q 'head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします' \
+  "$WORK/headres-dr2.log" || {
+  echo 'e2e: 縮退再開始 (継承) 時の INFO 文言が 2 回目ログに出ない' >&2
+  exit 1
+}
+
+# (復元 re-eval) 通常開始 -> (checkout を寄せて) 復元で scratch / 実ファイルへ
+# 切り替わることを跨プロセスで pin (MUST 2。位置・viewed 一致は phase1+phase2)。
+OUTRR1=$(mktemp "$WORK/headres-rr1.out.XXXXXX")
+run_headres "$REPO_ROOT/tests/e2e/restore_reeval.lua" "$WORK/d-restore-reeval" \
+  "$WORK/headres-rr1.log" REVIEW_E2E_RMODE=real-start >"$OUTRR1" 2>&1 \
+  || headres_fail "$OUTRR1" "復元再評価 real-start"
+grep -q 'E2E-RR1 mode=real-start' "$OUTRR1" || headres_fail "$OUTRR1" '復元再評価 real-start'
+OUTRR2=$(mktemp "$WORK/headres-rr2.out.XXXXXX")
+run_headres "$REPO_ROOT/tests/e2e/restore_reeval.lua" "$WORK/d-restore-reeval" \
+  "$WORK/headres-rr2.log" REVIEW_E2E_RMODE=scratch-restore >"$OUTRR2" 2>&1 \
+  || headres_fail "$OUTRR2" "復元再評価 scratch-restore"
+grep -q 'E2E-RR2 mode=scratch-restore' "$OUTRR2" || headres_fail "$OUTRR2" '復元再評価 scratch-restore'
+grep -q 'head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします' \
+  "$WORK/headres-rr2.log" || {
+  echo 'e2e: 復元時の scratch 縮退 INFO 文言がログに出ない (MUST 2 証跡)' >&2
+  exit 1
+}
+OUTRR3=$(mktemp "$WORK/headres-rr3.out.XXXXXX")
+run_headres "$REPO_ROOT/tests/e2e/restore_reeval.lua" "$WORK/d-restore-reeval" \
+  "$WORK/headres-rr3.log" REVIEW_E2E_RMODE=real-restore >"$OUTRR3" 2>&1 \
+  || headres_fail "$OUTRR3" "復元再評価 real-restore"
+grep -q 'E2E-RR3 mode=real-restore' "$OUTRR3" || headres_fail "$OUTRR3" '復元再評価 real-restore'
+if grep -q '読み取り専用 scratch でレビューします' "$WORK/headres-rr3.log"; then
+  echo 'e2e: real-restore (checkout==head) で縮退 INFO が出た (誤縮退)' >&2
+  exit 1
+fi
+
+# (tab 消滅) :tabclose -> status=open 保存 + extmark namespace 残骸 0 + INFO 文言。
+# 主 fixture の main..feature/feature checkout を使う (データ dir は専有)。
+OUTTB=$(mktemp "$WORK/tabclose.out.XXXXXX")
+mkdir -p "$WORK/d-tabclose"
+: >"$WORK/tabclose.log"
+if ! ( cd "$REPO" && env XDG_DATA_HOME="$WORK/d-tabclose" REVIEW_E2E_LOG="$WORK/tabclose.log" \
+    nvim --headless --noplugin -u "$REPO_ROOT/tests/e2e_init.lua" \
+    -c "luafile $REPO_ROOT/tests/e2e/tabclose.lua" ) >"$OUTTB" 2>&1; then
+  cat "$OUTTB" >&2
+  echo "e2e: tab 消滅シナリオ失敗" >&2
+  exit 1
+fi
+cat "$OUTTB" | tee -a "$WORK/e2e-report.txt"
+grep -q 'E2E-TB1 status=open extmarks=0' "$OUTTB" || {
+  echo 'e2e: :tabclose 後の status=open 保存 / extmark 残骸 0 が確認できない' >&2
+  exit 1
+}
+grep -q 'レビュー tab を閉じました (セッションは保存済み' "$WORK/tabclose.log" || {
+  echo 'e2e: TabClosed の INFO 文言がログに出ない' >&2
   exit 1
 }
 
@@ -371,4 +515,4 @@ if git -C "$REPO_PR" rev-parse --verify -q review-nvim/pr-7 >/dev/null; then
 fi
 [ ! -f "$(JSON_OF "$D_PR5")" ] || { echo 'e2e: delete 後にセッション JSON が残っている' >&2; exit 1; }
 
-echo "e2e: OK — golden path line=$L1 + 保存時リフレッシュ (E2E-R1) + PR worktree (o 実ファイル / close 掃除 / crash 回復 / --force 確認 / delete dir+ref)"
+echo "e2e: OK — golden path line=$L1 + 未コミット反映 (E2E-R1/U1/U2/R2) + head 解決フロー (switch / 縮退 / 縮退再開始 / 復元再評価) + tab 消滅 (open 維持・残骸 0) + PR worktree (o 実ファイル / close 掃除 / crash 回復 / --force 確認 / delete dir+ref)"

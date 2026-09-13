@@ -110,9 +110,19 @@ local function run()
     local bl = vim.api.nvim_buf_get_lines(base_buf, 0, -1, false)
     return bl[3] == 'line3'
   end, 'base scratch に git show main:a.lua が充填される')
-  -- 窓 diff が効いている (base/head 2 窓 + fold/hunk 移動の土台)
-  if not vim.wo[head_win].diff or vim.wo[head_win].foldmethod ~= 'diff' then
-    fail 'head 窓に窓 diff opts が効いていない'
+  -- 窓 diff opts (diff/scrollbind/foldmethod=diff) が base/head 2 窓それぞれの
+  -- 窓ローカルに効いている (fold/hunk 移動と連動スクロールの土台)
+  for _, w in ipairs { head_win, base_win } do
+    local wo = vim.wo[w]
+    if not wo.diff then
+      fail('窓 diff が効いていない (win=' .. tostring(w) .. ')')
+    end
+    if not wo.scrollbind then
+      fail('scrollbind が効いていない (win=' .. tostring(w) .. ')')
+    end
+    if wo.foldmethod ~= 'diff' then
+      fail('foldmethod=diff でない (win=' .. tostring(w) .. ')')
+    end
   end
   -- 開通 focus は head 窓 (直後の c/e が効く位置)
   expect(head_win == vim.api.nvim_get_current_win(), '開通 focus が head 窓でない')
@@ -268,7 +278,7 @@ local function run()
   vim.cmd 'normal o'
   wait_for(function()
     return #vim.api.nvim_list_tabpages() == tabs_before + 1
-  end, 'o で前行儀 tab 增加')
+  end, 'o で前行儀 tab 増加')
   local b_real = realpath(vim.fs.joinpath(top, 'b.lua'))
   if win_buf_name(vim.api.nvim_get_current_win()) ~= b_real then
     fail(
