@@ -75,10 +75,25 @@ local function run()
     fail('anchor 検証で active のはずが outdated 表示: ' .. all)
   end
 
-  local sidebar_lines =
-    vim.api.nvim_buf_get_lines(vim.fn.bufnr 'review://sidebar/main--feature', 0, -1, false)
-  if sidebar_lines[2] == nil or sidebar_lines[2]:sub(1, 6) ~= '[✓] ' then
-    fail('復元後 sidebar の viewed が復元されていない: ' .. tostring(sidebar_lines[2]))
+  -- tree 既定: 行番号でなく entry 写像で a.lua 行を引いて [✓] を見る (#17)
+  local filepanel = require 'review.ui.filepanel'
+  local sidebar_buf = vim.fn.bufnr 'review://sidebar/main--feature'
+  local sidebar_lines = vim.api.nvim_buf_get_lines(sidebar_buf, 0, -1, false)
+  local a_row = nil
+  for r = 1, #sidebar_lines do
+    local e = filepanel.row_entry(sidebar_buf, r)
+    if e ~= nil and e.kind == 'file' and e.path == 'a.lua' then
+      a_row = r
+    end
+  end
+  if a_row == nil or sidebar_lines[a_row]:sub(1, 6) ~= '[✓] ' then
+    fail(
+      '復元後 sidebar の viewed が復元されていない: '
+        .. tostring(sidebar_lines[a_row or 0])
+    )
+  end
+  if sidebar_lines[1] ~= 'Changes (3)' then
+    fail('復元 panel が tree 既定で開いていない: ' .. tostring(sidebar_lines[1]))
   end
 
   print('E2E-S2 line=' .. (marks[1][2] + 1) .. ' body=use a map here viewed=1')

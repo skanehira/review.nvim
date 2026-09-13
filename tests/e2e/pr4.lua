@@ -33,7 +33,17 @@ vim.defer_fn(function()
     local sidebar = vim.fn.bufnr 'review://sidebar/pr-7'
     local win = vim.fn.win_findbuf(sidebar)[1]
     vim.api.nvim_set_current_win(win)
-    vim.api.nvim_win_set_cursor(win, { 1, 0 })
+    -- tree 既定では a.lua 行はヘッダの後ろ。entry 写像で行を引く (#17)
+    local filepanel = require 'review.ui.filepanel'
+    local row = nil
+    for r = 1, vim.api.nvim_buf_line_count(sidebar) do
+      local e = filepanel.row_entry(sidebar, r)
+      if e ~= nil and e.kind == 'file' and e.path == 'a.lua' then
+        row = r
+      end
+    end
+    assert(row, 'pr panel に a.lua 行がない')
+    vim.api.nvim_win_set_cursor(win, { row, 0 })
     vim.cmd 'normal o'
     local fname = vim.uv.fs_realpath(vim.fs.joinpath(wt_root, 'a.lua'))
     wait_for(function()

@@ -59,6 +59,8 @@ rows[59] = 'LINE60-changed'
 open(sys.argv[1], 'w').write('\n'.join(rows) + '\n')
 PYEOF
 printf 'feature addition\nsecond line\n' >"$REPO/b.lua"
+mkdir -p "$REPO/src/deep"
+printf 'src work\n' >"$REPO/src/deep/new.lua"
 git -C "$REPO" add -A
 git -C "$REPO" commit -qm feature
 # phase3 で自動採用 head とは別の ref (feature と同一ツリー)。補完候補にも出る。
@@ -96,6 +98,23 @@ grep -q 'E2E-Y1 yank=@path-range+body' "$OUT1" || {
 }
 grep -q 'E2E-P1 prompt=exact' "$OUT1" || {
   echo 'e2e: :Review prompt の "0 が見出し + 2 件全量 (id 昇順) と全文一致しない' >&2
+  exit 1
+}
+# file panel ツリー表示 golden path (issue #17): ヘッダ・連結 chain dir・i トグル・折込
+grep -q 'E2E-TR1 tree=header+chain' "$OUT1" || {
+  echo 'e2e: panel tree ヘッダ/単一 child 連結 («Showing changes for:» と src/deep/) が壊れた' >&2
+  exit 1
+}
+grep -q 'E2E-TR2 i=list' "$OUT1" || {
+  echo 'e2e: `i` で list フラット表示に切り替わらない (または "i" が効かない)' >&2
+  exit 1
+}
+grep -q 'E2E-TR3 i=tree' "$OUT1" || {
+  echo 'e2e: `i` 再押下で tree 表示に戻らない' >&2
+  exit 1
+}
+grep -q 'E2E-TR4 fold=toggled' "$OUT1" || {
+  echo 'e2e: dir 行 <CR> の折り畳み/展開が効かない' >&2
   exit 1
 }
 # provider 無し退路 (ai-prompt.md): "0 コピーは成功し WARN が出ている (= 退路を観測)

@@ -75,7 +75,9 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 | レビュー窓          | `S` / `<leader>e`                 | file panel へ移動                    |
 | レビュー窓          | `<leader>b`                       | file panel 表示トグル                |
 | レビュー窓          | `i`                               | カーソル行のコメント全文を閲覧        |
-| file panel          | `<CR>` / `o` / `x` / `/` / `q`    | head/base に開く / 実ファイル / viewed 切替 / 絞り込み |
+| file panel          | `<CR>` / `o`                    | ファイル行 = head/base に開く / 実ファイル。dir 行 = 折り畳み |
+| file panel          | `i`                               | list (フルパス 1 行) ⇄ tree 表示切替 |
+| file panel          | `x` / `/` / `q`                   | viewed 切替 / 絞り込み / 終了 |
 | セッション一覧      | `<CR>` / `q` / `d`                | 開く / 閉じる / 削除                 |
 
 すべて buffer-local で `setup` の `keymaps` から変更可能 (設定キー名と既定値は `:h review-keymaps`)。レビュー窓のキーは押した時点の窓 role を照合して発火するので、ユーザーが自分の窓で同じ実ファイルを見ていてもレビュー操作は誤発火しません (gate を通らない窓では 1 キーストロークが built-in 動作に戻ります)。例:
@@ -85,6 +87,8 @@ require('review').setup({ keymaps = { diff = { add_comment = 'gc' } } })
 ```
 
 head/base の 2 窓は Neovim 標準の窓 diff (`foldmethod=diff`) で、変更行は `DiffAdd` / `DiffDelete` 系の標準 highlight で色分けされます。hunk 間は `[c` / `]c` (標準)、fold は `za` / `zo` / `zR` (標準) で、レビュー側からのキーマップはありません。ファイル間は `]d` / `[d`、変更一覧は `S` / `<leader>e`、一覧のトグルは `<leader>b` で移動します。
+
+file panel は既定でフォルダツリー表示です。単一 child の dir 連鎖は `a/b/c/` と連結され、dir 行の status は配下の集約 (全部同一記号ならそのまま、混在は `*`)。`<CR>` / `o` を dir 行で押すと折り畳み、ファイル行で押すと開きます。フラットなフルパス一覧が見たければ `i` で list 表示へ切替 (絞り込み・折り畳みと並ぶ view state で、セッションには保存されません)。ファイルを移動で開くと panel のカーソルがその行に追従し、選択行がハイライトされます (相互ハイライト)。nvim-web-devicons が入っていればファイルアイコンが自動で出ます (無くてもテキスト表示のまま。ランタイム依存にはなりません)。
 
 `c` / `e` で開くコメント入力ウィンドウは、本文入力中 (insert) は **`<CR>` = 改行**、`q` などで Normal に戻ったあと **`<CR>` = 確定** して閉じる。本文があるときは `q` では閉じず (誤って入力を捨てないため)、続けて `q` を押したときだけ破棄して閉じる。`<C-y>` は insert 中の確定、`<Esc>` は Normal に戻るだけで窓は閉じない。操作はウィンドウのタイトルと `<F1>` の help にも表示される。
 
