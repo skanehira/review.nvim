@@ -410,6 +410,32 @@ describe('windows: q (close) と :tabclose の両経路', function()
     end
   )
 
+  -- 互換 pin (issue #26): 「閉じたのが自分の tab か」の帰属判定は is_valid の
+  -- 失効タイミングに依存してはいけない (0.10.0 は TabClosed 発火時点で review tab
+  -- の handle がまだ valid:true を返す)。別 tab 消滅で発火しない側を両バージョンで
+  -- 固定し、「常に発火」への誤修正を弾く。
+  it(
+    'レビュー tab 以外を :tabclose しても on_tab_closed は発火せず state は残る (0.10.0/stable pin)',
+    function()
+      local called = 0
+      windows.open {
+        dir = OTHER_DIR,
+        on_tab_closed = function()
+          called = called + 1
+        end,
+      }
+      local review_t = windows.state().tab
+      vim.api.nvim_set_current_tabpage(state.tab)
+      vim.cmd 'tabclose!'
+      vim.wait(100)
+
+      assert.equals(0, called)
+      assert.is_true(vim.api.nvim_tabpage_is_valid(review_t))
+      assert.is_not_nil(windows.state())
+      assert.equals(review_t, vim.api.nvim_win_get_tabpage(windows.win 'head'))
+    end
+  )
+
   it('state が無いときの close は no-op で安全', function()
     windows.close()
     assert.is_nil(windows.state())

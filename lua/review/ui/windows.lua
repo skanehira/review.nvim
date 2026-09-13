@@ -103,6 +103,10 @@ function M.open(opts)
 
   -- review tab がユーザー操作 (:tabclose / :tabonly 等) で消えた検知。
   -- close() 側は closing フラグで区別する (q = close の掃除はここで走らせない)。
+  -- 帰属判定は nvim_list_tabpages() への現存で行う。is_valid は TabClosed 発火
+  -- 時点の handle 失効タイミングがバージョン間で違い、0.10.0 では閉じた直後の
+  -- review tab が true を返って「別の tab が閉じた」と誤判定し発火しない (issue #26
+  -- 実測: 0.10.0 is_valid=true / list 現存=false、0.13 は both false)。
   release_autocmd()
   autocmd_id = vim.api.nvim_create_autocmd('TabClosed', {
     group = TAB_GROUP,
@@ -111,8 +115,10 @@ function M.open(opts)
       if current == nil or current.closing then
         return
       end
-      if vim.api.nvim_tabpage_is_valid(current.tab) then
-        return -- 閉じられたのは別の tab
+      for _, t in ipairs(vim.api.nvim_list_tabpages()) do
+        if t == current.tab then
+          return -- 閉じられたのは別の tab (review tab は現存)
+        end
       end
       st = nil
       release_autocmd()

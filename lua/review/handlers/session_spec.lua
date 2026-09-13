@@ -1626,6 +1626,35 @@ describe('session.close / session.delete (q 経路 = close と tab 消滅)', fun
     end
   )
 
+  -- 互換 pin (issue #26): v0.10.0 と stable で TabClosed 発火時点の tab handle
+  -- 失効タイミングが違う (0.10.0 は is_valid が true のまま発火する)。両バージョンが
+  -- ともに満たすべき振る舞いの 3 点セットを 1 つの test に締める。
+  it(
+    'tab 消滅 → 掃除完走 + windows.state() nil + session status=open 維持'
+      .. ' (0.10.0/stable 互換 pin)',
+    function()
+      start_done('main', 'feature')
+      local review_t = review_tab()
+
+      vim.api.nvim_set_current_tabpage(review_t)
+      vim.cmd 'tabclose!'
+      vim.wait(300, function()
+        return ui_windows.state() == nil and session_handler.active() == nil
+      end)
+
+      assert.is_true(
+        not vim.tbl_contains(vim.api.nvim_list_tabpages(), review_t),
+        'review tab が現存している (消滅していない)'
+      )
+      assert.is_nil(
+        ui_windows.state(),
+        'tab 消滅後も windows.state が居残りの版がある'
+      )
+      assert.is_nil(session_handler.active())
+      assert.equals('open', load_saved().status, 'tab 消滅を close と解釈しない')
+    end
+  )
+
   it(
     'レビュー tab を閉じたまま :Review start (同一 refs) で開き直せる (placeholder でなく実窓)',
     function()
