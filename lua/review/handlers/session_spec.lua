@@ -480,8 +480,9 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
         pr = vim.NIL,
         worktree = vim.NIL,
         status = 'open',
-        -- 先頭 open_file が viewed=true (初期開きも open_file 共通処理)
-        files = { ['a.lua'] = { viewed = true }, ['b.lua'] = { viewed = false } },
+        -- files entry は一覧解決時 viewed=false で作られるが、open 効果では付かない
+        -- (レビュー完了マーク = panel の x トグルのみ / diff-review「file panel」)
+        files = { ['a.lua'] = { viewed = false }, ['b.lua'] = { viewed = false } },
         comments = {},
         created_at = 4321,
         updated_at = 4321,
@@ -513,11 +514,11 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
 
       local sb = vim.fn.bufnr(SIDEBAR_NAME)
       assert.not_equals(-1, sb)
-      -- 先頭 open_file が viewed=true なので行頭に [✓]
+      -- 開始 open ではマークを付けない (開いただけの行は素のまま)
       assert.same({
         'Changes (2)',
         'Showing changes for: main..作業ツリー',
-        '[✓] M a.lua +1 -0',
+        'M a.lua +1 -0',
         'A b.lua +1 -0',
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
       assert.equals(0, #state.notifications)
@@ -1386,7 +1387,7 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
   local function prepare_feature_with_comment_then_switch()
     start_done('main', 'feature')
     inject_comment 'KEEP ME' -- a.lua (save + 表示再構成まで共通経路)
-    -- b.lua を viewed にする (先頭 a.lua は開始 open で既に viewed=true)
+    -- b.lua だけ x でレビュー完了にトグル (a.lua は開いているが未マークのまま)
     focus_panel_file 'b.lua'
     session_handler.toggle_viewed_current()
 
@@ -1424,7 +1425,7 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       assert.equals(1, #state.inputs) -- close+継承は 1 回の確認に統合
       assert.equals(
         'review.nvim: active セッション main--hotfix です。閉じて main--feature を継承しますか？'
-          .. ' コメント内容も引き継ぎます [y/N]: ',
+          .. ' コメント・完了マーク内容も引き継ぎます [y/N]: ',
         state.inputs[1].prompt
       )
       assert.equals(SLUG, session_handler.active().id)
@@ -1433,9 +1434,10 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       assert.same(saved.comments, reloaded.comments) -- 上書きされず comments がそのまま
       assert.equals(true, reloaded.files['b.lua'].viewed)
       assert.equals('closed', load_saved('main--hotfix').status)
+      -- 継承後も a.lua は未マーク (開封連動が無い契約の回帰 pin) / b のマークは保持
       local a_row = panel_row_for('file', 'a.lua')
       assert.equals(
-        '[✓] M a.lua +1 -0',
+        'M a.lua +1 -0',
         vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)[a_row]
       )
     end
@@ -1702,17 +1704,19 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(vim.api.nvim_get_current_win()))
   end
 
-  it('<CR> で head/base をそのファイルに張り替え viewed=true + save', function()
-    start_done('main', 'feature')
-    focus_panel_file 'b.lua'
+  it(
+    '<CR> open は head/base を張り替えるがレビュー完了マークを付けない',
+    function()
+      start_done('main', 'feature')
+      focus_panel_file 'b.lua'
 
-    session_handler.open_selected_file()
+      session_handler.open_selected_file()
 
-    local entry = load_saved().files['b.lua']
-    assert.equals(true, entry.viewed)
-    assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
-    assert.equals(state.repo .. '/b.lua', head_buf_name())
-  end)
+      assert.equals(false, load_saved().files['b.lua'].viewed)
+      assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
+      assert.equals(state.repo .. '/b.lua', head_buf_name())
+    end
+  )
 
   it(
     '<CR> は focus を head 窓へ送る (panel に残らない。以降の c/e が効く)',
@@ -1754,12 +1758,12 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     assert.equals('head', ui_windows.role_of(ui_windows.win 'head'))
   end)
 
-  it('<Tab> で次ファイルへ open_file (viewed save / focus は head)', function()
+  it('<Tab> で次ファイルへ open_file (マークは触らない / focus は head)', function()
     start_done('main', 'feature') -- 先頭 a.lua
     session_handler.next_file()
 
     assert.equals(state.repo .. '/b.lua', ex_bufname())
-    assert.equals(true, load_saved().files['b.lua'].viewed)
+    assert.equals(false, load_saved().files['b.lua'].viewed)
   end)
 
   it('<S-Tab> で前ファイルに戻る (base git show 再充填)', function()
@@ -1796,13 +1800,21 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     end
   )
 
-  it('[F/]F は viewed 更新と save を伴う (panel <CR> と同一処理)', function()
-    start_done('main', 'feature') -- 先頭 a.lua (開始 open で viewed)
-    assert.is_true(load_saved().files['a.lua'].viewed)
-    assert.is_false(load_saved().files['b.lua'].viewed)
-    session_handler.last_file() -- b.lua
-    assert.is_true(load_saved().files['b.lua'].viewed)
-  end)
+  it(
+    '[F/]F open でマークは連動せず、x トグルが付け外しして save する',
+    function()
+      start_done('main', 'feature') -- 先頭 a.lua open
+      assert.equals(false, load_saved().files['a.lua'].viewed)
+      session_handler.last_file() -- b.lua
+      assert.equals(false, load_saved().files['b.lua'].viewed)
+
+      focus_panel_file 'b.lua'
+      session_handler.toggle_viewed_current()
+      assert.equals(true, load_saved().files['b.lua'].viewed) -- 付与と直後 save (INV-4)
+      session_handler.toggle_viewed_current()
+      assert.equals(false, load_saved().files['b.lua'].viewed) -- 外しも同様
+    end
+  )
 
   it(
     'S / <leader>e (focus_sidebar) で focus が panel へ移り、閉窓からは左再建',
@@ -1839,25 +1851,28 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
       assert.same({
         'Changes (2)',
         'Showing changes for: main..作業ツリー',
-        '[✓] M a.lua +1 -0',
+        'M a.lua +1 -0',
         'A b.lua +1 -0',
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
     end
   )
 
-  it('x で viewed 切替 -> 直後に save (両方向)', function()
-    start_done('main', 'feature') -- a.lua は開始 open で viewed=true
-    focus_panel_file 'a.lua'
+  it(
+    'x でマークを付け外し -> 直後に save (開始 open は未マークから開始)',
+    function()
+      start_done('main', 'feature') -- a.lua 開始 open (viewed=false)
+      focus_panel_file 'a.lua'
 
-    session_handler.toggle_viewed_current()
-    assert.equals(false, load_saved().files['a.lua'].viewed)
+      session_handler.toggle_viewed_current()
+      assert.equals(true, load_saved().files['a.lua'].viewed)
 
-    session_handler.toggle_viewed_current()
-    assert.equals(true, load_saved().files['a.lua'].viewed)
-  end)
+      session_handler.toggle_viewed_current()
+      assert.equals(false, load_saved().files['a.lua'].viewed)
+    end
+  )
 
   it('x 後に panel 一覧が [✓] 再描画される (付与と解除の両方向)', function()
-    start_done('main', 'feature') -- a.lua は開始 open で viewed=true -> [✓]
+    start_done('main', 'feature') -- 開封だけでは [✓] が付かない前提
     focus_panel_file 'b.lua'
     session_handler.toggle_viewed_current()
 
@@ -1865,7 +1880,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     assert.same({
       'Changes (2)',
       'Showing changes for: main..作業ツリー',
-      '[✓] M a.lua +1 -0',
+      'M a.lua +1 -0',
       '[✓] A b.lua +1 -0',
     }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
 
@@ -1873,7 +1888,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     assert.same({
       'Changes (2)',
       'Showing changes for: main..作業ツリー',
-      '[✓] M a.lua +1 -0',
+      'M a.lua +1 -0',
       'A b.lua +1 -0',
     }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
   end)
@@ -2886,7 +2901,7 @@ describe('panel 絞り込み (`/`)', function()
     assert.same({
       'Changes (1)',
       'Showing changes for: main..作業ツリー',
-      '[✓] M a.lua +1 -0',
+      'M a.lua +1 -0',
     }, panel_lines())
     assert.equals('main..feature · 1 file · 0 comments · filter=a.lua', panel_winbar())
   end)
@@ -2911,7 +2926,7 @@ describe('panel 絞り込み (`/`)', function()
     assert.same({
       'Changes (1)',
       'Showing changes for: main..作業ツリー',
-      '[✓] M a.lua +1 -0',
+      'M a.lua +1 -0',
     }, panel_lines())
   end)
 
@@ -2966,7 +2981,8 @@ end)
 -- BufWritePost -> `git diff <base>` 再取得 -> 再パース -> anchor 検証 ->
 -- ±カウント・panel・スレッド・winbar 再適用 -> :diffupdate -> 永続化。in-flight まとめ /
 -- 失敗保持 / close・切替時の active guard を応答キューで pin する (#15 の契約移植)。
--- 3 窓構造での観測面: winbar は w:review_winbar (窓変数)、panel 行は viewed=[✓]
+-- 3 窓構造での観測面: winbar は w:review_winbar (窓変数)、panel 行の [✓] は
+-- x でトグルするレビュー完了マーク (open では付かない)
 -- 表記、threads は head 実バッファ extmark、再取得で消えたファイルは files map と
 -- 一覧から落ち panel winbar 末尾 ⚠N で可視化 (#16 契約、persistence-restore
 -- 「anchor 検証」)。
@@ -3168,7 +3184,8 @@ describe(
         -- 3 窓契約: 再取得で消えた b.lua は files map に合成行を作らない
         -- (一覧も同じ集合。outdated は panel winbar ⚠N で可視化)
         assert.same({
-          ['a.lua'] = { viewed = true }, -- 開始時初期開きで viewed
+          -- open はマークを変えない (viewed=レビュー完了 = x でのみ付与)
+          ['a.lua'] = { viewed = false },
           ['c.lua'] = { viewed = false },
         }, saved.files)
 
@@ -3176,7 +3193,7 @@ describe(
         assert.same({
           'Changes (2)',
           'Showing changes for: main..作業ツリー',
-          '[✓] M a.lua +2 -0',
+          'M a.lua +2 -0',
           'A c.lua +1 -0',
         }, panel_rows())
         -- winbar: head 窓は窓変数 chrome (w:review_winbar 一本化)
@@ -3225,7 +3242,7 @@ describe(
         assert.same({
           'Changes (2)',
           'Showing changes for: main..作業ツリー',
-          '[✓] M a.lua +2 -0',
+          'M a.lua +2 -0',
           'A c.lua +1 -0',
         }, panel_rows())
         assert.equals(0, #state.notifications)
@@ -3314,7 +3331,7 @@ describe(
         assert.equals(1, state.diff_calls) -- 結果破棄 = 追い fetch も走らない
         assert.equals('closed', load_saved().status)
         assert.same(
-          { ['a.lua'] = { viewed = true }, ['b.lua'] = { viewed = false } },
+          { ['a.lua'] = { viewed = false }, ['b.lua'] = { viewed = false } },
           load_saved().files -- c.lua 再パース結果が書き戻されていない
         )
         assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME)) -- 再描画で窓も復活しない
@@ -3346,11 +3363,11 @@ describe(
         assert.same({
           'Changes (2)',
           'Showing changes for: main..作業ツリー',
-          '[✓] M a.lua +2 -0',
+          'M a.lua +2 -0',
           'A c.lua +1 -0',
         }, panel_rows())
         assert.same(
-          { ['a.lua'] = { viewed = true }, ['c.lua'] = { viewed = false } },
+          { ['a.lua'] = { viewed = false }, ['c.lua'] = { viewed = false } },
           load_saved().files
         )
       end
@@ -3445,7 +3462,7 @@ describe(
         assert.same({
           'Changes (2)',
           'Showing changes for: main..作業ツリー',
-          '[✓] M a.lua +2 -0',
+          'M a.lua +2 -0',
           'A c.lua +1 -0',
         }, panel_rows())
 
@@ -3581,7 +3598,7 @@ describe('file panel ツリー / view state (issue-17)', function()
     'Showing changes for: main..作業ツリー',
     '* app/',
     '  M util/',
-    '    [✓] M x.lua +1 -0 app/util/',
+    '    M x.lua +1 -0 app/util/',
     '  A y.lua +1 -0 app/',
     'A cmd/',
     '  A main.go +1 -0 cmd/',
@@ -3615,7 +3632,7 @@ describe('file panel ツリー / view state (issue-17)', function()
       session_handler.toggle_listing_style()
       local _, lines = panel_window_lines()
       assert.same({
-        '[✓] M app/util/x.lua +1 -0',
+        'M app/util/x.lua +1 -0',
         'A app/y.lua +1 -0',
         'D cmd +0 -1',
         'A cmd/main.go +1 -0',
@@ -3716,8 +3733,9 @@ describe('file panel ツリー / view state (issue-17)', function()
     end
     -- files は path -> {viewed} のまま (collapsed などの混入なし)
     assert.same({
-      ['app/util/x.lua'] = { viewed = true },
-      ['app/y.lua'] = { viewed = true },
+      -- 開始 open + <Tab> open だけではマークは付かない
+      ['app/util/x.lua'] = { viewed = false },
+      ['app/y.lua'] = { viewed = false },
       cmd = { viewed = false },
       ['cmd/main.go'] = { viewed = false },
       ['z.txt'] = { viewed = false },

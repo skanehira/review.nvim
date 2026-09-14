@@ -744,7 +744,7 @@ end
 --- 移動系 (panel <CR>/o/l 以外の開く導線・<Tab>/<S-Tab>/[F/]F・開始/復元時の
 --- 初期開き) が
 --- 必ず通る単一经路 (diff-review「open_file(path)」)。種別解決 → 窓に base/head を
---- 張り、chrome 再適用、viewed=true、save、panel 再描画、コメント extmark 再適用。
+--- 張り、chrome 再適用、panel 再描画、コメント extmark 再適用 (マークは変えない)。
 local function resolve_and_open(path)
   if active == nil then
     return
@@ -830,16 +830,12 @@ local function resolve_and_open(path)
     ui_commentmarks.apply(active.session, cur.head_buf, path)
   end
 
-  -- viewed=true + save + panel 再描画 (移動系すべてで同一。「既読」状態の更新)。
-  local entry = session.files[path]
-  if entry == nil then
-    entry = { viewed = false }
-    session.files[path] = entry
-  end
-  entry.viewed = true
-  -- panel カーソルを開いたファイル行へ逆追従 (<CR> 以外の移動系・初期開き含む)
+  -- panel カーソルを開いたファイル行へ逆追従 (<CR> 以外の移動系・初期開き含む)。
+  -- open はレビュー完了マーク (files[path].viewed = 行頭 [✓]) を変えない:
+  -- マークは panel の x でユーザーがトグルするのみ (diff-review「file panel」)。
+  -- したがって open_file の共通経路は永続状態を変えず save も不要
+  -- (INV-4 の save 対象 = コメント CRUD / マーク切替 / 差分再取得)。
   refresh_panel(path == M.NO_CHANGES and nil or { kind = 'file', path = path })
-  persist() -- INV-4: viewed 更新の直後 (open_file 共通処理)
   apply_chrome()
 end
 
@@ -1139,7 +1135,7 @@ local function proceed(args)
       confirm(
         (
           'review.nvim: active セッション %s です。閉じて %s を継承しますか？'
-          .. ' コメント内容も引き継ぎます [y/N]: '
+          .. ' コメント・完了マーク内容も引き継ぎます [y/N]: '
         ):format(active.session.id, slug),
         function(yes)
           if yes then

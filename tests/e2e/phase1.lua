@@ -134,7 +134,7 @@ local function run()
   )
 
   -- file panel tree golden path (issue #17): ヘッダ 2 行・単一 child 連結 dir・
-  -- 初期 open_file の viewed 先頭 [✓]・親パス grey 相当のメタ接尾
+  -- 開始 open ではマークを付けない (レビュー完了 [✓] = x トグルのみ)・親パス grey 接尾
   local tl = panel_lines()
   expect(tl[1] == 'Changes (3)', 'panel tree ヘッダ不一致: ' .. tostring(tl[1]))
   expect(
@@ -149,8 +149,9 @@ local function run()
     'new.lua 行フォーマット不一致: ' .. tl[nrow]
   )
   expect(
-    tl[panel_row('file', 'a.lua')]:sub(1, 6) == '[✓] ',
-    '初期 open_file の viewed が panel に行頭 [✓] として出ていない'
+    tl[panel_row('file', 'a.lua')] == 'M a.lua +2 -2',
+    '開始 open の行に mark が付いている (開封では [✓] を付けない契約): '
+      .. tostring(tl[panel_row('file', 'a.lua')])
   )
 
   -- `i` = list フラット ⇄ tree と、dir 行 <CR> の折り畳み/展開 (#17 契約)
@@ -159,7 +160,7 @@ local function run()
   vim.cmd 'normal i'
   local ll = panel_lines()
   expect(
-    table.concat(ll, '\n') == '[✓] M a.lua +2 -2\nM b.lua +2 -1\nA src/deep/new.lua +1 -0',
+    table.concat(ll, '\n') == 'M a.lua +2 -2\nM b.lua +2 -1\nA src/deep/new.lua +1 -0',
     'i で list 表示にならない: ' .. table.concat(ll, ' / ')
   )
   print 'E2E-TR2 i=list'
@@ -242,7 +243,7 @@ local function run()
   end
   print 'E2E-T1 thread=eol+virtlines'
 
-  -- panel <CR> で 2 ファイル目 (b.lua) へ (viewed 反映 + focus は head)
+  -- panel <CR> で 2 ファイル目 (b.lua) へ (open だけではマークは付かない + focus は head)
   vim.api.nvim_set_current_win(panel_win)
   vim.api.nvim_win_set_cursor(panel_win, { panel_row('file', 'b.lua'), 0 })
   local cr = vim.api.nvim_replace_termcodes('<CR>', true, false, true)
@@ -259,11 +260,11 @@ local function run()
   wait_for(function()
     return vim.api.nvim_buf_get_lines(b_base_buf, 0, -1, false)[1] == 'base'
   end, 'base scratch に git show main:b.lua が充填される')
-  -- '[✓] ' は 6 バイト ([ + ✓ 3B + ] + space)。string.sub はバイト指定。
+  -- <CR> open だけでは行頭に [✓] は出ない (開封 != レビュー完了)
   local brow = panel_row('file', 'b.lua')
   local sb_lines = panel_lines()
-  if sb_lines[brow] == nil or sb_lines[brow]:sub(1, 6) ~= '[✓] ' then
-    fail('sidebar viewed 切り替え後の行不一致: ' .. tostring(sb_lines[brow]))
+  if sb_lines[brow] == nil or sb_lines[brow]:sub(1, 6) == '[✓] ' then
+    fail('open だけで [✓] が付いた: ' .. tostring(sb_lines[brow]))
   end
 
   -- head 窓 o: 前行儀 tab に実ファイルを開く (review tab を壊さず・編集可)。
@@ -274,6 +275,18 @@ local function run()
     win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'b.lua')),
     '<CR> 後の focus が b.lua の head 窓でない'
   )
+  -- b.lua に x でマーク付与 (focus を一時的に panel へ戻す)。以後の head 窓 o に
+  -- 備えて focus は head 窓へ戻す。
+  vim.api.nvim_set_current_win(panel_win)
+  vim.api.nvim_win_set_cursor(panel_win, { brow, 0 })
+  vim.cmd 'normal x'
+  wait_for(function()
+    local l = panel_lines()[brow]
+    return l ~= nil and l:sub(1, 6) == '[✓] '
+  end, 'x で b.lua 行に [✓]')
+  vim.api.nvim_set_current_win(head_win)
+  print 'E2E-VW x=mark'
+
   local tabs_before = #vim.api.nvim_list_tabpages()
   vim.cmd 'normal o'
   wait_for(function()

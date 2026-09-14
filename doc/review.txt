@@ -41,7 +41,7 @@ USAGE						*review-usage*
 					「保存時自動反映」)。同一 refs 組の
 					保存済みセッションがある場合は「継承
 					するか」の [y/N] 確認が出る (y で
-					comments / viewed を引き継ぎ、n で
+					comments / 完了マークを引き継ぎ、n で
 					何もしない)
 	:Review pr {number|url}			PR レビュー開始 (gh 連携)。
 					{number} は <Tab> で open PR の番号が
@@ -185,7 +185,8 @@ KEYMAPS						*review-keymaps*
 	q		セッションを閉じる (コメント 0 件は無確認)
 	<F1>		キーバインドの help float
 	<Tab>		次のファイルを開く (head/base を張り替え。パス昇順・絞り込み後の
-			並び。端では無動作。viewed 更新と save は一覧の <CR> と同じ)
+			並び。端では無動作。一覧の <CR> と同じ open 経路 (マークは
+			変えない))
 	<S-Tab>		前のファイルを開く (上記と同じ規則)
 	[F		最初のファイルを開く (現対象が最初のとき無動作)
 	]F		最後のファイルを開く (現対象が最後のとき無動作)
@@ -207,11 +208,12 @@ KEYMAPS						*review-keymaps*
 	は «*»)。単一 child の dir 連鎖は «a/b/c/» と連結表示する。file 行は
 	«<status> <icon?> <basename> +a -d» に親パスを grey で添える。アイコンは
 	nvim-web-devicons があるときだけ自動で出る (無くてもテキスト表示)。
-	viewed ファイルは行頭に [✓]。
+	レビュー完了マークは行頭に [✓]。open や移動では決して付かず、パネルの
+	x でユーザーが付ける (セッションに保存され再起動後も復元)。
 
 	<CR>		file 行 = そのファイルを head/base 窓に開き、focus を head
-			窓へ移動 (viewed 自動 true)。dir 行 = 折り畳み/展開の
-			トグル (カーソルは dir 行に残る)
+			窓へ移動 (開いただけでレビュー完了マークは付かない)。dir 行 =
+			折り畳み/展開のトグル (カーソルは dir 行に残る)
 	o		<CR> と同じ «entry を開く»。panel の o は開くキーで、
 			レビュー窓の o (実ファイルを別 tab で開く) とは意味が
 			違う
@@ -224,7 +226,8 @@ KEYMAPS						*review-keymaps*
 	i		list 表示 (フルパス 1 行) ⇄ tree 表示を切替。絞り込み・
 			折り畳み・選択行は状態として引き継ぐが、セッション
 			ファイルには保存しない (開き直しで tree 既定に戻る)
-	x		viewed 切替 (dir ヘッダ行では無動作)
+	x		レビュー完了マーク [✓] を付ける / 外す (dir ヘッダ行では
+			無動作。open や移動では自動で付かない)
 	/		一覧を絞り込む。入力 = paths の大文字小文字無視の
 			部分一致で再描画。空入力で解除、Esc で現状維持。
 			絞り込み中は <CR>/o/l/x/<Tab>/<S-Tab>/[F/]F も
@@ -249,7 +252,7 @@ SESSION 状態と復旧				*review-sessions*
 保存済みセッションには open / closed の 2 状態がある (list で 1 行表示):
 
  契約化された「閉じる」操作は q / `:Review close` の 2 つ (同じ手順): comments +
- viewed を保存して closed にし、レビュー tab を閉じ、plugin が作った worktree を
+ 完了マークを保存して closed にし、レビュー tab を閉じ、plugin が作った worktree を
  掃除する (closed は `:Review` では復元できず、`:Review list` からのみ再開できる。
  開くと自動的に open に戻り worktree は再生成される)。
 

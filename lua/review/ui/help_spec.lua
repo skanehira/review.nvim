@@ -99,7 +99,9 @@ describe('help.open', function()
     assert.is_true(has_line(lines, 'R 差分を再取得 (レビュー窓の R と同一)'))
     assert.is_true(has_line(lines, 'i list 表示 (フルパス 1 行) ⇄ tree 表示を切替'))
     assert.is_true(has_line(lines, '/ 一覧を絞り込む (空入力で解除)'))
-    assert.is_true(has_line(lines, 'x viewed 切替'))
+    assert.is_true(
+      has_line(lines, 'x レビュー完了マーク [✓] 切替 (open では付かない)')
+    )
     -- gate 不成立窓の 1 keystroke built-in 副作用の help 明記契約 (DESIGN 決定表
     -- 「review キーの実装」)。文案の正本はこの行。
     assert.is_true(

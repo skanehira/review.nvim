@@ -218,8 +218,9 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         pr = { number = 7, url = 'https://github.com/acme/demo/pull/7' },
         worktree = { path = wt, created_by_us = true },
         status = 'open',
-        -- 開始時の初期開き = open_file 共通処理なので先頭ファイルは viewed=true
-        files = { ['a.lua'] = { viewed = true } },
+        -- open_file はレビュー完了マークを変えない (開始 open でも false のまま、
+        -- マークは panel の x でトグル)
+        files = { ['a.lua'] = { viewed = false } },
         comments = {},
         created_at = 4321,
         updated_at = 4321,

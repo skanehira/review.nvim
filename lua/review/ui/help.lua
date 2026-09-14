@@ -55,7 +55,7 @@ local SECTIONS = {
       { 'last_file', '最後のファイル (上記と同じ規則)' },
       { 'refresh', '差分を再取得 (レビュー窓の R と同一)' },
       { 'toggle_style', 'list 表示 (フルパス 1 行) ⇄ tree 表示を切替' },
-      { 'toggle_viewed', 'viewed 切替' },
+      { 'toggle_viewed', 'レビュー完了マーク [✓] 切替 (open では付かない)' },
       { 'filter', '一覧を絞り込む (空入力で解除)' },
       { 'close', 'セッションを閉じる' },
     },

@@ -8,7 +8,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 
 - 差分は専有 tabpage の 3 窓 (file panel │ base │ head) の**窓 diff** で確認。head 窓は実ファイルなので編集も LSP も効いたままレビューできる。file panel はトグル可
 - ブランチレビューは head を worktree にしない (現在のチェックアウトの作業ツリーが対象)。`head 省略 = 現在のブランチを自動採用`
-- コメント・viewed 状態をセッションとして自動保存。再起動後に `:Review` で復元 (`stdpath("data")` 配下に JSON、Neovim が異常終了しても起動時に検出して通知)
+- コメント・レビュー完了マーク (`[✓]`、panel の `x` で手動トグル) をセッションとして自動保存。再起動後に `:Review` で復元 (`stdpath("data")` 配下に JSON、Neovim が異常終了しても起動時に検出して通知)
 - 保存した差分は自動でレビューに反映。レビュー対象ファイルを保存 (`:w`。head 窓でもユーザー窓でも可、縮退 scratch は対象外) すると差分を再取得し、±カウント・コメント位置 (anchor)・プロンプトが直近保存基準で更新され、窓 diff も保存時に再計算される。未保存のバッファ編集は表示にだけ映る
 - `:Review pr <番号|URL>` で gh 連携。head を worktree に展開し、レビュー tab はその worktree に tcd される (head 窓 = worktree 内の実ファイル。レビュー終了時に worktree はクリーンアップされる)
 - コメントを `@path#L<行>` 形式のプロンプトとしてクリップボード / レジスタへコピー
@@ -52,7 +52,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
                                 " (カウント・プロンプトは保存済み内容基準)
                                 " :Review delete の <id> と :Review pr の番号も <Tab> で補完
                                 " 同一 refs 組の保存済みセッションがある場合は
-                                " 「継承して comments/viewed を引き継ぐか」の [y/N] 確認が出る
+                                " 「継承して comments/完了マークを引き継ぐか」の [y/N] 確認が出る
 :Review pr 42                   " PR #42 を worktree でレビュー
 :Review                         " 続きのセッションを復元 (複数あれば選択)
 :Review list                    " 保存済みセッション一覧から開く
@@ -81,7 +81,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 | file panel          | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (レビュー窓と同じ動作) |
 | file panel          | `R`                               | 差分を再取得 (レビュー窓と同じ)      |
 | file panel          | `i`                               | list (フルパス 1 行) ⇄ tree 表示切替 |
-| file panel          | `x` / `/` / `q`                   | viewed 切替 / 絞り込み / 終了 |
+| file panel          | `x` / `/` / `q`                   | 完了マーク [✓] 切替 / 絞り込み / 終了 |
 | セッション一覧      | `<CR>` / `q` / `d`                | 開く / 閉じる / 削除                 |
 
 すべて buffer-local で `setup` の `keymaps` から変更可能 (設定キー名と既定値は `:h review-keymaps`)。レビュー窓のキーは押した時点の窓 role を照合して発火するので、ユーザーが自分の窓で同じ実ファイルを見ていてもレビュー操作は誤発火しません (gate を通らない窓では 1 キーストロークが built-in 動作に戻ります)。例:

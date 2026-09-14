@@ -75,28 +75,34 @@ local function run()
     fail('anchor 検証で active のはずが outdated 表示: ' .. all)
   end
 
-  -- tree 既定: 行番号でなく entry 写像で a.lua 行を引いて [✓] を見る (#17)
+  -- tree 既定: 行番号でなく entry 写像で行を引く。phase1 で x 付与した b.lua の
+  -- マークが復元され、開封のみの a.lua は無マークのまま (陰性対照)
   local filepanel = require 'review.ui.filepanel'
   local sidebar_buf = vim.fn.bufnr 'review://sidebar/main--feature'
   local sidebar_lines = vim.api.nvim_buf_get_lines(sidebar_buf, 0, -1, false)
-  local a_row = nil
-  for r = 1, #sidebar_lines do
-    local e = filepanel.row_entry(sidebar_buf, r)
-    if e ~= nil and e.kind == 'file' and e.path == 'a.lua' then
-      a_row = r
+  local function row_of(path)
+    for r = 1, #sidebar_lines do
+      local e = filepanel.row_entry(sidebar_buf, r)
+      if e ~= nil and e.kind == 'file' and e.path == path then
+        return r
+      end
     end
   end
-  if a_row == nil or sidebar_lines[a_row]:sub(1, 6) ~= '[✓] ' then
+  local a_row, b_row = row_of 'a.lua', row_of 'b.lua'
+  if b_row == nil or sidebar_lines[b_row]:sub(1, 6) ~= '[✓] ' then
     fail(
-      '復元後 sidebar の viewed が復元されていない: '
-        .. tostring(sidebar_lines[a_row or 0])
+      '復元後 sidebar の b.lua マークが復元されていない: '
+        .. tostring(sidebar_lines[b_row or 0])
     )
+  end
+  if a_row == nil or sidebar_lines[a_row]:sub(1, 6) == '[✓] ' then
+    fail('開封のみの a.lua にマークが復元された: ' .. tostring(sidebar_lines[a_row]))
   end
   if sidebar_lines[1] ~= 'Changes (3)' then
     fail('復元 panel が tree 既定で開いていない: ' .. tostring(sidebar_lines[1]))
   end
 
-  print('E2E-S2 line=' .. (marks[1][2] + 1) .. ' body=use a map here viewed=1')
+  print('E2E-S2 line=' .. (marks[1][2] + 1) .. ' body=use a map here mark=1(a=0)')
 
   -- q (close) 経路: コメントありなので vim.ui.input 確認になる (headless では
   -- 応答を注入。pr4 と同手法)。承認後、レビュー tab 消滅 + 実ファイルの

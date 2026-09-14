@@ -39,7 +39,7 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 | rename | **新パス**の実ファイル/scratch | `git show <base>:<旧パス>` (旧パス自体が新規なら `review://null/...`) |
 | binary | 告知 scratch `review://binary/<session>/<path>` ×両窓共有 (`diffoff`。git パースの „Binary files differ“ を 1 行表示) | 同 buffer を共有 |
 
-- open_file(path) = 移動系の唯一経路: head/base を上記で張り、chrome 再適用、viewed=true、save、panel 再描画、コメント extmark 再適用。head が実バッファのとき内容変化があれば `:diffupdate`
+- open_file(path) = 移動系の唯一経路: head/base を上記で張り、chrome 再適用、panel 再描画、コメント extmark 再適用。open はレビュー完了マークを変えず永続状態も触らないため save しない (INV-4 の save 対象 = コメント CRUD / マーク切替 / 差分再取得)。head が実バッファのとき内容変化があれば `:diffupdate`
 
 **コメント表示 (head バッファの extmark)**:
 
@@ -72,11 +72,11 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 
 **file panel** (`review://sidebar/<session>`、filetype `review-list`。キーは DESIGN 表):
 
-- tree 表示 (既定): ヘッダ行 `Changes (N)` と `Showing changes for: <base>..<head 表示名 (作業ツリー) >`、続いてパスツリー。ディレクトリは折りたたみ可 (既定展開。collapsed は view state)、**単一 child 連鎖は連結表示** (`a/b/c/`)。**dir 行は末尾に `/` を付けファイルと同じ行フォーマット帯で識別する** (同名のファイルと dir が同時差分に出るケースの区別規則)。dir 行の status は子の集約 (全子同一記号ならそのまま、種類混在は `*` — 単独 status `M` と衝突させない)、file 行は `<status> <icon?> <basename> +<a> -<d>` + 親パス grey サフィックス。viewed  ファイルは行頭 `[✓]`。**devicons は存在自動検出** (無ければアイコンなしのテキスト表示。ランタイム依存ゼロは崩さない)
+- tree 表示 (既定): ヘッダ行 `Changes (N)` と `Showing changes for: <base>..<head 表示名 (作業ツリー) >`、続いてパスツリー。ディレクトリは折りたたみ可 (既定展開。collapsed は view state)、**単一 child 連鎖は連結表示** (`a/b/c/`)。**dir 行は末尾に `/` を付けファイルと同じ行フォーマット帯で識別する** (同名のファイルと dir が同時差分に出るケースの区別規則)。dir 行の status は子の集約 (全子同一記号ならそのまま、種類混在は `*` — 単独 status `M` と衝突させない)、file 行は `<status> <icon?> <basename> +<a> -<d>` + 親パス grey サフィックス。ファイルのレビュー完了マークが行頭 `[✓]`: **open/移動では決して付かず、panel の `x` でユーザーがトグルするのみ** (session の `files[path].viewed` に保存され、`p` 相当の非表示はない = 絞り込み `/` とは別系統)。**devicons は存在自動検出** (無ければアイコンなしのテキスト表示。ランタイム依存ゼロは崩さない)
 - list 表示 (`i` でトグル): フルパス 1 行の現行フラット形式。filter・viewed は tree と同じ集合で働く
 - 選択追従: panel のカーソル移動だけでは diff を切り替えない (diffview 動作)。`<CR>` / `o` / `l` が open_file。逆に open_file 時は panel カーソルを追従スクロールさせる (**選択行 hl `ReviewPanelFile`+`cursorline` 窓有効** — 相互ハイライト)
 - hl group: `ReviewPanelFile` / `ReviewPanelDir` / `ReviewPanelStatus` / `ReviewPanelMeta` (差分行の着色は窓 diff が Neovim 標準 Diff* を直接使う — DESIGN「命名」)
-- `/` 絞り込み・`x` viewed・`R`・`q`・`<Tab>`/`<S-Tab>`/`[F`/`]F` は DESIGN 表の動作。絞り込み・collapsed・listing style は view state (session JSON に載せない)
+- `/` 絞り込み・`x` レビュー完了マーク切替・`R`・`q`・`<Tab>`/`<S-Tab>`/`[F`/`]F` は DESIGN 表の動作。絞り込み・collapsed・listing style は view state (session JSON に載せない)
 - 表記の細部 (実装契約として固定): 同一階層は dir の subtree 先行 -> file 行、各々名前のバイト順。indent は 1 階層 2 半角 space (連結連鎖の子行のインデントは deepest 階層数に従う)。collapsed の dir 行のみ行頭に `▸` マーク (展開中はマークなし)。collapsed 集合の key は連結末尾 (= deepest) の dir path スラッシュ無し = `row_entry` の path と同一語。表示 file が 0 件のときヘッダ 2 行は出さない (従来 «0 行一覧» 契約のまま)。`Changes (N)` の N は絞り込み後の表示 file 数。devicons は `<status> <icon> <basename>` の icon と basename に色を張る: 色は検出側の返す hl group 名 (nvim-web-devicons `get_icon` の 2 返り値 = DevIcon* 群。group 定義は devicons 側の責務で、review.nvim は `nvim_set_hl` を作らず syntax engine にも一切触れない — diffview の `hl.get_file_icon` と同方式)。hl を返さない / group 未定義 / devicons 不在は無色 (ReviewPanelFile)。dir・header 行には張らない。list モードは icon 文字なしで basename 色のみ。list 表示はヘッダなし・icon なしの現行フラット形式。head 表示名 «作業ツリー» は branch/PR を問わず通常経路の既定、scratch 縮退時だけ保存 head ref 名
 
 **セッション開始時の初期開き**: 一覧先頭ファイルの open_file (focus は head 窓)。files が空の開通 (復元時に差分がまるごと消滅) は open_file の代わりに「変更なし」プレースホルダ scratch を base/head 窓へ張り、outdated 集約もそこへ出す (persistence-restore「差分がまるごと消滅」)。

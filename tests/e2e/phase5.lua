@@ -57,9 +57,9 @@ local function run()
     return vim.fn.bufexists 'review://sidebar/main--feature' == 1
   end, 'sidebar buffer')
 
-  -- 基準: 開始時の b.lua 行 (feature で base 1 行を 2 行に置換 = +2 -1)。viewed
-  -- 前のため [✓] 接頭は付かない。この値を編集前に見るのが「カウントが変わって
-  -- いない」の陰性対照になる。
+  -- 基準: 開始時の b.lua 行 (feature で base 1 行を 2 行に置換 = +2 -1)。開封では
+  -- マークを付けない契約なので [✓] 接頭は付かない。この値を編集前に見るのが
+  -- 「カウントが変わっていない」の陰性対照になる。
   local row0 = sidebar_row 'b.lua'
   if row0 ~= 'M b.lua +2 -1' then
     fail('開始直後の b.lua 行が不一致: ' .. tostring(row0))
@@ -122,7 +122,7 @@ local function run()
   vim.cmd 'silent write'
 
   wait_for(function()
-    return sidebar_row 'b.lua' == '[✓] M b.lua +3 -1'
+    return sidebar_row 'b.lua' == 'M b.lua +3 -1'
   end, '保存後の ±カウント自動リフレッシュ (+2 -> +3)')
   print 'E2E-R1 counts=updated'
 
@@ -162,10 +162,10 @@ local function run()
   -- 一定時間待っても panel は +3 のまま = 自動再取得が保存時に限定されている。
   vim.cmd 'normal! ofourth line (unsaved)'
   vim.wait(300, function()
-    return sidebar_row 'b.lua' == '[✓] M b.lua +4 -1'
+    return sidebar_row 'b.lua' == 'M b.lua +4 -1'
   end)
   local row_unsaved = sidebar_row 'b.lua'
-  if row_unsaved ~= '[✓] M b.lua +3 -1' then
+  if row_unsaved ~= 'M b.lua +3 -1' then
     fail('未保存編集がカウントに混入した: ' .. tostring(row_unsaved))
   end
 
@@ -179,7 +179,7 @@ local function run()
     fail('R 用の git checkout 失敗: ' .. out_rb)
   end
   local row_before_r = sidebar_row 'b.lua'
-  if row_before_r ~= '[✓] M b.lua +3 -1' then
+  if row_before_r ~= 'M b.lua +3 -1' then
     fail(
       'disk 復帰後 (R 前) の panel が +3 のままではない: ' .. tostring(row_before_r)
     )
@@ -187,7 +187,7 @@ local function run()
   vim.api.nvim_set_current_win(head_win)
   vim.cmd 'normal R'
   wait_for(function()
-    return sidebar_row 'b.lua' == '[✓] M b.lua +2 -1'
+    return sidebar_row 'b.lua' == 'M b.lua +2 -1'
   end, '手動 R で disk 基準の再取得 (+3 -> +2)')
   print 'E2E-R2 manual-refresh=ok'
 

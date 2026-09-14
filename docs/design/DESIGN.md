@@ -48,7 +48,7 @@ plugin/review.lua            # :Review コマンド登録 + VimEnter 起動 scan
 | head が現在の HEAD と違うとき (branch) | `head` が rev-parse で現在の HEAD と違うコミットを指すとき、head が**ローカルブランチ**なら [y/N] で「そのブランチへ switch するか」を確認する。承諾 → `git switch <head>` して通常の実ファイル経路へ。拒否・ローカルブランチでない・作業ツリーが dirty (switch でユーザーの未コミット変更を危険にさらす) → 両窓 `git show` scratch の読み取り専用レビューに縮退し、INFO で明示 | 未コミット対象化により「head の状態」を実ファイルで示せるのはCheckout がそのコミットのときだけ。worktree を作らない決定の帰結として、switch と scratch 縮退の 2 経路に閉じる (確認を伴うので黙って checkout を動かさない) |
 | LSP 連携 | レビュー tab 作成時に `:tcd` で tab-local cwd を向く。LSP の root_dir はファイルパス起点の root marker 遡上で決まり、**tcd/cwd は root_dir 自体には効かない** (server プロセスの spawn cwd に効く)。worktree を開けば `.git` pointer file / go.mod 等のマーカーで通常は worktree root に解決できる | tab-local-cwd-lsp-root 実測 (0.10.0/0.13、lua_ls markers=`.git`・gopls markers=`go.mod` で sent root_dir=workspaceFolders=worktree、workspace/symbol 応答確認)。dir 限定マーカーのみの設定に関する制約は「既知の制約」 |
 | review キーの実装 | **buffer-local + 押下時点 window role gate**: 実ファイルバッファはユーザーが自分の窓でも開くため、マップは buffer-local に張り、rhs expr gate で `w:review_key_gate == winid` 一致 + `nvim_win_is_valid` + 押下時点のバッファ内容フィンガープリント照合を通ったときだけ review 操作を、不成立時は built-in 挙動を返す。張込前に `nvim_buf_get_keymap` でユーザー既存マップを検出し衝突キーはスキップ | window-local keymap API は Neovim に存在しない (0.13 で pcall nil 実測)。gate 不成立窓ではユーザーの 1 キーストロークが built-in になる副作用がある — user doc (help) に明記 (head-window-key-gate verified) |
-| file panel 表示 | フラット一覧でなくフォルダツリー (折りたたみ・`i` で list/tree 切替・単一-child 連鎖連結表示)。ヘッダに `Changes (N)` と `Showing changes for: <base>..<head 表示名>` (通常経路の head 表示名は `作業ツリー`、縮退時は ref 名 — 書式の詳細は features/diff-review)、行は `<status> <icon?> <basename> +a -d` と親パス grey、選択行と head 窓の相互追従 | 深さのあるリポジトリでフラット一覧が読めない (diffview と同じ動機)。viewed `[✓]`・絞り込み・`x` は review.nvim 独自機能として維持 |
+| file panel 表示 | フラット一覧でなくフォルダツリー (折りたたみ・`i` で list/tree 切替・単一-child 連鎖連結表示)。ヘッダに `Changes (N)` と `Showing changes for: <base>..<head 表示名>` (通常経路の head 表示名は `作業ツリー`、縮退時は ref 名 — 書式の詳細は features/diff-review)、行は `<status> <icon?> <basename> +a -d` と親パス grey、選択行と head 窓の相互追従 | 深さのあるリポジトリでフラット一覧が読めない (diffview と同じ動機)。`[✓]` レビュー完了マーク (x で手動トグル)・絞り込みは review.nvim 独自機能として維持 |
 | 永続化 | JSON 1 ファイル / セッション。`stdpath("data")/review.nvim/sessions/<repo-hash>/<slug>.json`。コメント CRUD ごとに即時アトミック書込 (tmp + rename) | MUST 2。Vim の session/view 機構は窓 diff と実ファイル open の状態と噛み合わず、独自書式のほうが復元時の検証 (下述 anchor) ができる |
 | 復元検証 | コメントに new 側行番号 + anchor (対象行テキスト + 前後 1 行) を保存。再開時に**直近パーサ結果**と突き合わせ、±20 行以内に同一テキストを検索・無ければ `outdated`。検証の正本テキスト源は core/diff パーサ出力 (add/context 可視行) | 黙って捨てず、黙って誤った場所につけない。head が作業ツリー基準になっても anchor の意味 (new 側行) は不変で、スキーマは無変更 |
 | 起動時復元 | VimEnter で当該 repo の open セッションを検出して notify。`:Review` (無印) が即復元 (複数あれば vim.ui.select)。復元時も head 解決フロー (switch 提案/scratch 縮退) を通す | 「起動後すぐに復元できる」= 1 操作。勝手にウィンドウを開く surprise は避け、検知と通知までを自動で行う |
@@ -134,7 +134,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | head/base 窓 | `c` (normal / visual-line) | コメント作成 (float input。visual は範囲コメント)。**head 窓のみ発火**。base 窓・告知 scratch (deleted/binary) では WARN («この窓にはコメントを付けられません») (確定文言の正本はこの表) |
 | head/base 窓 | `e` / `d` / `y` / `i` | カーソル行のコメント編集 / 削除 (arming 二重押し) / プロンプト yank / 全文閲覧。同上 head 限定 |
 | head/base 窓 | `[F` / `]F` | 最初 / 最後のファイル (`]c` / `[c` は **マップせず Neovim 標準の hunk 移動**に任せる) |
-| head/base 窓 | `<Tab>` / `<S-Tab>` | 次 / 前のファイル (パス昇順。端は無動作。viewed 更新と save は panel `<CR>` と同一。diff ペアが切れていれば張直す) |
+| head/base 窓 | `<Tab>` / `<S-Tab>` | 次 / 前のファイル (パス昇順。端は無動作。panel `<CR>` と同一の open 経路 = マークは変えない。diff ペアが切れていれば張直す) |
 | head/base 窓 | `<leader>e` / `<leader>b` | file panel へ focus / file panel 表示トグル (panel を閉じても tab とレビュー窓は残る) |
 | head/base 窓 | `R` | 差分再取得 (`git diff` 引数形は head 解決に一致 — 通常 `<base>` / 縮退 `<base> <head>`) → 再パース → anchor 検証 → ±カウント・スレッド・panel 更新 → :diffupdate |
 | head/base 窓 | `o` | そのファイルの実ファイルをレビュー tab の外 (前行儀の tab) で開く — diff ペアを壊さず通常編集文脈へ出る経路。scratch 縮退時・base 窓でも同じ動作 |
@@ -143,7 +143,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | file panel | `<CR>` / `o` / `l` | カーソル entry を開く (ファイル = 実ファイル窓に張って focus、dir = fold トグル)。(file panel 上の `o` = 開く。diff 窓の `o` とは意味が違う) |
 | file panel | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (開いて focus は diff 窓と同一動作) |
 | file panel | `i` | list 表示 (フルパス 1 行) と tree 表示の切替 (view state。session JSON に載せない) |
-| file panel | `x` | viewed 切替 |
+| file panel | `x` | レビュー完了マーク `[✓]` 切替 (open では付かない) |
 | file panel | `/` | 絞り込み (大文字小文字無視の path 部分一致。空入力 = 解除、キャンセル = 現状維持。`<Tab>`/`[F`/`]F` と `<CR>` は絞り込み後の集合だけを辿る) |
 | file panel | `R` | 差分再取得 (レビュー窓の `R` と同一) |
 | file panel | `q` | `:Review close` 相当 (diff 窓の `q` と同じ) |
@@ -152,7 +152,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | sessionlist | `q` | 一覧バッファを閉じる (セッション状態は変えない) |
 
 - fold 操作 (`za` / `zo` / `zc` / `zR` / `zM`) と panel の `j`/`k` 移動はマップせず標準挙動に任せる
-- 移動系で「ファイルを開く」経路はすべて同一処理 `open_file(path)` (head 窓に実ファイル張付・base 窓に scratch 張付・viewed 更新・save・panel 再描画) を呼ぶ
+- 移動系で「ファイルを開く」経路はすべて同一処理 `open_file(path)` (head 窓に実ファイル張付・base 窓に scratch 張付・panel 再描画 = 永続状態は変えない) を呼ぶ
 
 ## 横断規約
 

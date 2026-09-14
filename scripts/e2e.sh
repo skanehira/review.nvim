@@ -177,7 +177,8 @@ if [ "$L1" != "$L2" ]; then
   echo "e2e: 復元後行位置不一致 phase1=$L1 phase2=$L2" >&2
   exit 1
 fi
-grep -q 'viewed=1' "$OUT2" || { echo 'e2e: viewed 復元なし' >&2; exit 1; }
+grep -q 'mark=1(a=0)' "$OUT2" || { echo 'e2e: 完了マーク復元なし (b.lua=1 / a.lua=0 の期待)' >&2; exit 1; }
+grep -q 'E2E-VW x=mark' "$OUT1" || { echo 'e2e: phase1 の x マーク付与に失敗' >&2; exit 1; }
 # q (close) 経路の掃除: レビュー tab 消滅 + 実ファイル extmark 残骸 0 + closed
 grep -q 'E2E-Q1 cleared=1 tabclosed=1 status=closed' "$OUT2" || {
   echo 'e2e: phase2 q close で tab 消滅 / extmark clear / status=closed が確認できない' >&2
