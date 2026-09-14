@@ -8,6 +8,7 @@
 -- 窓経由でユーザー窓へ漏れるため w: 側 only — chrome 決定)。
 local config = require 'review.config'
 local treelist = require 'review.ui.treelist'
+local syntaxhl = require 'review.ui.syntaxhl'
 
 local M = {}
 
@@ -186,14 +187,44 @@ function M.render(session, files, opts)
   vim.bo[buf].filetype = 'review-list'
   vim.b[buf].review_meta = { kind = 'sidebar', session_id = session.id }
 
-  -- span hl: 常に捨てて再構成 (バッファ側に真実を置かない現行契約)
+  -- span hl: 常に捨てて再構成 (バッファ側に真実を置かない現行契約)。
+  -- file 名のスパンは Neovim 内蔵 syntax の色を写す (ui/syntaxhl)。解决不能
+  -- (filetype 不明 / syntax 区間なし) は従来どおり ReviewPanelFile のまま。
   vim.api.nvim_buf_clear_namespace(buf, hl_ns, 0, -1)
+  local function paint(row_index, from, to, group)
+    vim.api.nvim_buf_set_extmark(buf, hl_ns, row_index - 1, from, {
+      end_col = to,
+      hl_group = group,
+    })
+  end
   for i, row in ipairs(rows) do
+    local base = row.kind == 'file' and row.path and row.path:match '([^/]+)$' or nil
     for _, s in ipairs(row.spans) do
-      vim.api.nvim_buf_set_extmark(buf, hl_ns, i - 1, s.from, {
-        end_col = s.to,
-        hl_group = s.group,
-      })
+      local written = false
+      if base ~= nil and s.group == 'ReviewPanelFile' then
+        local sy = syntaxhl.spans(base)
+        -- list モードの span はフルパス = basename は末尾に触れる (offset 補正)
+        local off = (s.to - s.from) - #base
+        if sy ~= nil and off >= 0 then
+          local cursor = s.from
+          for _, sub in ipairs(sy) do
+            local from = s.from + off + sub.from
+            local to = s.from + off + sub.to
+            if from > cursor then
+              paint(i, cursor, from, 'ReviewPanelFile')
+            end
+            paint(i, from, to, sub.group)
+            cursor = to
+          end
+          if cursor < s.to then
+            paint(i, cursor, s.to, 'ReviewPanelFile')
+          end
+          written = true
+        end
+      end
+      if not written then
+        paint(i, s.from, s.to, s.group)
+      end
     end
   end
 

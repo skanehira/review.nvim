@@ -462,6 +462,105 @@ describe('filepanel キー割り当て', function()
 end)
 
 -- ===========================================================================
+-- basename の syntax 色写し (ui/syntaxhl)。写し自体は syntaxhl_spec が持つので、
+-- ここは «render の span paint が syntax span を file 名区間に差し替える» 結線と
+-- «フォールバック» を検証する。
+-- ===========================================================================
+describe('filepanel basename syntax 写し', function()
+  use_env()
+
+  local function hl_spans_of(buf, row)
+    local ns = vim.api.nvim_get_namespaces().review_panel_hl
+    assert.is_true(ns ~= nil)
+    local out = {}
+    for _, m in
+      ipairs(
+        vim.api.nvim_buf_get_extmarks(buf, ns, { row - 1, 0 }, { row - 1, -1 }, { details = true })
+      )
+    do
+      out[#out + 1] = m
+    end
+    return out
+  end
+
+  local function has_group(marks, group, from, to)
+    for _, m in ipairs(marks) do
+      if m[4].hl_group == group and m[3] == from and m[4].end_col == to then
+        return true
+      end
+    end
+    return false
+  end
+
+  it(
+    'lua keyword を含む名前の行は syntax group の span が file 名区間に写る',
+    function()
+      vim.cmd 'syntax enable'
+      local buf = filepanel.render(session_stub(), { f('for.lua', 'M', 1, 0) }, TREE_OPTS)
+      local lines = panel_lines(buf)
+      local row, pos
+      for i, line in ipairs(lines) do
+        local p = line:find('for.lua', 1, true)
+        if p ~= nil then
+          row, pos = i, p
+        end
+      end
+      assert.is_true(row ~= nil, 'for.lua 行が無い: ' .. table.concat(lines, ' | '))
+      local marks = hl_spans_of(buf, row)
+      assert.is_true(
+        has_group(marks, 'luaRepeat', pos - 1, pos - 1 + 3),
+        '"for" 区間 (col '
+          .. pos - 1
+          .. '->'
+          .. pos + 2
+          .. ') へ luaRepeat が写っていない: '
+          .. vim.inspect(marks)
+      )
+    end
+  )
+
+  it('syntax 非対応の拡張は従来どおり ReviewPanelFile span のまま', function()
+    vim.cmd 'syntax enable'
+    local buf = filepanel.render(session_stub(), { f('weird.zzzznotalang', 'M', 1, 0) }, TREE_OPTS)
+    local marks = hl_spans_of(buf, 3)
+    local any = false
+    for _, m in ipairs(marks) do
+      if m[4].hl_group == 'ReviewPanelFile' then
+        any = true
+      end
+    end
+    assert.is_true(any, 'fallback span が無い: ' .. vim.inspect(marks))
+  end)
+
+  it('dir 行と header は write 対象外 (ReviewPanelDir/meta span のまま)', function()
+    vim.cmd 'syntax enable'
+    local buf = filepanel.render(
+      session_stub(),
+      { f('src/do.lua', 'M', 1, 0), f('for.lua', 'M', 1, 0) },
+      TREE_OPTS
+    )
+    -- tree で 'src/' dir 行を特定 (行番号固定でなく内容検索 = 写しは file のみ)
+    local lines = panel_lines(buf)
+    local dir_row = nil
+    for i, line in ipairs(lines) do
+      if line:find('src/', 1, true) ~= nil then
+        dir_row = i
+        break
+      end
+    end
+    assert.is_true(dir_row ~= nil, 'src/ dir 行が無い: ' .. table.concat(lines, ' | '))
+    local marks = hl_spans_of(buf, dir_row)
+    assert.is_true(#marks > 0, 'dir 行に span が無い')
+    for _, m in ipairs(marks) do
+      assert.is_true(
+        m[4].hl_group:find '^ReviewPanel' ~= nil,
+        'dir 行へ syntax span が混入した: ' .. vim.inspect(m)
+      )
+    end
+  end)
+end)
+
+-- ===========================================================================
 -- 実 FS + 実 git 正誤表 (multi-段パス・同名 file/dir 併存・viewed 混在・filter 併用)。
 -- panel_lines 全体一致 + row_entry 写像 + collapsed 反映を同時検証するので、
 -- ツリー組み立て・連結・集約・行フォーマットのどれか一つ欠けても FAIL する。
