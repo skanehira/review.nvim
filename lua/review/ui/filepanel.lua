@@ -51,8 +51,8 @@ local function devicons_resolver(path)
   local name = vim.fn.fnamemodify(path, ':t')
   local ext = vim.fn.fnamemodify(name, ':e')
   -- default=true を使わない: 未知拡張に汎用アイコンを積むと noise になる
-  local icon = devicons.get_icon(name, ext)
-  return icon
+  local icon, hl = devicons.get_icon(name, ext)
+  return icon, hl
 end
 
 function M._set_icon_resolver(fn)

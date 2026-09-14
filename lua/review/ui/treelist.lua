@@ -95,7 +95,7 @@ end
 
 -- tree モードは basename + 親パス grey サフィックス、list モードはフルパス 1 行
 -- (name に path を渡す) ので name 解決は呼び出し側。
-local function file_row(entry, indent, parent_path, icon, name)
+local function file_row(entry, indent, parent_path, icon, icon_hl, name)
   local l = line()
   l.add(indent)
   if entry.viewed then
@@ -105,11 +105,13 @@ local function file_row(entry, indent, parent_path, icon, name)
   l.add(entry.status, 'ReviewPanelStatus')
   l.add ' '
   if icon ~= nil then
-    -- アイコン専用 hl group は DESIGN「命名」に定義が無い (nvim-web-devicons は
-    -- hex 色しか返さず、色ごとにグループを作ると定義が無限増える) ので無 hl。
-    l.add(icon .. ' ')
+    -- アイコンとファイル名の色の hl group の解決は resolver の責任
+    -- (nvim-web-devicons の DevIcon* group 参照のみ。plugin 側で set_hl も
+    -- syntax engine も触らない — diffview hl.get_file_icon と同方式)。
+    -- hl なし / 未定義 group は無色 = ReviewPanelFile フォールバック。
+    l.add(icon .. ' ', icon_hl)
   end
-  l.add(name, 'ReviewPanelFile')
+  l.add(name, icon_hl or 'ReviewPanelFile')
   l.add ' '
   l.add(('+%d -%d'):format(entry.added or 0, entry.deleted or 0), 'ReviewPanelMeta')
   if parent_path ~= nil and parent_path ~= '' then
@@ -191,8 +193,11 @@ local function emit_tree(node, opts, indent, out)
   end
   for _, fname in ipairs(sorted_files(node)) do
     local entry = node.files[fname]
-    local icon = opts.icon ~= nil and opts.icon(entry.path) or nil
-    out[#out + 1] = file_row(entry, indent, node.path, icon, fname)
+    local icon, icon_hl = nil, nil
+    if opts.icon ~= nil then
+      icon, icon_hl = opts.icon(entry.path)
+    end
+    out[#out + 1] = file_row(entry, indent, node.path, icon, icon_hl, fname)
   end
 end
 
@@ -201,7 +206,7 @@ end
 --- opts = {
 ---   mode = 'tree' | 'list' (省略時 tree),
 ---   collapsed = { [dirpath]=true } (dir 行の path キー = deepest path),
----   icon = nil | function(path) -> string|nil,
+---   icon = nil | function(path) -> (string|nil), (hlname|nil) (2返り値 = 色 group),
 ---   base, head_display  -- tree ヘッダ «Showing changes for: <base>..<head 表示名>»
 --- }
 --- 返り値 rows = { {kind='header'|'dir'|'file', text, path?, spans} }
@@ -221,7 +226,12 @@ function M.build(files, opts)
   if opts.mode == 'list' then
     -- 現行フラット形式 (フルパス 1 行)。親パスサフィックスは付けない (path 自体がフル)
     for _, entry in ipairs(sorted) do
-      rows[#rows + 1] = file_row(entry, '', nil, nil, entry.path)
+      local icon_hl = nil
+      if opts.icon ~= nil then
+        local _, hl = opts.icon(entry.path)
+        icon_hl = hl
+      end
+      rows[#rows + 1] = file_row(entry, '', nil, nil, icon_hl, entry.path)
     end
     return rows
   end

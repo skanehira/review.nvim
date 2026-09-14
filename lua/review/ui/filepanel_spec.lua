@@ -69,6 +69,10 @@ local function panel_lines(buf)
   return vim.api.nvim_buf_get_lines(buf, 0, -1, false)
 end
 
+local function hl_ns()
+  return vim.api.nvim_get_namespaces().review_panel_hl
+end
+
 -- 窓に panel buf を张って表示状態にする (render 単体では未表示 = 開通前の実経路)。
 local function show(buf)
   vim.api.nvim_win_set_buf(state.win, buf)
@@ -328,6 +332,67 @@ describe('filepanel icon (devicons 自動検出)', function()
       'A y.lua +1 -0',
     }, panel_lines(buf))
   end)
+
+  it(
+    'resolver が返す hl group がアイコンとファイル名の両方に張る (dir 行は対象外)',
+    function()
+      filepanel._set_icon_resolver(function(path)
+        if path:match '%.lua$' then
+          return 'L', 'DevIconLuaStub'
+        end
+        return nil
+      end)
+      local buf = filepanel.render(session_stub(), { f('a.lua', 'M', 1, 0) }, TREE_OPTS)
+      local marks = vim.api.nvim_buf_get_extmarks(buf, hl_ns(), 0, -1, { details = true })
+      local icon_hit, name_hit = false, false
+      for _, m in ipairs(marks) do
+        if m[4].hl_group == 'DevIconLuaStub' then
+          -- 'M L a.lua +1 -0': icon 起点 col=2 (0-based)、name 起点 col=4
+          if m[3] == 2 then
+            icon_hit = true
+          end
+          if m[3] == 4 and m[4].end_col == 9 then
+            name_hit = true
+          end
+        end
+      end
+      assert.is_true(
+        icon_hit,
+        'icon span に resolver hl が張られていない: ' .. vim.inspect(marks)
+      )
+      assert.is_true(
+        name_hit,
+        'file 名 span に resolver hl が張られていない: ' .. vim.inspect(marks)
+      )
+    end
+  )
+
+  it(
+    'list モードでも file 名 span は resolver hl (icon 文字自身は list では張らない)',
+    function()
+      filepanel._set_icon_resolver(function(path)
+        if path:match '%.lua$' then
+          return 'L', 'DevIconLuaStub'
+        end
+        return nil
+      end)
+      local buf = filepanel.render(
+        session_stub(),
+        { f('src/a.lua', 'M', 1, 0) },
+        { mode = 'list', base = 'main', head_display = '作業ツリー' }
+      )
+      local lines = panel_lines(buf)
+      assert.equals('M src/a.lua +1 -0', lines[1])
+      local marks = vim.api.nvim_buf_get_extmarks(buf, hl_ns(), 0, -1, { details = true })
+      local name_hit
+      for _, m in ipairs(marks) do
+        if m[4].hl_group == 'DevIconLuaStub' then
+          name_hit = true
+        end
+      end
+      assert.is_true(name_hit, 'list 名の hl 写しが無い: ' .. vim.inspect(marks))
+    end
+  )
 
   it(
     'devicons 不在環境 (plenary みの test rtp) ではアイコンなしのテキスト表示',
