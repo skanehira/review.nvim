@@ -52,8 +52,13 @@ nvim を起動せずに通る)。
   既に開いていても同一 buffer を再利用する**。その場合も keygate install と
   owned_bufs 登録は必須 (再利用だけ install を省むと c/e/d が全滅。#16 r1 high で実測)
 - `BufWritePost` に later 載せる: 窓 diff は `:w` 単体では再計算されない (PoC 実測)。
-  `session.lua` のリフレッシュは自動で行い、明示 `:diffupdate` を head/base 窓に
-  発火する。自前の autocmd を増やさないこと
+  リフレッシュは `session.lua` が自動で行うので、窓を作るとき autocmd を増やさない。
+  head 窓で `:w` すると自動で diff 再計算まで走る
+- **窓再利用での set_buf 張替は古い buf が diff group に残積する** (group は全体
+  8 buffer 上限で、9 個目に E96 «Cannot diff more than 8 buffers»。実運用報告で判明)。
+  base/head 窓を使い回す `windows.bind` は `set_buf` 前に現窓 buf へ `:diffoff` して
+  刈る (窓そのものの close/tabclose は残積しない = 張替経路限定)。窓 diff を使う
+  新しい窓種族 (3 個以上の比較窓など) を足すときは同じ刈り込みを設けること
 - head バッファの extmark 残骸: `ui/commentmarks` の clear_tracked /
   `ui/keygate.uninstall` は **close・tab 消滅・縮退切り替えの全経路**で必要。
   「窓を閉じれば消える」に依赖しない (レビュー窓以外の同 buffer 窓にも見える仕様)

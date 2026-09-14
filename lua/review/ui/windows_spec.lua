@@ -199,6 +199,24 @@ describe('windows.bind / set_panel_buf: role 導出', function()
   end)
 
   it(
+    'bind 反復 (9 ファイル超): 前回 buf を diff group から外し E96«Cannot diff more than 8 buffers» を起こさない',
+    function()
+      -- Neovim の窓 diff は共有 group が 8 buffer 上限で、窓を再利用して
+      -- 張替えても張付けたbufが group に残積する (実測)。open_file 反復で
+      -- 9 個目の set_buf が E96 で crash するため、bind は毎回
+      -- 「今張る buf 以外」を group から刈る責務を持つ。
+      for i = 1, 12 do
+        local ok, err = pcall(
+          windows.bind,
+          scratch_buf(('review://base/s/f%d.lua'):format(i)),
+          scratch_buf(('review://head/s/f%d.lua'):format(i))
+        )
+        assert.is_true(ok, 'bind #' .. i .. ' が失敗した: ' .. tostring(err))
+      end
+    end
+  )
+
+  it(
     '実ファイル head も gate で head 導出 (review:// 命名に依存しない)',
     function()
       local real = vim.api.nvim_create_buf(false, true)

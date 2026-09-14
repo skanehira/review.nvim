@@ -234,6 +234,23 @@ function M.bind(base_buf, head_buf, opts)
   opts = opts or {}
   ensure_pair()
   local bw, hw = st.base_win, st.head_win
+  -- 窓再利用で張り返しても前回 buf は hidden で diff group に残積し、group は
+  -- 全体で 8 buffer 上限 (E96 «Cannot diff more than 8 buffers»)。set_buf 前に
+  -- 現窓の buf を group から刈る (今回張る buf と同一なら diffoff しない =
+  -- 同一ファイルの再 bind で窓 diff が解けるのを防ぐ)。
+  local function detach_prev_diff(w, keep)
+    if not valid_win(w) then
+      return
+    end
+    local cur = vim.api.nvim_win_get_buf(w)
+    if cur ~= keep and vim.api.nvim_buf_is_valid(cur) then
+      vim.api.nvim_win_call(w, function()
+        pcall(vim.cmd, 'diffoff')
+      end)
+    end
+  end
+  detach_prev_diff(bw, base_buf)
+  detach_prev_diff(hw, head_buf)
   vim.w[bw].review_base_gate = nil
   vim.w[bw].review_base_buf = nil
   vim.w[hw].review_key_gate = nil
