@@ -200,8 +200,7 @@ KEYMAPS						*review-keymaps*
 
  file panel (変更ファイル一覧)			*review-keymaps-sidebar*
 
-	既定はフォルダツリー表示。ファイル名は該当 filetype の vim 構文色を写す
-	(対応構文が無い型は無色フォールバック)。ヘッダ 2 行 («Changes (N)» と «Showing changes
+	既定はフォルダツリー表示。ヘッダ 2 行 («Changes (N)» と «Showing changes
 	for: <base>..<head 表示名>»。head 表示名は通常経路 «作業ツリー»、読み取り
 	専用 scratch 縮退時み ref 名) の下にパスツリーが続く。dir 行は末尾 «/» で
 	ファイルと区別し、status は配下の集約 (全子同一記号ならそのまま、種類混在

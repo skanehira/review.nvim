@@ -72,7 +72,6 @@ nvim を起動せずに通る)。
 | `nvim_win_set_keymap` / window-local keymap API は**存在しない** (keymap API は global 3 + buffer 3 の 6 個のみ) | 窓限定キーは buffer-local 張込 + 押下時点の window role gate + 張込前衝突検出の 3 点セットで実現 | PoC head-window-key-gate |
 | `nvim_buf_get_keymap` の返り値は **ユーザーが `vim.keymap.set` 関数形で張ったキーには `rhs` フィールド自体が無い** (`callback` に関数)。`m.rhs` を無検証に index すると crash | 衝突検出自体が crash して鍵が全滅する。`type(m.rhs) ~= 'string'` を「衝突」として true を返す | #16 r1 high (実再現) |
 | `nvim_tabpage_is_valid` は TabClosed 発火時点で **0.10.0: true / 0.13: false**。`nvim_list_tabpages()` に閉じた tab が無いのは両版共通 | tab 消滅フックの帰属判定は list 現存有無で導く (is_valid 依据は 0.10 で黙って発火しない) | #26 (probe 実測 + CI 失敗) |
-| nvim 0.13 既定環境では scratch buffer に filetype を付けると treesitter highlighter が attach して `b:ts_highlight` が立ち、`syntaxset` の FileType autocmd が vim syntax のロードを省略する (`synID` が全空になる)。構文色を読むだけなら **autocmd を経由せず `&syntax` を直接設定**する (`setfiletype`/FileType を踏まないため treesitter/LSP/matchparen の副作用経路も同時に消える) |
 | `virt_text` / `virt_lines` の chunk は常に `{ {text, hl} }` ネスト (フラット `{text, hl}` は "expected Array, got String") 見出し eol と行下スレッドは 1 extmark に併合 (同一位置 2 mark は取得順不定) | AGENTS.md 再掲。新しい行内表示を作るときそのまま適用 | spec 実測 |
 | `extmark opts` の follow 系は **`right_gravity` (boolean)**。`gravity = 'right'` は無効引数 | 編集時の mark 追従契約 | PoC |
 | `nvim --server --remote-expr` は 0.13 で editor.lua shim 経由: **list index が 0 base**、`getbufline('<bufname>')` は `[]` (同一状態で) | remote-expr 検証は buffer 特定=index、内容=luaeval+`nvim_buf_get_lines` で書く。無音の false PASS を防ぐ | issue #18 実測 |
