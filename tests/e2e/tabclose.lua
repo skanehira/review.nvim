@@ -101,7 +101,13 @@ local run = function()
     fail('tabclose 後の保存コメントが不一致: ' .. vim.inspect(sess.comments[1]))
   end
 
-  print 'E2E-TB1 status=open extmarks=0'
+  -- (d) global winbar が元 (空) へ戻る: ユーザー窓が 2 窓以上のとき empty の
+  -- ヘッダー行が残る掃除漏れ (実測のユーザー報告) の回帰 pin。
+  if vim.o.winbar ~= '' then
+    fail('tabclose 後に global winbar が戻っていない: ' .. vim.o.winbar)
+  end
+
+  print 'E2E-TB1 status=open extmarks=0 winbar=restored'
   vim.cmd 'qa!'
 end
 

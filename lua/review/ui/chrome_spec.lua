@@ -40,6 +40,55 @@ describe('ui/chrome winbar グローバル式', function()
   end)
 
   it(
+    'restore_global は自前で入れた式を空へ戻し、再度 window で再インストールされる',
+    function()
+      chrome.window(vim.api.nvim_get_current_win())
+      assert.equals(PLUGIN_WINBAR, vim.o.winbar)
+      chrome.restore_global()
+      assert.equals('', vim.o.winbar)
+      chrome.window(vim.api.nvim_get_current_win())
+      assert.equals(PLUGIN_WINBAR, vim.o.winbar)
+    end
+  )
+
+  it('restore_global は二重呼び出しでも安全 (idempotent)', function()
+    chrome.window(vim.api.nvim_get_current_win())
+    chrome.restore_global()
+    chrome.restore_global()
+    assert.equals('', vim.o.winbar)
+  end)
+
+  it(
+    'ユーザー定義 winbar は restore でも触らない (自前でなければ元のまま)',
+    function()
+      vim.o.winbar = '%f my own'
+      chrome.window(vim.api.nvim_get_current_win())
+      chrome.restore_global()
+      assert.equals('%f my own', vim.o.winbar)
+    end
+  )
+
+  it(
+    'review 中にユーザーが式を書き換えたら restore は上書きしない',
+    function()
+      chrome.window(vim.api.nvim_get_current_win())
+      vim.o.winbar = '%f changed during review'
+      chrome.restore_global()
+      assert.equals('%f changed during review', vim.o.winbar)
+    end
+  )
+
+  it('restore は global のみ戻し、別窓の window-local winbar を壊さない', function()
+    chrome.window(vim.api.nvim_get_current_win())
+    vim.cmd 'vsplit'
+    local w2 = vim.api.nvim_get_current_win()
+    vim.api.nvim_set_option_value('winbar', 'local of w2', { win = w2 })
+    chrome.restore_global()
+    assert.equals('', vim.api.nvim_get_option_value('winbar', { scope = 'global' }))
+    assert.equals('local of w2', vim.api.nvim_get_option_value('winbar', { win = w2 }))
+  end)
+
+  it(
     'window の winbar 適用は window-local set をしない (global 漏れの実測教訓)',
     function()
       -- window-local set は初回代入で global を書き換えるため chrome.window は

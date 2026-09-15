@@ -10,6 +10,7 @@
 --   * 開通時 tcd、head/base 窓 opts、開通 focus = head 窓
 --   * role は窓変数 gate + 表示 buf 指紋から導く (別窓で同じ buf を見せても head 不成立)
 local windows = require 'review.ui.windows'
+local chrome = require 'review.ui.chrome'
 
 local OTHER_DIR = vim.uv.fs_realpath '/tmp' or '/tmp'
 
@@ -458,6 +459,38 @@ describe('windows: q (close) と :tabclose の両経路', function()
     windows.close()
     assert.is_nil(windows.state())
   end)
+
+  it(
+    'close() は自前インストールした global winbar を空へ戻す (ヘッダー掃除)',
+    function()
+      local before = vim.o.winbar
+      vim.o.winbar = ''
+      windows.open { dir = OTHER_DIR }
+      chrome.window(windows.win 'panel')
+      assert.equals('%{get(w:,"review_winbar","")}', vim.o.winbar)
+      windows.close()
+      assert.equals('', vim.o.winbar)
+      vim.o.winbar = before
+    end
+  )
+
+  it(
+    'ユーザー :tabclose でも global winbar を空へ戻す (消滅経路の掃除)',
+    function()
+      local before = vim.o.winbar
+      vim.o.winbar = ''
+      windows.open { dir = OTHER_DIR, on_tab_closed = function() end }
+      chrome.window(windows.win 'panel')
+      local tab = windows.state().tab
+      vim.api.nvim_set_current_tabpage(tab)
+      vim.cmd 'tabclose!'
+      vim.wait(200, function()
+        return windows.state() == nil
+      end)
+      assert.equals('', vim.o.winbar)
+      vim.o.winbar = before
+    end
+  )
 end)
 
 describe('windows.sweep: 専有 tab 内の空窓回収', function()

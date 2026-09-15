@@ -369,7 +369,7 @@ if ! ( cd "$REPO" && env XDG_DATA_HOME="$WORK/d-tabclose" REVIEW_E2E_LOG="$WORK/
   exit 1
 fi
 cat "$OUTTB" | tee -a "$WORK/e2e-report.txt"
-grep -q 'E2E-TB1 status=open extmarks=0' "$OUTTB" || {
+grep -q 'E2E-TB1 status=open extmarks=0 winbar=restored' "$OUTTB" || {
   echo 'e2e: :tabclose 後の status=open 保存 / extmark 残骸 0 が確認できない' >&2
   exit 1
 }

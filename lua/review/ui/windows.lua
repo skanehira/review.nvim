@@ -10,6 +10,7 @@
 -- wincmd L で右端へ寄せる。窓 role は内容 + 窓変数から導く (UX review F1 の真因
 -- だった id 実体判定の drift を構造で消す)。
 local config = require 'review.config'
+local ui_chrome = require 'review.ui.chrome'
 
 local M = {}
 
@@ -122,6 +123,8 @@ function M.open(opts)
       end
       st = nil
       release_autocmd()
+      -- 窓と一緒に消えない global 状態 (winbar 式) を元へ戻す
+      ui_chrome.restore_global()
       if current.on_tab_closed ~= nil then
         current.on_tab_closed()
       end
@@ -381,6 +384,8 @@ function M.close()
     pcall(vim.api.nvim_set_current_tabpage, current.tab)
     pcall(vim.cmd, 'tabclose!')
   end
+  -- tab と一緒に消えない global 状態 (winbar 式) を元へ戻す
+  ui_chrome.restore_global()
 end
 
 return M
