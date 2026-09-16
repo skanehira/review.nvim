@@ -76,6 +76,7 @@ nvim を起動せずに通る)。
 | `virt_text` / `virt_lines` の chunk は常に `{ {text, hl} }` ネスト (フラット `{text, hl}` は "expected Array, got String") 見出し eol と行下スレッドは 1 extmark に併合 (同一位置 2 mark は取得順不定) | AGENTS.md 再掲。新しい行内表示を作るときそのまま適用 | spec 実測 |
 | `extmark opts` の follow 系は **`right_gravity` (boolean)**。`gravity = 'right'` は無効引数 | 編集時の mark 追従契約 | PoC |
 | `nvim --server --remote-expr` は 0.13 で editor.lua shim 経由: **list index が 0 base**、`getbufline('<bufname>')` は `[]` (同一状態で) | remote-expr 検証は buffer 特定=index、内容=luaeval+`nvim_buf_get_lines` で書く。無音の false PASS を防ぐ | issue #18 実測 |
+| expr keymap → `vim.schedule` dispatch は環境によって «次の打鍵まで反映されない» 遅延が出る (ユーザー設定で `<leader>e` が 1 打鍵遅延) | **窓切替系 (focus_panel / toggle_panel) は非 expr の同期関数 mapping** にする (textlock 外なので buffer 変更も安全)。検証は callback を直接呼び spy 通知が即時に載ることを assert (schedule drain を挟まない) | keygate_spec 同期発火テスト・2026-09 実測 |
 | portable 0.10.0 バイナリでホストの `nvim/site/parser/lua.so` (0.13 用 ABI) を拾うと `:edit *.lua` で treesitter ABI mismatch / no parser error | ローカル互換検証の失敗が実バグと区別不能になる。検証は CI (クリーン runner) を ground truth にし、ローカル 0.10.0 は rtp から parser dir を除去した init で走る (`--noplugin` + `runtimepath:remove(...)`) | #26 検証時の実測 |
 
 CI matrix は **nvim v0.10.0 と stable の両方**で走る。手元 nightly で green でも

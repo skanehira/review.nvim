@@ -156,6 +156,33 @@ local function install_one(buf, mode, lhs, op)
   return true
 end
 
+-- 窓切替系 (focus_panel / toggle_panel) の同期張込。expr mapping の rhs は textlock
+-- 下で評価されるため buffer/窓を作る dispatch は vim.schedule に回すが、環境に
+-- よって «次の打鍵まで反映されない» 遅延が出る (実測: ユーザー設定で <leader>e の
+-- focus が 1 打鍵遅延 — ユーザー報告)。非 expr の関数 mapping は textlock 外なので
+-- buffer 変更 (panel 再建) も安全に同期実行できる。gate 不成立 (ユーザー窓) は
+-- no-op (leader 前置のキーに built-in の意味は無い)。
+local function install_sync(buf, lhs, op)
+  if user_keytaken(buf, 'n', lhs) then
+    return false
+  end
+  vim.keymap.set('n', lhs, function()
+    if gate_state(op) == false then
+      return
+    end
+    local target = DISPATCH[op]
+    if target ~= nil then
+      require(target[1])[target[2]]()
+    end
+  end, { buffer = buf, noremap = true, silent = true, nowait = true })
+  local t = installed[buf] or {}
+  installed[buf] = t
+  local by_mode = t.n or {}
+  t.n = by_mode
+  by_mode[#by_mode + 1] = lhs
+  return true
+end
+
 --- head/base どちらの窓にも張れるよう、config.keymaps.diff の全キーを張る。
 --- 役割 gate は発火時点 (上の fire) で判定するため、この張込阶段では窓を必要と
 --- しない。session_id は将来の拡張 (複数セッション共存時の衝突検出) 用に残す。
@@ -181,10 +208,10 @@ function M.install(buf, session_id)
   install_one(buf, 'n', k.last_file, 'last_file')
   install_one(buf, 'n', k.refresh, 'refresh')
   if k.focus_panel ~= nil then
-    install_one(buf, 'n', k.focus_panel, 'focus_panel')
+    install_sync(buf, k.focus_panel, 'focus_panel')
   end
   if k.toggle_panel ~= nil then
-    install_one(buf, 'n', k.toggle_panel, 'toggle_panel')
+    install_sync(buf, k.toggle_panel, 'toggle_panel')
   end
   return session_id
 end

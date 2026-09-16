@@ -72,17 +72,20 @@ end
 -- (:normal の打鍵は headless で map の解決経路が不安定なため、
 -- nvim_buf_get_keymap の rhs = 発火物が押下と同一であることを使う)。
 local function press(buf, lhs, win)
-  local maps = vim.api.nvim_buf_get_keymap(buf, 'n')
-  local rhs = nil
-  for _, m in ipairs(maps) do
-    if m.lhs == lhs then
-      rhs = m.rhs
+  local m = nil
+  for _, x in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+    if x.lhs == lhs then
+      m = x
     end
   end
-  assert.is_not_nil(rhs, 'keymap ' .. lhs .. ' が張られていない')
+  assert.is_not_nil(m, 'keymap ' .. lhs .. ' が張られていない')
   local target = win or vim.api.nvim_get_current_win()
   return vim.api.nvim_win_call(target, function()
-    return vim.api.nvim_eval(rhs)
+    -- 非 expr (同期 mapping) は callback、expr mapping は rhs が発火物
+    if m.callback ~= nil then
+      return m.callback()
+    end
+    return vim.api.nvim_eval(m.rhs)
   end)
 end
 
@@ -266,13 +269,16 @@ describe('keygate.install / uninstall', function()
       keygate.install(buf, 'sx')
       local ours = 0
       for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
-        if m.rhs:find('review.ui.keygate', 1, true) ~= nil then
+        local is_ours = (
+          type(m.rhs) == 'string' and m.rhs:find('review.ui.keygate', 1, true) ~= nil
+        ) or m.callback ~= nil
+        if is_ours then
           ours = ours + 1
         end
       end
       -- config.keymaps.diff の n -mode 全キー = 14 (c/e/d/y/i/q/<F1>/<Tab>/
       -- <S-Tab>/[F/]F/R/<leader>e/<leader>b) + g? 別名 = 15。v の c は別 mode。
-      -- (o = 実ファイル別 tab は 2026-09 削除)
+      -- focus_panel / toggle_panel は非 expr の callback map (同期発火) で数える。
       assert.equals(15, ours)
     end
   )
@@ -282,10 +288,8 @@ describe('keygate.install / uninstall', function()
     keygate.install(buf, 'sx')
     keygate.uninstall(buf)
     for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
-      assert.is_true(
-        m.rhs:find('review.ui.keygate', 1, true) == nil,
-        '残骸: ' .. m.lhs .. ' -> ' .. m.rhs
-      )
+      local is_gate = type(m.rhs) == 'string' and m.rhs:find('review.ui.keygate', 1, true) ~= nil
+      assert.is_true(not is_gate, '残骸: ' .. m.lhs .. ' -> ' .. tostring(m.rhs))
     end
     local c = nil
     for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
@@ -296,7 +300,8 @@ describe('keygate.install / uninstall', function()
     assert.equals(':echo "user-c"<CR>', c)
     -- visual も掃除される
     for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'v')) do
-      assert.is_true(m.rhs:find('review.ui.keygate', 1, true) == nil)
+      local is_gate = type(m.rhs) == 'string' and m.rhs:find('review.ui.keygate', 1, true) ~= nil
+      assert.is_true(not is_gate)
     end
   end)
 end)
@@ -364,6 +369,39 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
         press(head_buf, case.key, windows.win 'head')
         wait_msg(case.spy)
       end
+    end
+  )
+
+  it(
+    'focus_panel / toggle_panel は同期発火する (schedule 遅延なし。leader の回帰 pin)',
+    function()
+      windows.bind(base_buf, head_buf, { head_kind = 'real' })
+      local k = config.get().keymaps.diff
+      local function expand(key)
+        if key:sub(1, 8) == '<leader>' then
+          return (vim.g.mapleader or '\\') .. key:sub(9)
+        end
+        return key
+      end
+
+      -- 押下 = callback をその窓で呼ぶ。同期なら spy 通知が即時に載る (schedule を
+      -- 挟む expr 経路では次イベントまで載らない = ユーザー報告の 1 打鍵遅延)。
+      state.notifications = {}
+      press(head_buf, expand(k.focus_panel), windows.win 'head')
+      assert.equals(1, #state.notifications, '同期発火していない (schedule 遅延)')
+      assert.equals('SPY:focus_sidebar', state.notifications[1].msg)
+
+      state.notifications = {}
+      press(head_buf, expand(k.toggle_panel), windows.win 'head')
+      assert.equals(1, #state.notifications)
+      assert.equals('SPY:toggle_panel', state.notifications[1].msg)
+
+      -- gate 不成立 (ユーザー窓で同一 buf) は no-op (leader 前置に built-in は無い)
+      vim.api.nvim_win_set_buf(state.user_win, head_buf)
+      vim.api.nvim_set_current_win(state.user_win)
+      state.notifications = {}
+      press(head_buf, expand(k.focus_panel), state.user_win)
+      assert.equals(0, #state.notifications)
     end
   )
 
