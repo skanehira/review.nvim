@@ -139,7 +139,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | head/base 窓 | `R` | 差分再取得 (`git diff` 引数形は head 解決に一致 — 通常 `<base>` / 縮退 `<base> <head>`) → 再パース → anchor 検証 → ±カウント・スレッド・panel 更新 → :diffupdate |
 | head/base 窓 | `o` | そのファイルの実ファイルをレビュー tab の外 (前行儀の tab) で開く — diff ペアを壊さず通常編集文脈へ出る経路。scratch 縮退時・base 窓でも同じ動作 |
 | head/base 窓 | `q` | `:Review close` 相当 (コメントありなら確認プロンプト。tab を閉じる。実ファイルバッファとユーザー窓には触れない) |
-| head/base 窓 | `<F1>` | help float |
+| head/base 窓 | `<F1>` / `g?` | help float (内容は markdown。`g?` は config を持たない固定の別名で `<F1>` と同一呼び出し) |
 | file panel | `<CR>` / `o` / `l` | カーソル entry を開く (ファイル = 実ファイル窓に張って focus、dir = fold トグル)。(file panel 上の `o` = 開く。diff 窓の `o` とは意味が違う) |
 | file panel | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (開いて focus は diff 窓と同一動作) |
 | file panel | `i` | list 表示 (フルパス 1 行) と tree 表示の切替 (view state。session JSON に載せない) |
@@ -147,6 +147,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | file panel | `/` | 絞り込み (大文字小文字無視の path 部分一致。空入力 = 解除、キャンセル = 現状維持。`<Tab>`/`[F`/`]F` と `<CR>` は絞り込み後の集合だけを辿る) |
 | file panel | `R` | 差分再取得 (レビュー窓の `R` と同一) |
 | file panel | `q` | `:Review close` 相当 (diff 窓の `q` と同じ) |
+| file panel | `help` (`<F1>` 既定) / `g?` | help float (diff 窓と同じ。`g?` は固定の別名) |
 | sessionlist (`:Review list` のバッファ) | `<Enter>` | 選択セッションを開く (closed → open。head 解決フロー・worktree 要否は pr-worktree の作成判断で再開時に再評価) |
 | sessionlist | `d` | 選択セッションを削除 (`:Review delete` と同一の確認フロー) |
 | sessionlist | `q` | 一覧バッファを閉じる (セッション状態は変えない) |
@@ -161,7 +162,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - **永続化**: 書き込みは即時・アトミック (同一ディレクトリの tmp に書いて `os.rename`)。読み込み失敗 (JSON 破損) は `.corrupt` に退避してから空セッション扱いとし、通知する (レビュー不能にしない)。例外: 読み取り不能 (権限等) で退避自体ができない場合は退避せず WARN のみ「存在しない」扱いとする (例外の条件は persistence-restore「読込」が正本)
 - **エラー表示**: `vim.notify` (エラー = WARN、情報 = INFO)。レビュー操作の途中失敗は元の状態を保持したまま理由 1 行を出す
 - **命名**: namespace は `review` (`lua/review/`、`plugin/review.lua`)。highlight グループは `ReviewCommentLine` (コメント range の下線)、`ReviewCommentBody` / `ReviewCommentOutdated` (行下スレッド本文 / outdated の gray)、`ReviewPanelFile` / `ReviewPanelDir` / `ReviewPanelStatus` / `ReviewPanelComment` / `ReviewPanelAdd` / `ReviewPanelRemove` (file panel の basename / dir 行 / git status 記号 / コメント有無 / +数 / -数。± は標準 `Added` / `Removed` link) / `ReviewPanelMeta` (session 一覧 の grey 行 = repo path 消失で <Enter> 不可)。差分行の着色は **Neovim 標準 `DiffAdd` / `DiffDelete` / `DiffText`** を使う (窓 diff が直接適用するため自前 diff グループを持たない。`config.highlight` の override は上記 review 自前グループ + 標準 Diff* の両名を受け付ける)。テストはソースと同ディレクトリに `*_spec.lua` (例外: `plugin/` 配下のファイルの spec は `lua/review/` 直下に置く)
-- **UI**: float は `border="rounded"`。入力に telescope 等は使わず `vim.ui.input` / 標準バッファに載せる。scratch 系バッファは filetype を意図的に集約する: file panel と `:Review list` のセッション一覧は共通の `review-list`、base 窓 scratch は内容に応じた file-type detect。**buffer-local キーマップ・extmark namespace ともにバッファ作成元 (`review_meta`) では判定を決めつけず、窓 role (実ファイル窓は `w:review_key_gate` + 押下時点内容照合、scratch 系は `review_meta`) から導く** (FileType autocmd 分岐は使わない)。実ファイルバッファへ張るコメント extmark は**セッション open 中はそのバッファの全窓に見える** (窓単位抑止 API が無い実測)。閉じる時に張った全バッファの namespace を明示 clear する (残骸 0 をアサーションで保証)
+- **UI**: help float は内容を **markdown** で組み立てて描く (buffer filetype=markdown + `conceallevel=3`。キーは config の現在値、`##` 見出しと `**キー**` の箇条書きは conceal で装飾だけ見せる)。float は `border="rounded"`。入力に telescope 等は使わず `vim.ui.input` / 標準バッファに載せる。scratch 系バッファは filetype を意図的に集約する: file panel と `:Review list` のセッション一覧は共通の `review-list`、base 窓 scratch は内容に応じた file-type detect。**buffer-local キーマップ・extmark namespace ともにバッファ作成元 (`review_meta`) では判定を決めつけず、窓 role (実ファイル窓は `w:review_key_gate` + 押下時点内容照合、scratch 系は `review_meta`) から導く** (FileType autocmd 分岐は使わない)。実ファイルバッファへ張るコメント extmark は**セッション open 中はそのバッファの全窓に見える** (窓単位抑止 API が無い実測)。閉じる時に張った全バッファの namespace を明示 clear する (残骸 0 をアサーションで保証)
 - **窓の所有**: レビュー用 tabpage は専有。file panel / base / head 窓の役割は id ではなく**内容と窓変数から導く** (drift recovery)。ユーザーがレビュー窓で `:edit` 等して窓の役割が壊れたときは復旧経路 (`R` / `<Tab>` / panel `<CR>` の open_file 共通処理) で張り直す。レビュー中は `diffopt` の既定値を変えない
 
 ## ドメインモデル

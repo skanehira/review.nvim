@@ -50,6 +50,9 @@ M.defaults = {
       -- list 表示 (フルパス 1 行) と tree 表示の切替 (view state。DESIGN キー表)
       toggle_style = 'i',
       refresh = 'R',
+      -- help float は <F1> (config) に加え固定の別名 g? でも開く (keygate/
+      -- filepanel の張込側。DESIGN キー表「g? は <F1> と同じ機能呼び出し」)。
+      help = '<F1>',
     },
     sessionlist = {
       open = '<CR>',

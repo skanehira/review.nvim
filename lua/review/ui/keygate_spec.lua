@@ -163,6 +163,8 @@ describe('keygate.install / uninstall', function()
       local lhs = expand_lhs(key)
       assert.is_true(present[lhs] == true, 'map 缺失: ' .. key)
     end
+    -- g? は config を持たない固定の help 別名 (DESIGN キー表)
+    assert.is_true(present['g?'] == true, 'g? 別名の map が無い')
     -- 廃止キー残存ゼロ (issue #18 の撤去契約。上の全件 present が正のアサーション)。
     -- 分解リテラルなのは DoD の残存検出 pattern (単一文字列リテラル形) と衝突しない
     -- ようにするため。
@@ -170,6 +172,26 @@ describe('keygate.install / uninstall', function()
       assert.is_nil(present[dead], '廃止キーが張られている: ' .. dead)
     end
   end)
+
+  it(
+    'g? 別名はユーザー既存マップがあればスキップし、uninstall でも消さない',
+    function()
+      local function gq_rhs()
+        for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+          if m.lhs == 'g?' then
+            return m.rhs
+          end
+        end
+      end
+
+      vim.api.nvim_buf_set_keymap(buf, 'n', 'g?', '<Cmd>echo "user"<CR>', { noremap = true })
+      keygate.install(buf, 'sx')
+      assert.equals('<Cmd>echo "user"<CR>', gq_rhs())
+
+      keygate.uninstall(buf)
+      assert.equals('<Cmd>echo "user"<CR>', gq_rhs())
+    end
+  )
 
   it('c は visual-line でも張られる (範囲コメント)', function()
     keygate.install(buf, 'sx')
@@ -250,8 +272,8 @@ describe('keygate.install / uninstall', function()
         end
       end
       -- config.keymaps.diff の n -mode 全キー = 15 (c/e/d/y/i/o/q/<F1>/<Tab>/
-      -- <S-Tab>/[F/]F/R/<leader>e/<leader>b)。v の c は別 mode。
-      assert.equals(15, ours)
+      -- <S-Tab>/[F/]F/R/<leader>e/<leader>b) + g? 別名 = 16。v の c は別 mode。
+      assert.equals(16, ours)
     end
   )
 

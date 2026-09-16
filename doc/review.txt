@@ -143,6 +143,7 @@ KEYMAPS						*review-keymaps*
 			toggle_style   = 'i',    -- list ⇄ tree 表示切替
 			toggle_viewed  = 'x',
 			filter         = '/',    -- |review-keymaps-sidebar|
+			help           = '<F1>', -- g? も固定別名で同じ呼び出し
 			close          = 'q',
 		},
 		sessionlist = {               -- :Review list の一覧
@@ -183,7 +184,9 @@ KEYMAPS						*review-keymaps*
 	o		そのファイルの実ファイルをレビュー tab の外 (前行儀の
 			tab) で開く。削除ファイルは «開けません» の WARN
 	q		セッションを閉じる (コメント 0 件は無確認)
-	<F1>		キーバインドの help float
+	<F1> / g?	キーバインドの help float (内容は markdown 表示)。
+			g? は <F1> と同じ機能呼び出しの固定別名で、config では
+			変えられない (<F1> が端末に奪われる環境向け)。
 	<Tab>		次のファイルを開く (head/base を張り替え。file panel の表示順
 			= ツリーを上から下。折りたたみ・絞り込みを反映。端では無動作。
 			一覧の <CR> と同じ open 経路 (マークは変えない))
@@ -236,6 +239,7 @@ KEYMAPS						*review-keymaps*
 			一致集合内だけを辿る (winbar に一致数と filter が
 			出る)
 	q		セッションを閉じる (diff の q と同じ)
+	<F1> / g?	キーバインドの help float (diff 窓と同じ。g? は固定別名)
 
 	panel のカーソル移動だけでは diff を切り替えない。逆にファイルを open_file
 	すると panel のカーソルがその行へ追従する (相互ハイライト: 選択行 +

@@ -1,7 +1,10 @@
--- <F1> help float (diff-review.md「操作」)。表示内容は config.keymaps の現在値から
--- 生成する (DESIGN.md「API 一覧」の正本表を setup で変えたユーザーに実キーを見せる)。
--- config.keymaps のキーは実装済みのものすべて載せる (載っていないキーは
+-- <F1> / g? help float (diff-review.md「操作」)。表示内容は config.keymaps の現在値
+-- から生成する (DESIGN.md「API 一覧」の正本表を setup で変えたユーザーに実キーを
+-- 見せる)。config.keymaps のキーは実装済みのものすべて載せる (載っていないキーは
 -- help に載って押せないキーを作るため追加禁止)。q / <Esc> で閉じる。
+-- 内容は markdown (見出し + キーを bold の箇条書き) として組み立て、buffer は
+-- filetype=markdown + conceallevel=3 で描く (markdown 装飾子は conceal で消え、
+-- bold のキーだけが見える)。g? は <F1> と同一の呼び出し (固定の別名)。
 local config = require 'review.config'
 
 local M = {}
@@ -22,7 +25,7 @@ local SECTIONS = {
       { 'yank_prompt', 'カーソル行のコメントのプロンプトを yank' },
       { 'open_file', 'そのファイルの実ファイルを別 tab で開く' },
       { 'close', 'セッションを閉じる (レビュー tab を閉じる)' },
-      { 'help', 'このヘルプ' },
+      { 'help', 'このヘルプ (g? でも開く)' },
       { 'next_file', '次のファイルへ (端では無動作)' },
       { 'prev_file', '前のファイルへ (端では無動作)' },
       { 'first_file', '最初のファイルへ' },
@@ -60,6 +63,7 @@ local SECTIONS = {
       { 'toggle_style', 'list 表示 (フルパス 1 行) ⇄ tree 表示を切替' },
       { 'toggle_viewed', 'レビュー完了マーク [✓] 切替 (open では付かない)' },
       { 'filter', '一覧を絞り込む (空入力で解除)' },
+      { 'help', 'このヘルプ (file panel でも g? で開く)' },
       { 'close', 'セッションを閉じる' },
     },
   },
@@ -105,14 +109,15 @@ local SECTIONS = {
 
 function M.open()
   local keymaps = config.get().keymaps
-  local lines = { 'review.nvim キーバインド' }
+  -- markdown ソース (## 見出し + `- **キー** 説明`)。キーは config の現在値。
+  local lines = { '# review.nvim キーバインド', '' }
   for _, section in ipairs(SECTIONS) do
-    table.insert(lines, '')
-    table.insert(lines, '[' .. section.title .. ']')
+    table.insert(lines, '## ' .. section.title)
     for _, row in ipairs(section.rows) do
       local key = section.keymap and keymaps[section.keymap][row[1]] or row[1]
-      table.insert(lines, key .. ' ' .. row[2])
+      table.insert(lines, ('- **%s** %s'):format(key, row[2]))
     end
+    table.insert(lines, '')
   end
 
   local buf = vim.api.nvim_create_buf(false, true)
@@ -120,13 +125,21 @@ function M.open()
   vim.bo[buf].bufhidden = 'wipe'
   vim.bo[buf].swapfile = false
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  -- markdown として描く (装飾は conceal。raw の `##` / `**` は見せない)
+  vim.bo[buf].filetype = 'markdown'
 
   local width = 4
   for _, line in ipairs(lines) do
     width = math.max(width, vim.fn.strdisplaywidth(line))
   end
   width = math.max(20, math.min(76, width + 2))
-  local height = math.max(4, math.min(vim.o.lines - 2, #lines + 2))
+  -- wrap 表示の折返し込みで高さを出す (長い説明行を切らない)
+  local height = 0
+  for _, line in ipairs(lines) do
+    local disp = vim.fn.strdisplaywidth(line)
+    height = height + math.max(1, math.ceil(disp / width))
+  end
+  height = math.max(4, math.min(vim.o.lines - 2, height + 2))
 
   local win = vim.api.nvim_open_win(buf, true, {
     relative = 'editor',
@@ -136,6 +149,10 @@ function M.open()
     height = height,
     border = 'rounded',
   })
+  vim.wo[win].conceallevel = 3
+  vim.wo[win].concealcursor = 'n'
+  vim.wo[win].wrap = true
+  vim.wo[win].linebreak = true
 
   local function close()
     if vim.api.nvim_win_is_valid(win) then

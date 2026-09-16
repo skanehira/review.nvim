@@ -46,6 +46,7 @@ describe('config.get', function()
           filter = '/',
           toggle_style = 'i',
           refresh = 'R',
+          help = '<F1>',
         },
         sessionlist = {
           open = '<CR>',
@@ -100,6 +101,7 @@ describe('config.get', function()
           filter = '/',
           toggle_style = 'i',
           refresh = 'R',
+          help = '<F1>',
         },
         sessionlist = {
           open = '<CR>',

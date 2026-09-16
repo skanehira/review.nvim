@@ -439,6 +439,41 @@ describe('filepanel キー割り当て', function()
   use_env()
 
   it(
+    'g? / <F1> で help float が開く (panel 上の config 値は help が markdown 表示)',
+    function()
+      local buf = show(filepanel.render(session_stub(), { f('a.lua', 'M', 1, 0) }, TREE_OPTS))
+      local present = {}
+      for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+        present[m.lhs] = true
+      end
+      assert.is_true(present['g?'] == true, 'panel の g? が無い')
+      assert.is_true(present['<F1>'] == true, 'panel の <F1> が無い')
+
+      vim.cmd 'normal g?'
+      local floats = {}
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(w).relative ~= '' then
+          floats[#floats + 1] = w
+        end
+      end
+      assert.equals(1, #floats, 'help float が 1 枚開くこと')
+      local hb = vim.api.nvim_win_get_buf(floats[1])
+      assert.equals('markdown', vim.bo[hb].filetype)
+      local flines = vim.api.nvim_buf_get_lines(hb, 0, -1, false)
+      local found = false
+      for _, l in ipairs(flines) do
+        if
+          l == '- **<CR>** そのファイルを head/base 窓に開く (dir 行では折り畳み)'
+        then
+          found = true
+        end
+      end
+      assert.is_true(found, 'config 値の markdown 行が無い: ' .. vim.inspect(flines))
+      vim.cmd 'normal q' -- help 自身の q で閉じる (現在窓 = float)
+    end
+  )
+
+  it(
     'DESIGN キー表の file panel 全キーが buffer-local に張り付き rhs が実関数として解決できる',
     function()
       local buf = filepanel.render(session_stub(), { f('a.lua', 'M', 1, 0) }, TREE_OPTS)

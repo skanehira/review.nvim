@@ -174,6 +174,9 @@ function M.install(buf, session_id)
   install_one(buf, 'n', k.open_file, 'open_file')
   install_one(buf, 'n', k.close, 'close')
   install_one(buf, 'n', k.help, 'help')
+  -- g? は config を持たない固定の別名 (<F1> が terminal に奪われる環境向け。
+  -- DESIGN キー表。衝突時は install_one がスキップする)。
+  install_one(buf, 'n', 'g?', 'help')
   install_one(buf, 'n', k.next_file, 'next_file')
   install_one(buf, 'n', k.prev_file, 'prev_file')
   install_one(buf, 'n', k.first_file, 'first_file')

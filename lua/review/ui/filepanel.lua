@@ -119,6 +119,8 @@ local function paint_keymaps(buf)
     { k.toggle_viewed, "require('review.handlers.session').toggle_viewed_current()" },
     { k.filter, "require('review.handlers.session').filter_sidebar()" },
     { k.toggle_style, "require('review.handlers.session').toggle_listing_style()" },
+    { k.help, "require('review.ui.help').open()" },
+    { 'g?', "require('review.ui.help').open()" },
     { k.close, "require('review.handlers.session').close_by_key()" },
   } do
     if kmap[1] ~= nil then
