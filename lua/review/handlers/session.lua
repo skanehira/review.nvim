@@ -27,6 +27,7 @@ local ui_commentmarks = require 'review.ui.commentmarks'
 local ui_fileview = require 'review.ui.fileview'
 local ui_keygate = require 'review.ui.keygate'
 local ui_filepanel = require 'review.ui.filepanel'
+local ui_treelist = require 'review.ui.treelist'
 local ui_scratchwin = require 'review.ui.scratchwin'
 local ui_windows = require 'review.ui.windows'
 local usermsg = require 'review.handlers.usermsg'
@@ -1570,15 +1571,35 @@ local function current_path()
   return active ~= nil and active.current ~= nil and active.current.path or nil
 end
 
--- 移動系 (<Tab>/<S-Tab>/[F/]F): 一覧 (パス昇順・絞り込み後の集合) から次の
--- 対象を解決し open_file (処理は panel <CR> と同一)。次/前は端は無動作。
+-- 移動系 (<Tab>/<S-Tab>/[F/]F): file panel の表示順 (ツリーを上から下) から次の
+-- 対象を解決し open_file (処理は panel <CR> と同一)。render と同じ treelist.build
+-- を単一源にし、折りたたみ dir の子・絞り込み外は表示と同一規則で飛ばす。
+-- 現在位置が順序に無い (折りたたみ・絞り込みで隠れた) ときは次 = 先頭、前 = 無動作。
 local function visible_order()
   local order = {}
   if active == nil then
     return order
   end
+  local entries = {}
   for _, e in ipairs(visible_files()) do
-    order[#order + 1] = e.path
+    entries[#entries + 1] = {
+      path = e.path,
+      status = e.status,
+      added = e.added,
+      deleted = e.deleted,
+      viewed = false,
+    }
+  end
+  local rows = ui_treelist.build(entries, {
+    mode = panel_mode,
+    collapsed = panel_collapsed,
+    base = active.session.base,
+    head_display = panel_head_display(),
+  })
+  for _, row in ipairs(rows) do
+    if row.kind == 'file' then
+      order[#order + 1] = row.path
+    end
   end
   return order
 end

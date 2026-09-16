@@ -90,7 +90,7 @@ describe('help.open', function()
     assert.is_true(
       has_line(
         lines,
-        '<Tab> 次のファイル (一覧順 = <CR> と同一処理。端は無動作)'
+        '<Tab> 次のファイル (file panel の表示順 = <CR> と同一処理。端は無動作)'
       )
     )
     assert.is_true(has_line(lines, '<S-Tab> 前のファイル (上記と同じ規則)'))

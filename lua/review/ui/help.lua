@@ -49,7 +49,10 @@ local SECTIONS = {
       -- 移動系・refresh の文案は doc/review.txt sidebar 節と同文。diff 節と同一文に
       -- すると help_spec の has_line 完全一致が節を区別できず (検出能力ゼロ)、
       -- 節の行数が減ってもテストが緑になる。文言を一意化している。
-      { 'next_file', '次のファイル (一覧順 = <CR> と同一処理。端は無動作)' },
+      {
+        'next_file',
+        '次のファイル (file panel の表示順 = <CR> と同一処理。端は無動作)',
+      },
       { 'prev_file', '前のファイル (上記と同じ規則)' },
       { 'first_file', '最初のファイル (上記と同じ規則)' },
       { 'last_file', '最後のファイル (上記と同じ規則)' },

@@ -27,6 +27,15 @@ describe('highlight.setup', function()
       'Comment',
       vim.api.nvim_get_hl(0, { name = 'ReviewPanelStatus', link = true }).link
     )
+    assert.equals(
+      'Comment',
+      vim.api.nvim_get_hl(0, { name = 'ReviewPanelComment', link = true }).link
+    )
+    assert.equals('Added', vim.api.nvim_get_hl(0, { name = 'ReviewPanelAdd', link = true }).link)
+    assert.equals(
+      'Removed',
+      vim.api.nvim_get_hl(0, { name = 'ReviewPanelRemove', link = true }).link
+    )
     assert.equals('Comment', vim.api.nvim_get_hl(0, { name = 'ReviewPanelMeta', link = true }).link)
     assert.is_nil(next(vim.api.nvim_get_hl(0, { name = 'ReviewSidebarFile' })))
   end)

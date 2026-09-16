@@ -98,7 +98,7 @@ describe('filepanel.render tree (既定)', function()
         'Changes (2)',
         'Showing changes for: main..作業ツリー',
         'A src/deep/',
-        '    A new.lua +2 -0 src/deep/',
+        '    A new.lua +2 -0',
         'M a.lua +1 -0',
       }, panel_lines(buf))
 
@@ -110,11 +110,39 @@ describe('filepanel.render tree (既定)', function()
         'Changes (2)',
         'Showing changes for: main..作業ツリー',
         'A src/deep/',
-        '    A new.lua +2 -0 src/deep/',
+        '    A new.lua +2 -0',
         '[✓] M a.lua +1 -0',
       }, panel_lines(buf2))
     end
   )
+
+  it(
+    'コメントありファイルの行に 💬 が出る (session.comments から解決)',
+    function()
+      local session = session_stub { comments = { { path = 'a.lua', body = 'x' } } }
+      local buf =
+        filepanel.render(session, { f('a.lua', 'M', 1, 0), f('b.lua', 'A', 1, 0) }, TREE_OPTS)
+      assert.same({
+        'Changes (2)',
+        'Showing changes for: main..作業ツリー',
+        'M 💬 a.lua +1 -0',
+        'A b.lua +1 -0',
+      }, panel_lines(buf))
+    end
+  )
+
+  it('💬 の hl span は ReviewPanelComment (実 extmark)', function()
+    local session = session_stub { comments = { { path = 'a.lua', body = 'x' } } }
+    local buf = filepanel.render(session, { f('a.lua', 'M', 1, 0) }, TREE_OPTS)
+    local lines = panel_lines(buf)
+    local found
+    for _, s in ipairs(filepanel.hl_spans(buf)) do
+      if s.group == 'ReviewPanelComment' then
+        found = lines[s.row + 1]:sub(s.from + 1, s.to)
+      end
+    end
+    assert.equals('💬', found)
+  end)
 
   it(
     'hl span extmark が treelist の spans と同じ位置に入る (dir span / file span / meta)',
@@ -137,7 +165,8 @@ describe('filepanel.render tree (既定)', function()
       assert.same({
         { text = 'M', group = 'ReviewPanelStatus' },
         { text = 'a.lua', group = 'ReviewPanelFile' },
-        { text = '+1 -0', group = 'ReviewPanelMeta' },
+        { text = '+1', group = 'ReviewPanelAdd' },
+        { text = '-0', group = 'ReviewPanelRemove' },
       }, by_row[5])
 
       -- 再 render で古い span extmark が残らない (捨てて再構成契約)
@@ -599,10 +628,10 @@ describe('filepanel 実 FS 正誤表 (temp repo + 実 git)', function()
         'Showing changes for: main..作業ツリー',
         -- dir 先行 (名前のバイト順: cmd < src) -> root file 昇順 (a.lua < cmd < top.md)
         'A cmd/',
-        '  A helper.go +1 -0 cmd/',
-        '  [✓] A main.go +1 -0 cmd/',
+        '  A helper.go +1 -0',
+        '  [✓] A main.go +1 -0',
         'A src/deep/mid/',
-        '      A fin.lua +1 -0 src/deep/mid/',
+        '      A fin.lua +1 -0',
         '[✓] M a.lua +1 -1',
         'D cmd +0 -1',
         'A top.md +1 -0',
@@ -641,7 +670,7 @@ describe('filepanel 実 FS 正誤表 (temp repo + 実 git)', function()
         'Changes (1)',
         'Showing changes for: main..作業ツリー',
         'A src/deep/mid/',
-        '      A fin.lua +1 -0 src/deep/mid/',
+        '      A fin.lua +1 -0',
       }, panel_lines(buf3))
     end
   )

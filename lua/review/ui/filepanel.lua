@@ -151,6 +151,12 @@ function M.render(session, files, opts)
     prev_entry = rendered[buf].rows[prev_cursor_row]
   end
 
+  local commented = {}
+  for _, comment in ipairs(session.comments or {}) do
+    if comment.path ~= nil then
+      commented[comment.path] = true
+    end
+  end
   local entries = {}
   for _, file in ipairs(files) do
     local state = session.files[file.path]
@@ -160,6 +166,7 @@ function M.render(session, files, opts)
       added = file.added,
       deleted = file.deleted,
       viewed = state ~= nil and state.viewed == true,
+      comment = commented[file.path] == true,
     }
   end
 

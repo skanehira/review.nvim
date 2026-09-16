@@ -6,13 +6,14 @@ local treelist = require 'review.ui.treelist'
 
 -- core/diff のパース結果 (File) の最小写し。viewed は filepanel 側で session から
 -- 埋めて渡す (treelist は純粋な一覧組み立てのみ)。
-local function f(path, status, added, deleted, viewed)
+local function f(path, status, added, deleted, viewed, comment)
   return {
     path = path,
     status = status,
     added = added,
     deleted = deleted,
     viewed = viewed == true,
+    comment = comment == true,
   }
 end
 
@@ -67,7 +68,7 @@ describe('treelist.build tree モード', function()
       'Changes (2)',
       'Showing changes for: main..作業ツリー',
       'A src/deep/',
-      '    A new.lua +1 -0 src/deep/',
+      '    A new.lua +1 -0',
       'M a.lua +2 -2',
     }, texts(rows))
     assert.equals('dir', rows[3].kind)
@@ -87,8 +88,8 @@ describe('treelist.build tree モード', function()
       'Showing changes for: main..作業ツリー',
       '* lib/',
       '  A y/',
-      '    A r.go +3 -0 lib/y/',
-      '  M x.go +1 -1 lib/',
+      '    A r.go +3 -0',
+      '  M x.go +1 -1',
     }, texts(rows))
     assert.equals('lib', rows[3].path)
     assert.equals('lib/y', rows[4].path)
@@ -105,9 +106,9 @@ describe('treelist.build tree モード', function()
       'Changes (4)',
       'Showing changes for: main..作業ツリー',
       'M cmd/',
-      '  M run.go +1 -0 cmd/',
+      '  M run.go +1 -0',
       'A docs/',
-      '  A a.md +1 -0 docs/',
+      '  A a.md +1 -0',
       'M README.md +1 -1',
       'A build.sh +1 -0',
     }, texts(rows))
@@ -124,7 +125,7 @@ describe('treelist.build tree モード', function()
         'Changes (2)',
         'Showing changes for: main..作業ツリー',
         'A cmd/',
-        '  A main.go +2 -0 cmd/',
+        '  A main.go +2 -0',
         'M cmd +1 -0',
       }, texts(rows))
       -- 行データは kind で区別できる (path は同じ語になりうる)
@@ -148,7 +149,7 @@ describe('treelist.build tree モード', function()
         'Showing changes for: main..作業ツリー',
         'A src/',
         '  ▸ A deep/',
-        '  A top.lua +1 -1 src/',
+        '  A top.lua +1 -1',
         'M a.lua +1 -0',
       }, texts(rows))
       assert.equals('src/deep', rows[4].path)
@@ -172,7 +173,7 @@ describe('treelist.build tree モード', function()
       'Changes (3)',
       'Showing changes for: main..作業ツリー',
       'A src/',
-      '  A L n.lua +1 -0 src/',
+      '  A L n.lua +1 -0',
       'M L a.lua +1 -0',
       'M b.md +1 -0',
     }, texts(rows))
@@ -195,7 +196,7 @@ describe('treelist.build tree モード', function()
   end)
 
   it(
-    'spans: status / dir 名 (ReviewPanelDir) / basename (ReviewPanelFile) / meta (ReviewPanelMeta)',
+    'spans: status / dir 名 (ReviewPanelDir) / basename (ReviewPanelFile) / ± (Add・Remove)',
     function()
       local rows = treelist.build({
         f('src/deep/new.lua', 'A', 12, 3, true),
@@ -217,14 +218,42 @@ describe('treelist.build tree モード', function()
       }, pieces(dir))
 
       local file = rows[4]
-      assert.equals('    [✓] A new.lua +12 -3 src/deep/', file.text)
+      assert.equals('    [✓] A new.lua +12 -3', file.text)
       assert.same({
         { text = '[✓]', group = 'ReviewPanelStatus' },
         { text = 'A', group = 'ReviewPanelStatus' },
         { text = 'new.lua', group = 'ReviewPanelFile' },
-        { text = '+12 -3', group = 'ReviewPanelMeta' },
-        { text = 'src/deep/', group = 'ReviewPanelMeta' },
+        { text = '+12', group = 'ReviewPanelAdd' },
+        { text = '-3', group = 'ReviewPanelRemove' },
       }, pieces(file))
+    end
+  )
+
+  it(
+    'コメントありファイルは status の後に 💬 (無しは付かない。span は ReviewPanelComment)',
+    function()
+      local rows = treelist.build({
+        f('a.lua', 'M', 1, 1, false, true),
+        f('b.lua', 'A', 1, 0),
+      }, tree_opts())
+      assert.same({
+        'Changes (2)',
+        'Showing changes for: main..作業ツリー',
+        'M 💬 a.lua +1 -1',
+        'A b.lua +1 -0',
+      }, texts(rows))
+      -- span は 💬 のグリフ範囲 (後続 space は無 hl)
+      local marks = {}
+      for _, s in ipairs(rows[3].spans) do
+        marks[#marks + 1] = { text = rows[3].text:sub(s.from + 1, s.to), group = s.group }
+      end
+      assert.same({
+        { text = 'M', group = 'ReviewPanelStatus' },
+        { text = '💬', group = 'ReviewPanelComment' },
+        { text = 'a.lua', group = 'ReviewPanelFile' },
+        { text = '+1', group = 'ReviewPanelAdd' },
+        { text = '-1', group = 'ReviewPanelRemove' },
+      }, marks)
     end
   )
 
@@ -265,7 +294,13 @@ describe('treelist.build list モード', function()
     end
     assert.is_true(groups.ReviewPanelFile == true)
     assert.is_true(groups.ReviewPanelStatus == true)
-    assert.is_true(groups.ReviewPanelMeta == true)
+    assert.is_true(groups.ReviewPanelAdd == true)
+    assert.is_true(groups.ReviewPanelRemove == true)
+  end)
+
+  it('list モードでもコメント icon は付く (フルパス行の status 後)', function()
+    local rows = treelist.build({ f('src/a.lua', 'M', 1, 1, false, true) }, { mode = 'list' })
+    assert.same({ 'M 💬 src/a.lua +1 -1' }, texts(rows))
   end)
 
   it('collapsed/mode 省略時は tree が既定 (既定がフォルダツリー)', function()

@@ -134,7 +134,7 @@ local function run()
   )
 
   -- file panel tree golden path (issue #17): ヘッダ 2 行・単一 child 連結 dir・
-  -- 開始 open ではマークを付けない (レビュー完了 [✓] = x トグルのみ)・親パス grey 接尾
+  -- 開始 open ではマークを付けない (レビュー完了 [✓] = x トグルのみ)・親パス接尾なし
   local tl = panel_lines()
   expect(tl[1] == 'Changes (3)', 'panel tree ヘッダ不一致: ' .. tostring(tl[1]))
   expect(
@@ -144,10 +144,7 @@ local function run()
   expect(panel_row('dir', 'src/deep') ~= nil, 'src/deep 連結 dir 行が無い')
   local nrow = panel_row('file', 'src/deep/new.lua')
   expect(nrow ~= nil, 'new.lua 子行が無い')
-  expect(
-    tl[nrow] == '    A new.lua +1 -0 src/deep/',
-    'new.lua 行フォーマット不一致: ' .. tl[nrow]
-  )
+  expect(tl[nrow] == '    A new.lua +1 -0', 'new.lua 行フォーマット不一致: ' .. tl[nrow])
   expect(
     tl[panel_row('file', 'a.lua')] == 'M a.lua +2 -2',
     '開始 open の行に mark が付いている (開封では [✓] を付けない契約): '
@@ -316,8 +313,9 @@ local function run()
     'o の tab を閉じた後にレビュー tab の 3 窓が壊れた'
   )
 
-  -- 移動キー (最終キー表 #18): <S-Tab> で a.lua -> ]F 最後 (src/deep/new.lua) ->
-  -- [F 最初 (a.lua) -> i で閲覧 float -> 閉じる -> <leader>e で panel focus
+  -- 移動キー (最終キー表 #18 の表示順版): <S-Tab> で a.lua -> ]F 最後 (b.lua) ->
+  -- [F 最初 (src/deep/new.lua, ツリーは dir 先行) -> <Tab>/<S-Tab> 往復
+  -- -> i で閲覧 float -> 閉じる -> <leader>e で panel focus
   vim.api.nvim_set_current_win(windows.win 'head')
   local stab = vim.api.nvim_replace_termcodes('<S-Tab>', true, true, true)
   vim.cmd('normal ' .. stab)
@@ -327,27 +325,33 @@ local function run()
   print 'E2E-M1 S-Tab=prev'
   vim.cmd 'normal ]F'
   wait_for(function()
-    return win_buf_name(vim.api.nvim_get_current_win())
-      == realpath(vim.fs.joinpath(top, 'src/deep/new.lua'))
-  end, ']F で最後のファイル src/deep/new.lua')
+    return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'b.lua'))
+  end, ']F で最後のファイル b.lua (ツリー表示順の末尾)')
   print 'E2E-M2 ]F=last'
   vim.cmd 'normal [F'
   wait_for(function()
-    return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'a.lua'))
-  end, '[F で最初のファイル a.lua')
+    return win_buf_name(vim.api.nvim_get_current_win())
+      == realpath(vim.fs.joinpath(top, 'src/deep/new.lua'))
+  end, '[F で最初のファイル src/deep/new.lua (ツリーは dir 先行)')
   print 'E2E-M3 [F=first'
   -- <Tab> 次ファイル (押下は 0 接頭で渡す = :normal の引数先頭 whitespace 回避。
-  -- 実測で 0<Tab> 注入の発火を確認済み)。b.lua へ進み、<S-Tab> で戻る。
+  -- 実測で 0<Tab> 注入の発火を確認済み)。表示順 [new.lua, a.lua, b.lua] を辿る。
   local tab_key = vim.api.nvim_replace_termcodes('<Tab>', true, false, true)
   vim.cmd('normal 0' .. tab_key)
   wait_for(function()
-    return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'b.lua'))
-  end, '<Tab> で b.lua')
+    return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'a.lua'))
+  end, '<Tab> で a.lua')
   print 'E2E-M4 Tab=next'
   vim.cmd('normal 0' .. stab)
   wait_for(function()
+    return win_buf_name(vim.api.nvim_get_current_win())
+      == realpath(vim.fs.joinpath(top, 'src/deep/new.lua'))
+  end, '<S-Tab> で src/deep/new.lua 復帰')
+  -- 続くコメント閲覧 float は 2 行以上ある a.lua で行う (new.lua は 1 行)
+  vim.cmd('normal 0' .. tab_key)
+  wait_for(function()
     return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'a.lua'))
-  end, '<S-Tab> で a.lua 復帰')
+  end, 'コメント閲覧前の a.lua 復帰')
   vim.api.nvim_win_set_cursor(vim.api.nvim_get_current_win(), { 3, 0 })
   vim.cmd 'normal i'
   wait_for(function()

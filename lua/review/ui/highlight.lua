@@ -15,12 +15,17 @@ local DEFAULTS = {
   ReviewDiffAdd = { link = 'DiffAdd' },
   ReviewDiffDelete = { link = 'DiffDelete' },
   ReviewDiffHunk = { link = 'diffLine' },
-  -- file panel (DESIGN「命名」basename / dir 行 / git status 記号 / 親子パス・±数)。
-  -- basename は親パス grey (Comment) と対比させて既定は無着色 = Normal link。
-  -- 選択行 hl も ReviewPanelFile (diff-review「file panel」相互ハイライト)。
+  -- file panel (DESIGN「命名」basename / dir 行 / git status 記号 / コメント有無 /
+  -- 増減数)。basename は既定無着色 = Normal link。選択行 hl も ReviewPanelFile
+  -- (diff-review「file panel」相互ハイライト)。±は + 緑 / - 赤、💬 は Comment grey。
   ReviewPanelFile = { link = 'Normal' },
   ReviewPanelDir = { link = 'Directory' },
   ReviewPanelStatus = { link = 'Comment' },
+  ReviewPanelComment = { link = 'Comment' },
+  ReviewPanelAdd = { link = 'Added' },
+  ReviewPanelRemove = { link = 'Removed' },
+  -- session 一覧 (:Review list) の grey 行 (repo path 消失で <Enter> 不可)。
+  -- file panel 側では未使用 (2026-09 改訂で親パスサフィックスを撤去)。
   ReviewPanelMeta = { link = 'Comment' },
 }
 

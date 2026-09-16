@@ -212,6 +212,16 @@ local function panel_row_for(kind, path)
   return panel_row_for_buf(vim.api.nvim_win_get_buf(ui_windows.win 'panel'), kind, path)
 end
 
+-- 現在開いているファイルを panel カーソルの entry 写像から取る (deleted 等の
+-- 告知 scratch では head 窓 buf 名が前のファイルのまま残るため、head_buf_name
+-- ではなく移動系の契約である panel 追従から見る)。
+local function panel_current_path()
+  local pw = ui_windows.win 'panel'
+  local buf = vim.api.nvim_win_get_buf(pw)
+  local entry = require('review.ui.filepanel').row_entry(buf, vim.api.nvim_win_get_cursor(pw)[1])
+  return entry ~= nil and entry.path or nil
+end
+
 local function focus_panel_file(needle)
   local pw = ui_windows.win 'panel'
   local row = panel_row_for_buf(vim.api.nvim_win_get_buf(pw), 'file', needle)
@@ -3598,10 +3608,10 @@ describe('file panel ツリー / view state (issue-17)', function()
     'Showing changes for: main..作業ツリー',
     '* app/',
     '  M util/',
-    '    M x.lua +1 -0 app/util/',
-    '  A y.lua +1 -0 app/',
+    '    M x.lua +1 -0',
+    '  A y.lua +1 -0',
     'A cmd/',
-    '  A main.go +1 -0 cmd/',
+    '  A main.go +1 -0',
     'D cmd +0 -1',
     'M z.txt +1 -0',
   }
@@ -3661,7 +3671,7 @@ describe('file panel ツリー / view state (issue-17)', function()
         'Showing changes for: main..作業ツリー',
         '▸ * app/',
         'A cmd/',
-        '  A main.go +1 -0 cmd/',
+        '  A main.go +1 -0',
         'D cmd +0 -1',
         'M z.txt +1 -0',
       }, lines)
@@ -3755,4 +3765,51 @@ describe('file panel ツリー / view state (issue-17)', function()
       vim.w[ui_windows.win 'panel'].review_winbar
     )
   end)
+
+  it(
+    '<Tab>/<S-Tab> はパス昇順でなく file panel の表示順 (ツリー上→下) を辿る',
+    function()
+      start_trees() -- 初期 open = app/util/x.lua
+      assert.equals('app/util/x.lua', panel_current_path())
+
+      session_handler.next_file() -- ツリー: app/y.lua (パス昇順と同じ)
+      assert.equals('app/y.lua', panel_current_path())
+
+      -- ここがパス昇順と分岐: ツリーは cmd/main.go -> cmd (file)、パスは cmd -> cmd/main.go
+      session_handler.next_file()
+      assert.equals('cmd/main.go', panel_current_path())
+      session_handler.next_file()
+      assert.equals('cmd', panel_current_path())
+      session_handler.next_file()
+      assert.equals('z.txt', panel_current_path())
+      session_handler.next_file() -- 端 = 無動作
+      assert.equals('z.txt', panel_current_path())
+
+      session_handler.prev_file() -- ツリーを 1 つ上へ
+      assert.equals('cmd', panel_current_path())
+    end
+  )
+
+  it(
+    '折りたたみ dir の子は表示と同一規則で飛ばし、list モードはフラット順を辿る',
+    function()
+      start_trees() -- 初期 open = app/util/x.lua
+      local pw = ui_windows.win 'panel'
+      vim.api.nvim_set_current_win(pw)
+      vim.api.nvim_win_set_cursor(pw, { panel_row_for('dir', 'app'), 0 })
+      session_handler.open_selected_file() -- app を折りたたむ (子は非表示)
+
+      -- 非表示になった現在位置は順序から外れ、次 = 表示先頭 (cmd/main.go)
+      session_handler.next_file()
+      assert.equals('cmd/main.go', panel_current_path())
+      session_handler.first_file() -- 現対象が先頭なので無動作
+      assert.equals('cmd/main.go', panel_current_path())
+
+      -- list モードは折りたたみを無視したフラット (パス昇順)
+      session_handler.toggle_listing_style()
+      session_handler.open_file 'app/y.lua'
+      session_handler.next_file() -- パス昇順: app/y.lua -> cmd (file)
+      assert.equals('cmd', panel_current_path())
+    end
+  )
 end)

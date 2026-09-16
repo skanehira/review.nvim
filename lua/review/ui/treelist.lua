@@ -4,8 +4,10 @@
 -- highlight 適用は ui/filepanel)。FS・窓・vim API を触らないので入出力だけで判定できる。
 --
 -- 行フォーマットの決定 (docs 契約 + 設計の穴埋め):
---   file 行 `[indent][✓ ][status ][icon ][basename] +a -d[ 親path/]` (親は grey 相当の
---     ReviewPanelMeta span)。viewed は status より前 = 現行フラット形式で行頭 [✓] の契約踏襲
+--   file 行 `[indent][✓ ][status ][💬 ][icon ][basename] +a -d`。viewed は status
+--     より前 = 行頭 [✓]、コメントありは status の後に 💬 (ReviewPanelComment)。
+--     ±は `+n` (ReviewPanelAdd 緑) / `-n` (ReviewPanelRemove 赤) の 2 span。
+--     親パス grey サフィックスは持たない (ツリーの indent が文脈 — 2026-09 改訂)
 --   dir 行 `[indent][▸ ]status display/`。末尾 `/` が dir 識別子 (同名のファイルと
 --     dir が同時差分に出るケースの区別規則)。status は配下全 file の集約
 --     (全同一記号ならそのまま、種類混在は `*` — 単独 status `M` と衝突させない)
@@ -93,9 +95,9 @@ local function line()
   return self
 end
 
--- tree モードは basename + 親パス grey サフィックス、list モードはフルパス 1 行
+-- tree モードは basename、list モードはフルパス 1 行 (親パスサフィックスは無し)
 -- (name に path を渡す) ので name 解決は呼び出し側。
-local function file_row(entry, indent, parent_path, icon, icon_hl, name)
+local function file_row(entry, indent, icon, icon_hl, name)
   local l = line()
   l.add(indent)
   if entry.viewed then
@@ -104,6 +106,10 @@ local function file_row(entry, indent, parent_path, icon, icon_hl, name)
   end
   l.add(entry.status, 'ReviewPanelStatus')
   l.add ' '
+  if entry.comment then
+    l.add('💬', 'ReviewPanelComment')
+    l.add ' '
+  end
   if icon ~= nil then
     -- アイコンとファイル名の色の hl group の解決は resolver の責任
     -- (nvim-web-devicons の DevIcon* group 参照のみ。plugin 側で set_hl も
@@ -113,11 +119,9 @@ local function file_row(entry, indent, parent_path, icon, icon_hl, name)
   end
   l.add(name, icon_hl or 'ReviewPanelFile')
   l.add ' '
-  l.add(('+%d -%d'):format(entry.added or 0, entry.deleted or 0), 'ReviewPanelMeta')
-  if parent_path ~= nil and parent_path ~= '' then
-    l.add ' '
-    l.add(parent_path .. '/', 'ReviewPanelMeta')
-  end
+  l.add(('+%d'):format(entry.added or 0), 'ReviewPanelAdd')
+  l.add ' '
+  l.add(('-%d'):format(entry.deleted or 0), 'ReviewPanelRemove')
   return { kind = 'file', text = l.text, path = entry.path, spans = l.spans }
 end
 
@@ -197,7 +201,7 @@ local function emit_tree(node, opts, indent, out)
     if opts.icon ~= nil then
       icon, icon_hl = opts.icon(entry.path)
     end
-    out[#out + 1] = file_row(entry, indent, node.path, icon, icon_hl, fname)
+    out[#out + 1] = file_row(entry, indent, icon, icon_hl, fname)
   end
 end
 
@@ -231,7 +235,7 @@ function M.build(files, opts)
         local _, hl = opts.icon(entry.path)
         icon_hl = hl
       end
-      rows[#rows + 1] = file_row(entry, '', nil, nil, icon_hl, entry.path)
+      rows[#rows + 1] = file_row(entry, '', nil, icon_hl, entry.path)
     end
     return rows
   end
