@@ -2,10 +2,10 @@
 -- のセッションを :Review delete で dir + ref + JSON まで一掃することを assert。
 local answers = { 'y' }
 local idx = 0
-require('review.handlers.session')._set_confirm(function(_, cb)
+vim.ui.input = function(_, cb)
   idx = idx + 1
-  cb((answers[idx] or 'y') == 'y')
-end)
+  cb(answers[idx] or 'y')
+end
 
 local function fail(why)
   print('E2E-FAIL: ' .. why)

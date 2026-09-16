@@ -24,7 +24,6 @@ local result = require 'review.core.result'
 local store = require 'review.store.session'
 local ui_chrome = require 'review.ui.chrome'
 local ui_commentmarks = require 'review.ui.commentmarks'
-local ui_confirm = require 'review.ui.confirm'
 local ui_keygate = require 'review.ui.keygate'
 local ui_filepanel = require 'review.ui.filepanel'
 local ui_treelist = require 'review.ui.treelist'
@@ -140,22 +139,15 @@ local function prune_and_rm_dir(repo, path, done)
   end)
 end
 
--- [y/N] の確認。1 キー確定の float (ui/confirm)。vim.ui.input は Enter 必須で、
--- «y だけ押して次のコマンドを打つ» と y が cmdline 入力に残留し後続キーが混入する
--- (UX review F15)。float は cmdline を使わないので残留しない。
-local confirm_override = nil
-
---- テスト差替え用 (headless はキー入力が無い)。nil で既定 (float) へ戻す。
-function M._set_confirm(fn)
-  confirm_override = fn
-end
-
+-- [y/N] の確認。vim.ui.input を使う (vim.fn.confirm は headless で絞込めない)。
+-- 応答 (y/n + <Enter>) のあとに cmdline を空 echo で明示クリアする: 環境によって
+-- 応答後の cmdline に残りが見えることがあり、続けた打鍵が入力へ混入するため
+-- (UX review F15 / ユーザー要望)。
 local function confirm(prompt, cb)
-  if confirm_override ~= nil then
-    confirm_override(prompt, cb)
-    return
-  end
-  ui_confirm.open(prompt, cb)
+  vim.ui.input({ prompt = prompt }, function(answer)
+    vim.api.nvim_echo({}, false, {})
+    cb(answer == 'y')
+  end)
 end
 
 local function dir_exists(path)

@@ -58,7 +58,7 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 
 **操作** (既定キーの正本は DESIGN.md「デフォルトキーマップ」。buffer-local + window role gate、`silent nowait`。gate 不成立窓では 1 キーストロークが built-in になる副作用を help に明記):
 
-- `[y/N]` 確認は自前 float (ui/confirm) で **y / n・Esc・<CR> の 1 キー確定**。`vim.ui.input` は Enter 必須で、y 押下後に続けた打鍵が cmdline 入力へ混入するため使わない (UX review F15)。文言の正本は各呼び出し側 (prompt 文字列)、float は末尾の `[y/N]: ` を落として hint 行を付ける
+- `[y/N]` 確認は `vim.ui.input` (cmdline) で行い、y / n を打って `<Enter>` で応答する。応答後に空 echo (`nvim_echo({}, false, {})`) で cmdline をクリアする (残留した打鍵が入力に混ざらない — UX review F15)。文言の正本は各呼び出し側 (prompt 文字列)
 
 | 操作 | 起きること |
 | --- | --- |

@@ -108,9 +108,9 @@ local function run()
   -- 応答を注入。pr4 と同手法)。承認後、レビュー tab 消滅 + 実ファイルの
   -- extmark 残骸 0 + status=closed。
   local review_tab = windows.state().tab
-  require('review.handlers.session')._set_confirm(function(_, cb)
-    cb(true)
-  end)
+  vim.ui.input = function(_, cb)
+    cb 'y'
+  end
   vim.api.nvim_set_current_win(head_win)
   vim.cmd 'normal q'
   wait_for(function()

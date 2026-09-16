@@ -167,14 +167,14 @@ local function list_cmd()
   return { 'git', 'worktree', 'list', '--porcelain' }
 end
 
--- 応答の選択肢を 1 回目順に 1 件ずつ返す確認スタブ (delete+force の 2 確認用)。
+-- 応答の選択肢を 1 回目順に 1 件ずつ返す入力スタブ (delete+force の 2 確認用)。
 local function answer_queue(answers)
   local idx = 0
-  session_handler._set_confirm(function(prompt, cb)
+  vim.ui.input = function(opts, cb)
     idx = idx + 1
-    table.insert(state.inputs, { prompt = prompt })
-    cb(answers[idx] == 'y')
-  end)
+    table.insert(state.inputs, opts)
+    cb(answers[idx])
+  end
 end
 
 local function has_call(prefix)
@@ -323,12 +323,6 @@ local function use_env()
       table.insert(state.inputs, opts)
       cb(state.input_answer)
     end
-    -- [y/N] 確認は 1 キー float になったため、headless では応答スタブで差し替える
-    -- (prompt の記録形は従来の vim.ui.input opts と同形 = .prompt で揃える)。
-    session_handler._set_confirm(function(prompt, cb)
-      table.insert(state.inputs, { prompt = prompt })
-      cb(state.input_answer == 'y')
-    end)
     -- review://* とレビュー tab は nvim プロセス共有。前テスト残りを掃除して
     -- 隔離 tab を現在の tab にする (同名再利用の混線防止)。
     if ui_windows.state() ~= nil then
@@ -371,7 +365,6 @@ local function use_env()
     store._set_now(nil)
     store._set_notify(nil)
     session_handler._set_now(nil)
-    session_handler._set_confirm(nil)
     session_handler._reset()
     config.reset()
     cli._set_system(nil)
@@ -2649,6 +2642,44 @@ describe('delete の worktree / ref 掃除', function()
         ):format(wt_path()),
         state.inputs[2].prompt
       )
+    end
+  )
+
+  it(
+    '確認は vim.ui.input (cmdline) で行い、応答後に cmdline をクリアする',
+    function()
+      vim.fn.mkdir(wt_path(), 'p')
+      store.save(existing_stub {
+        worktree = { path = wt_path(), created_by_us = true },
+      })
+      install_git {
+        top_ok,
+        function()
+          return { code = 0, stdout = ' M a.lua\n', stderr = '' }
+        end,
+      }
+      local echoes = {}
+      local REAL_ECHO = vim.api.nvim_echo
+      vim.api.nvim_echo = function(chunks, history, opts)
+        table.insert(echoes, { chunks = chunks, history = history, opts = opts })
+        return REAL_ECHO(chunks, history, opts)
+      end
+      local prompts = {}
+      vim.ui.input = function(opts, cb)
+        prompts[#prompts + 1] = opts.prompt
+        cb 'n' -- キャンセル = delete 中止 (このテストの主眼は入力経路と後始末)
+      end
+      session_handler.delete(SLUG)
+      vim.api.nvim_echo = REAL_ECHO
+      assert.equals(1, #prompts, 'vim.ui.input (cmdline) 経由で確認していない')
+      -- 応答後に cmdline を空 echo で掃除する契約 (残留した打鍵の混入防止)
+      local cleared = false
+      for _, e in ipairs(echoes) do
+        if #e.chunks == 0 and e.history == false then
+          cleared = true
+        end
+      end
+      assert.is_true(cleared, '応答後に cmdline クリア (空 echo) が呼ばれない')
     end
   )
 
