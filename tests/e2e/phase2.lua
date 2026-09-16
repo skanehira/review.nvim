@@ -62,7 +62,7 @@ local function run()
   local virt = marks[1][4].virt_text and marks[1][4].virt_text[1] and marks[1][4].virt_text[1][1]
     or ''
   -- 行下スレッド表示 (GitHub 風): eol は件数、本文は virt_lines 先頭行
-  if not virt:find('💬', 1, true) then
+  if not virt:find('\u{EA6B}', 1, true) then
     fail('復元 extmark の件数表示が無い: ' .. virt)
   end
   local vlines = marks[1][4].virt_lines or {}

@@ -123,7 +123,8 @@ function M.apply(session, bufnr, path)
         n_out = n_out + 1
       end
     end
-    local text = (' 💬 %d'):format(#cs) .. (n_out > 0 and (' (⚠%d)'):format(n_out) or '')
+    -- nf-cod-comment (U+EA6B)。旧 💬 は廃止 (panel アイコンと同一グリフ)。
+    local text = (' \u{EA6B} %d'):format(#cs) .. (n_out > 0 and (' (⚠%d)'):format(n_out) or '')
     local underline_end = row
     for _, c in ipairs(cs) do
       local er = math.min(c.end_line or c.line, line_count)

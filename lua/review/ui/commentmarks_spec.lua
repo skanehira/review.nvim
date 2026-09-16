@@ -82,7 +82,7 @@ describe('commentmarks.apply: 併合 extmark', function()
       assert.equals(1, h[2], 'row は line-1 (0-based)')
       local vt = h[4].virt_text[1][1]
       assert.is_true(
-        vt:find('💬', 1, true) ~= nil,
+        vt:find('\u{EA6B}', 1, true) ~= nil,
         '件数 eol 表示が無い: ' .. tostring(vt)
       )
       local vl = h[4].virt_lines
@@ -111,7 +111,10 @@ describe('commentmarks.apply: 併合 extmark', function()
       if m[4].virt_text ~= nil then
         heads = heads + 1
         thread_len = #(m[4].virt_lines or {})
-        assert.is_true(m[4].virt_text[1][1]:find('💬 2', 1, true) ~= nil, m[4].virt_text[1][1])
+        assert.is_true(
+          m[4].virt_text[1][1]:find('\u{EA6B} 2', 1, true) ~= nil,
+          m[4].virt_text[1][1]
+        )
       end
     end
     assert.equals(1, heads, '併合されずに mark が二つある')
@@ -149,7 +152,7 @@ describe('commentmarks.apply: 併合 extmark', function()
     end
   )
 
-  it('outdated 混在群の件数表示は 💬 N (⚠M)', function()
+  it('outdated 混在群の件数表示はコメントアイコン N (⚠M)', function()
     local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/e.lua')
     commentmarks.apply(
       session_of {
@@ -293,7 +296,7 @@ describe(
           'a.lua'
         )
         local vl, vt = head_virt_lines(buf)
-        assert.equals(' 💬 1 (⚠1)', vt)
+        assert.equals(' \u{EA6B} 1 (⚠1)', vt)
         assert.equals('⚠ [c1] kept', vl[1][1][1])
         assert.equals('ReviewCommentOutdated', vl[1][1][2])
       end

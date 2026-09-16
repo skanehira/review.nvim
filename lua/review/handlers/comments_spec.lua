@@ -241,7 +241,7 @@ describe('comments c (作成 / head バッファ恒等行)', function()
           return chunk
         end
         local vt = m[4].virt_text and text_of(m[4].virt_text[1]) or ''
-        if type(vt) == 'string' and vt:find('💬', 1, true) ~= nil then
+        if type(vt) == 'string' and vt:find('\u{EA6B}', 1, true) ~= nil then
           found_cnt = true
         end
         for _, vl in ipairs(m[4].virt_lines or {}) do

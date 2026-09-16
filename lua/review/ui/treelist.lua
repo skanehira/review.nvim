@@ -4,8 +4,9 @@
 -- highlight 適用は ui/filepanel)。FS・窓・vim API を触らないので入出力だけで判定できる。
 --
 -- 行フォーマットの決定 (docs 契約 + 設計の穴埋め):
---   file 行 `[indent][✓ ][status ][💬 ][icon ][basename] +a -d`。viewed は status
---     より前 = 行頭 [✓]、コメントありは status の後に 💬 (ReviewPanelComment)。
+--   file 行 `[indent][✓ ][status ][コメントアイコン ][icon ][basename] +a -d`。viewed
+--     は status より前 = 行頭 [✓]、コメントありは status の後に nf-cod-comment
+--     (U+EA6B) を出す (ReviewPanelComment。旧 💬 は廃止)。
 --     ±は `+n` (ReviewPanelAdd 緑) / `-n` (ReviewPanelRemove 赤) の 2 span。
 --     親パス grey サフィックスは持たない (ツリーの indent が文脈 — 2026-09 改訂)
 --   dir 行 `[indent][▸ ]status display/`。末尾 `/` が dir 識別子 (同名のファイルと
@@ -107,7 +108,7 @@ local function file_row(entry, indent, icon, icon_hl, name)
   l.add(entry.status, 'ReviewPanelStatus')
   l.add ' '
   if entry.comment then
-    l.add('💬', 'ReviewPanelComment')
+    l.add('\u{EA6B}', 'ReviewPanelComment')
     l.add ' '
   end
   if icon ~= nil then

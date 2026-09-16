@@ -230,7 +230,7 @@ describe('treelist.build tree モード', function()
   )
 
   it(
-    'コメントありファイルは status の後に 💬 (無しは付かない。span は ReviewPanelComment)',
+    'コメントありファイルは status の後にコメントアイコン (無しは付かない。span は ReviewPanelComment)',
     function()
       local rows = treelist.build({
         f('a.lua', 'M', 1, 1, false, true),
@@ -239,17 +239,17 @@ describe('treelist.build tree モード', function()
       assert.same({
         'Changes (2)',
         'Showing changes for: main..作業ツリー',
-        'M 💬 a.lua +1 -1',
+        'M \u{EA6B} a.lua +1 -1',
         'A b.lua +1 -0',
       }, texts(rows))
-      -- span は 💬 のグリフ範囲 (後続 space は無 hl)
+      -- span はコメントアイコン (U+EA6B) のグリフ範囲 (後続 space は無 hl)
       local marks = {}
       for _, s in ipairs(rows[3].spans) do
         marks[#marks + 1] = { text = rows[3].text:sub(s.from + 1, s.to), group = s.group }
       end
       assert.same({
         { text = 'M', group = 'ReviewPanelStatus' },
-        { text = '💬', group = 'ReviewPanelComment' },
+        { text = '\u{EA6B}', group = 'ReviewPanelComment' },
         { text = 'a.lua', group = 'ReviewPanelFile' },
         { text = '+1', group = 'ReviewPanelAdd' },
         { text = '-1', group = 'ReviewPanelRemove' },
@@ -300,7 +300,7 @@ describe('treelist.build list モード', function()
 
   it('list モードでもコメント icon は付く (フルパス行の status 後)', function()
     local rows = treelist.build({ f('src/a.lua', 'M', 1, 1, false, true) }, { mode = 'list' })
-    assert.same({ 'M 💬 src/a.lua +1 -1' }, texts(rows))
+    assert.same({ 'M \u{EA6B} src/a.lua +1 -1' }, texts(rows))
   end)
 
   it('collapsed/mode 省略時は tree が既定 (既定がフォルダツリー)', function()

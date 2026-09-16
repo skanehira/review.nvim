@@ -206,9 +206,10 @@ KEYMAPS						*review-keymaps*
 	専用 scratch 縮退時み ref 名) の下にパスツリーが続く。dir 行は末尾 «/» で
 	ファイルと区別し、status は配下の集約 (全子同一記号ならそのまま、種類混在
 	は «*»)。単一 child の dir 連鎖は «a/b/c/» と連結表示する。file 行は
-	«[✓?] <status> <💬?> <icon?> <basename> +a -d»。+n は緑、-n は赤で、
-	コメントがあるファイルは status の後に 💬 が付く (親パスは出さない =
-	ツリーのインデントで判別)。アイコンは nvim-web-devicons があるときだけ
+	«[✓?] <status> <コメントアイコン?> <icon?> <basename> +a -d»。+n は緑、
+	-n は赤で、コメントがあるファイルは status の後にコメントアイコン
+	(nf-cod-comment。Nerd Font のグリフ) が付く (親パスは出さない = ツリーの
+	インデントで判別)。filetype アイコンは nvim-web-devicons があるときだけ
 	自動で出る (無くてもテキスト表示)。
 	レビュー完了マークは行頭に [✓]。open や移動では決して付かず、パネルの
 	x でユーザーが付ける (セッションに保存され再起動後も復元)。
@@ -280,7 +281,7 @@ SESSION 状態と復旧				*review-sessions*
 			コメントを保持する
 
 outdated 認定 (差分の揺れで対象行を特定できないコメント) は head バッファで
- 解ける位置にあえば行末 `(💬 N (⚠M))` と gray スレッド、head 窓に解けない分は
+ 解ける位置にあえば行末 `(コメントアイコン N (⚠M))` と gray スレッド、head 窓に解けない分は
  head バッファ 1 行目の行上に «⚠ N outdated (prompt 除外中)» として集約、窓の
  さえないファイル (削除/binary 告知) の分は file panel winbar 末尾の `⚠N` で示す
  (:h review-display)。`:Review prompt` の既定出力からは除外される。本文は失わず
@@ -305,8 +306,9 @@ outdated 認定 (差分の揺れで対象行を特定できないコメント) �
 	head/base の縮退 (scratch 縮退) は両窓 git show の読み取り専用になる
 		(INFO 通知済み)。
 
-	コメントは head 実バッファの extmark (対象行の下線 + 行末 `💬 N`、
-	outdated 混在は `💬 N (⚠M)`、本文は**行下スレッド** virt_lines に GitHub 風、
+	コメントは head 実バッファの extmark (対象行の下線 + 行末
+	`コメントアイコン N`、outdated 混在は `コメントアイコン N (⚠M)`、本文は
+	**行下スレッド** virt_lines に GitHub 風、
 	10 行で打ち切れ全文は `i` 窓)。スレッドはそのバッファを見る全窓に
 	見える (窓単位で抑える API が Neovim に無い実測。バッファ行を占有しない
 	ので行番号写像は不変)。位置を解けない outdated は その head バッファ

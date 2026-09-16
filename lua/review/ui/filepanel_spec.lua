@@ -117,7 +117,7 @@ describe('filepanel.render tree (既定)', function()
   )
 
   it(
-    'コメントありファイルの行に 💬 が出る (session.comments から解決)',
+    'コメントありファイルの行にコメントアイコン (U+EA6B) が出る (session.comments から解決)',
     function()
       local session = session_stub { comments = { { path = 'a.lua', body = 'x' } } }
       local buf =
@@ -125,24 +125,27 @@ describe('filepanel.render tree (既定)', function()
       assert.same({
         'Changes (2)',
         'Showing changes for: main..作業ツリー',
-        'M 💬 a.lua +1 -0',
+        'M \u{EA6B} a.lua +1 -0',
         'A b.lua +1 -0',
       }, panel_lines(buf))
     end
   )
 
-  it('💬 の hl span は ReviewPanelComment (実 extmark)', function()
-    local session = session_stub { comments = { { path = 'a.lua', body = 'x' } } }
-    local buf = filepanel.render(session, { f('a.lua', 'M', 1, 0) }, TREE_OPTS)
-    local lines = panel_lines(buf)
-    local found
-    for _, s in ipairs(filepanel.hl_spans(buf)) do
-      if s.group == 'ReviewPanelComment' then
-        found = lines[s.row + 1]:sub(s.from + 1, s.to)
+  it(
+    'コメントアイコン (U+EA6B) の hl span は ReviewPanelComment (実 extmark)',
+    function()
+      local session = session_stub { comments = { { path = 'a.lua', body = 'x' } } }
+      local buf = filepanel.render(session, { f('a.lua', 'M', 1, 0) }, TREE_OPTS)
+      local lines = panel_lines(buf)
+      local found
+      for _, s in ipairs(filepanel.hl_spans(buf)) do
+        if s.group == 'ReviewPanelComment' then
+          found = lines[s.row + 1]:sub(s.from + 1, s.to)
+        end
       end
+      assert.equals('\u{EA6B}', found)
     end
-    assert.equals('💬', found)
-  end)
+  )
 
   it(
     'hl span extmark が treelist の spans と同じ位置に入る (dir span / file span / meta)',

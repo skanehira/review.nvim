@@ -1935,7 +1935,7 @@ describe('commit_comment_change (INV-4 + extmark 再適用)', function()
     for _, chunk in ipairs(details[1][4].virt_text or {}) do
       vt = vt .. (type(chunk[1]) == 'table' and chunk[1][1] or chunk[1])
     end
-    assert.is_true(vt:find('💬 2', 1, true) ~= nil, vt)
+    assert.is_true(vt:find('\u{EA6B} 2', 1, true) ~= nil, vt)
     assert.equals('main..feature · a.lua · +1 -0 · 2 comments', vim.w[hw].review_winbar)
   end)
 

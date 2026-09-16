@@ -43,7 +43,7 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 
 **コメント表示 (head バッファの extmark)**:
 
-- 対象行 = コメントの `line`〜`end_line` の範囲 (new 側行番号 = head バッファの行番号そのもの。**行写像変換は存在しない** — head 実窓では行番号が恒等で、unified バッファ時代の変換経路 (`new_line_at`) は持たない)。namespace `review_comment` の extmark 1 個に virt_text (行末 `💬 N`、outdated 混在は `💬 N (⚠M)`) と virt_lines (行下スレッド本文 `[c1] …`、10 行で `… (i で全文)`、group 内は id 行 + continuation インデント) を併合する (同一位置に複数 extmark を作ると取得順不定で spec 契約にできない)。下線 hl `ReviewCommentLine`
+- 対象行 = コメントの `line`〜`end_line` の範囲 (new 側行番号 = head バッファの行番号そのもの。**行写像変換は存在しない** — head 実窓では行番号が恒等で、unified バッファ時代の変換経路 (`new_line_at`) は持たない)。namespace `review_comment` の extmark 1 個に virt_text (行末 `コメントアイコン (nf-cod-comment U+EA6B) N`、outdated 混在は `コメントアイコン N (⚠M)`) と virt_lines (行下スレッド本文 `[c1] …`、10 行で `… (i で全文)`、group 内は id 行 + continuation インデント) を併合する (同一位置に複数 extmark を作ると取得順不定で spec 契約にできない)。下線 hl `ReviewCommentLine`
 - eol anchor (end_col 指定なし start col 対応) + `right_gravity=true` (boolean 指定。`gravity` 文字列は invalid) で編集時の行移動に自動追従
 - **同一バッファの全窓にスレッドが見える (仕様)**。窓単位抑止 API は実測で存在しない。セッション close / delete 時に張った全バッファの ns を明示 clear し、残骸 0 を spec で pin する
 - 位置を解けない outdated (= new 側に該当テキスト無し) は当該 head バッファ **1 行目の virt_lines_above** に集約: `⚠ N outdated (prompt 除外中)` + 本文一覧。head 窓が存在しないファイル (deleted・binary 告知窓) に紐づく outdated は panel winbar の末尾要素 `⚠N` (「窓装飾 (chrome)」参照) とプロンプト除外 INFO で可視化する
@@ -73,8 +73,8 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 
 **file panel** (`review://sidebar/<session>`、filetype `review-list`。キーは DESIGN 表):
 
-- tree 表示 (既定): ヘッダ行 `Changes (N)` と `Showing changes for: <base>..<head 表示名 (作業ツリー) >`、続いてパスツリー。ディレクトリは折りたたみ可 (既定展開。collapsed は view state)、**単一 child 連鎖は連結表示** (`a/b/c/`)。**dir 行は末尾に `/` を付けファイルと同じ行フォーマット帯で識別する** (同名のファイルと dir が同時差分に出るケースの区別規則)。dir 行の status は子の集約 (全子同一記号ならそのまま、種類混在は `*` — 単独 status `M` と衝突させない)、file 行は `[✓?] <status> <💬?> <icon?> <basename> +<a> -<d>`: 💬 はコメントありファイル、`+<a>` は緑 (`ReviewPanelAdd`)・`-<d>` は赤 (`ReviewPanelRemove`)、親パス grey サフィックスは持たない (ツリー indent が文脈)。`<Tab>`/`<S-Tab>`/`[F`/`]F` はこの表示順 (ツリー上→下) を辿る。ファイルのレビュー完了マークが行頭 `[✓]`: **open/移動では決して付かず、panel の `x` でユーザーがトグルするのみ** (session の `files[path].viewed` に保存され、`p` 相当の非表示はない = 絞り込み `/` とは別系統)。**devicons は存在自動検出** (無ければアイコンなしのテキスト表示。ランタイム依存ゼロは崩さない)
-- list 表示 (`i` でトグル): フルパス 1 行の現行フラット形式。filter・viewed・±・💬 は tree と同じ規約で働く (移動系はパス昇順のフラット順になる)
+- tree 表示 (既定): ヘッダ行 `Changes (N)` と `Showing changes for: <base>..<head 表示名 (作業ツリー) >`、続いてパスツリー。ディレクトリは折りたたみ可 (既定展開。collapsed は view state)、**単一 child 連鎖は連結表示** (`a/b/c/`)。**dir 行は末尾に `/` を付けファイルと同じ行フォーマット帯で識別する** (同名のファイルと dir が同時差分に出るケースの区別規則)。dir 行の status は子の集約 (全子同一記号ならそのまま、種類混在は `*` — 単独 status `M` と衝突させない)、file 行は `[✓?] <status> <コメントアイコン?> <icon?> <basename> +<a> -<d>`: コメントアイコン (nf-cod-comment U+EA6B) はコメントありファイル、`+<a>` は緑 (`ReviewPanelAdd`)・`-<d>` は赤 (`ReviewPanelRemove`)、親パス grey サフィックスは持たない (ツリー indent が文脈)。`<Tab>`/`<S-Tab>`/`[F`/`]F` はこの表示順 (ツリー上→下) を辿る。ファイルのレビュー完了マークが行頭 `[✓]`: **open/移動では決して付かず、panel の `x` でユーザーがトグルするのみ** (session の `files[path].viewed` に保存され、`p` 相当の非表示はない = 絞り込み `/` とは別系統)。**devicons は存在自動検出** (無ければアイコンなしのテキスト表示。ランタイム依存ゼロは崩さない)
+- list 表示 (`i` でトグル): フルパス 1 行の現行フラット形式。filter・viewed・±・コメントアイコン は tree と同じ規約で働く (移動系はパス昇順のフラット順になる)
 - 選択追従: panel のカーソル移動だけでは diff を切り替えない (diffview 動作)。`<CR>` / `o` / `l` が open_file。逆に open_file 時は panel カーソルを追従スクロールさせる (**選択行 hl `ReviewPanelFile`+`cursorline` 窓有効** — 相互ハイライト)
 - hl group: `ReviewPanelFile` / `ReviewPanelDir` / `ReviewPanelStatus` / `ReviewPanelComment` / `ReviewPanelAdd` / `ReviewPanelRemove` (差分行の着色は窓 diff が Neovim 標準 DiffAdd/Delete を直接使う — DESIGN「命名」)
 - `/` 絞り込み・`x` レビュー完了マーク切替・`R`・`q`・`<Tab>`/`<S-Tab>`/`[F`/`]F` は DESIGN 表の動作。絞り込み・collapsed・listing style は view state (session JSON に載せない)

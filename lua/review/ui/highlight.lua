@@ -17,7 +17,7 @@ local DEFAULTS = {
   ReviewDiffHunk = { link = 'diffLine' },
   -- file panel (DESIGN「命名」basename / dir 行 / git status 記号 / コメント有無 /
   -- 増減数)。basename は既定無着色 = Normal link。選択行 hl も ReviewPanelFile
-  -- (diff-review「file panel」相互ハイライト)。±は + 緑 / - 赤、💬 は Comment grey。
+  -- (diff-review「file panel」相互ハイライト)。±は + 緑 / - 赤、コメントアイコンは Comment grey。
   ReviewPanelFile = { link = 'Normal' },
   ReviewPanelDir = { link = 'Directory' },
   ReviewPanelStatus = { link = 'Comment' },

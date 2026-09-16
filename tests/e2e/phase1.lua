@@ -221,7 +221,7 @@ local function run()
   for _, m in ipairs(vim.api.nvim_buf_get_extmarks(a_buf, ns, 0, -1, { details = true })) do
     local d = m[4] or {}
     local vt = d.virt_text and d.virt_text[1] and d.virt_text[1][1] or ''
-    if vt:find('💬', 1, true) ~= nil and m[2] == 2 then
+    if vt:find('\u{EA6B}', 1, true) ~= nil and m[2] == 2 then
       found_cnt = true
     end
     for _, vl in ipairs(d.virt_lines or {}) do
