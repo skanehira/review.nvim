@@ -36,8 +36,6 @@ local RAW_DIFF = table.concat({
 }, '\n')
 
 local REAL_NOTIFY = vim.notify
-local REAL_INPUT = vim.ui.input
-
 local state = {}
 
 local function use_env()
@@ -127,13 +125,12 @@ local function use_env()
     vim.api.nvim_set_current_win(state.head_win)
   end)
   after_each(function()
-    -- close はコメントあり確認として vim.ui.input を引く (headless の既定 provider は
-    -- 無限待ちになるため 'y' 応答に戻してから閉じる)。
-    vim.ui.input = function(_, cb)
-      cb 'y'
-    end
+    -- close はコメントあり確認 (1 キー float) を引く。headless では応答スタブ。
+    session_handler._set_confirm(function(_, cb)
+      cb(true)
+    end)
     session_handler.close()
-    vim.ui.input = REAL_INPUT
+    session_handler._set_confirm(nil)
     if ui_windows.state() ~= nil then
       ui_windows.close()
     end

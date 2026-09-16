@@ -19,8 +19,6 @@ local SLUG = 'main--feature'
 
 -- プロセス単一の vim 組み込みを require 時に 1 回捕捉 (before_each ごとに見ると
 -- spy が入れ子になり after_each の復旧先が壊れる — session_spec と同型)。
-local REAL_INPUT = vim.ui.input
-
 local CY = vim.api.nvim_replace_termcodes('<C-y>', true, false, true)
 
 -- head (作業ツリー) の a.lua = new 側 5 行。実 repo dir の disk と同じ内容に
@@ -96,13 +94,12 @@ local function use_env()
     -- 恒等行: head バッファの行 N = new 側行 N (1 one / 2 two / 3 three / 4 four / 5 six)
   end)
   after_each(function()
-    -- close はコメントあり確認として vim.ui.input を引く (headless の既定 provider は
-    -- 無限待ちになるため 'y' 応答に戻してから閉じる)。
-    vim.ui.input = function(_, cb)
-      cb 'y'
-    end
+    -- close はコメントあり確認 (1 キー float) を引く。headless では応答スタブ。
+    session_handler._set_confirm(function(_, cb)
+      cb(true)
+    end)
     session_handler.close()
-    vim.ui.input = REAL_INPUT
+    session_handler._set_confirm(nil)
     if ui_windows.state() ~= nil then
       ui_windows.close()
     end

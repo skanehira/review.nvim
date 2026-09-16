@@ -71,10 +71,10 @@ local run = function()
     -- 通常経路のセッションを作る (checkout==head なので提案は出ない)。
     git { 'checkout', '-q', 'feature' }
     local offers = 0
-    vim.ui.input = function(_, cb)
+    require('review.handlers.session')._set_confirm(function(_, cb)
       offers = offers + 1
-      cb 'n'
-    end
+      cb(false)
+    end)
     vim.cmd 'Review start main feature'
     local hb = head_buf_name()
     if offers ~= 0 then
@@ -93,10 +93,10 @@ local run = function()
     git { 'checkout', '-q', 'main' }
     wait_resume_notify()
     local offers = 0
-    vim.ui.input = function(_, cb)
+    require('review.handlers.session')._set_confirm(function(_, cb)
       offers = offers + 1
-      cb 'n'
-    end
+      cb(false)
+    end)
     vim.cmd 'Review'
     local hb = head_buf_name()
     local bb = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(windows.win 'base'))
@@ -121,10 +121,10 @@ local run = function()
     git { 'checkout', '-q', 'feature' }
     wait_resume_notify()
     local offers = 0
-    vim.ui.input = function(_, cb)
+    require('review.handlers.session')._set_confirm(function(_, cb)
       offers = offers + 1
-      cb 'n'
-    end
+      cb(false)
+    end)
     vim.cmd 'Review'
     local hb = head_buf_name()
     if offers ~= 0 then

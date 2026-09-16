@@ -43,10 +43,11 @@ local run = function()
   -- 提案の応答スタブ (phase2 の close 確認と同じ手法)。prompt はここで撮り、
   -- switch の実行後に実ファイル経路であることを assert 対象へ渡す。
   local offers = {}
-  vim.ui.input = function(opts, cb)
-    offers[#offers + 1] = opts.prompt
-    cb 'y'
-  end
+  local session_handler = require 'review.handlers.session'
+  session_handler._set_confirm(function(prompt, cb)
+    offers[#offers + 1] = prompt
+    cb(true)
+  end)
 
   vim.cmd 'Review start main feature'
   wait_for(function()

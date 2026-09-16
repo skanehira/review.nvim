@@ -35,10 +35,11 @@ local run = function()
 
   local answers = { 'n' }
   local prompt_seen = nil
-  vim.ui.input = function(opts, cb)
-    prompt_seen = opts.prompt
-    cb(table.remove(answers))
-  end
+  local session_handler = require 'review.handlers.session'
+  session_handler._set_confirm(function(prompt, cb)
+    prompt_seen = prompt
+    cb(table.remove(answers) == 'y')
+  end)
 
   vim.cmd 'Review start main feature'
   wait_for(function()

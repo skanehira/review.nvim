@@ -58,6 +58,8 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 
 **操作** (既定キーの正本は DESIGN.md「デフォルトキーマップ」。buffer-local + window role gate、`silent nowait`。gate 不成立窓では 1 キーストロークが built-in になる副作用を help に明記):
 
+- `[y/N]` 確認は自前 float (ui/confirm) で **y / n・Esc・<CR> の 1 キー確定**。`vim.ui.input` は Enter 必須で、y 押下後に続けた打鍵が cmdline 入力へ混入するため使わない (UX review F15)。文言の正本は各呼び出し側 (prompt 文字列)、float は末尾の `[y/N]: ` を落として hint 行を付ける
+
 | 操作 | 起きること |
 | --- | --- |
 | `c` (normal / visual-line) | head 窓のカーソル / '<~'> 行番号が new 側行そのもの。削除告知・binary 注釈・base 窓では WARN (確定文言の正本は DESIGN.md キー表 «この窓にはコメントを付けられません») で開かない。コメント入力 float は契約そのまま (マルチライン scratch、Normal `<CR>` 確定 / insert `<CR>` 改行 / `q` 閉じる [本文なし=キャンセル、本文ありは続けて q で破棄 arming] / `<C-y>` 確定エイリアス / `<Esc>` は Normal 復帰のみ、stopinsert 経路、title に `path:line[-end]` 常時表示) |

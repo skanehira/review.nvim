@@ -4,10 +4,10 @@
 -- プロンプト文そのものは log に印字して shell 側で assert する)。
 local inputs = {}
 local answers = { 'n', 'y' }
-vim.ui.input = function(opts, cb)
-  inputs[#inputs + 1] = opts.prompt or ''
-  cb(answers[#inputs] or 'y')
-end
+require('review.handlers.session')._set_confirm(function(prompt, cb)
+  inputs[#inputs + 1] = prompt or ''
+  cb((answers[#inputs] or 'y') == 'y')
+end)
 
 local function fail(why)
   print('E2E-FAIL: ' .. why)

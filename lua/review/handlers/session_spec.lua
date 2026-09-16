@@ -167,14 +167,14 @@ local function list_cmd()
   return { 'git', 'worktree', 'list', '--porcelain' }
 end
 
--- 応答の選択肢を 1 回目順に 1 件ずつ返す入力スタブ (delete+force の 2 確認用)。
+-- 応答の選択肢を 1 回目順に 1 件ずつ返す確認スタブ (delete+force の 2 確認用)。
 local function answer_queue(answers)
   local idx = 0
-  vim.ui.input = function(opts, cb)
+  session_handler._set_confirm(function(prompt, cb)
     idx = idx + 1
-    table.insert(state.inputs, opts)
-    cb(answers[idx])
-  end
+    table.insert(state.inputs, { prompt = prompt })
+    cb(answers[idx] == 'y')
+  end)
 end
 
 local function has_call(prefix)
@@ -332,6 +332,12 @@ local function use_env()
       table.insert(state.inputs, opts)
       cb(state.input_answer)
     end
+    -- [y/N] 確認は 1 キー float になったため、headless では応答スタブで差し替える
+    -- (prompt の記録形は従来の vim.ui.input opts と同形 = .prompt で揃える)。
+    session_handler._set_confirm(function(prompt, cb)
+      table.insert(state.inputs, { prompt = prompt })
+      cb(state.input_answer == 'y')
+    end)
     -- review://* とレビュー tab は nvim プロセス共有。前テスト残りを掃除して
     -- 隔離 tab を現在の tab にする (同名再利用の混線防止)。
     if ui_windows.state() ~= nil then
@@ -374,6 +380,7 @@ local function use_env()
     store._set_now(nil)
     store._set_notify(nil)
     session_handler._set_now(nil)
+    session_handler._set_confirm(nil)
     session_handler._reset()
     config.reset()
     cli._set_system(nil)

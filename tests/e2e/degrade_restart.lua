@@ -44,18 +44,19 @@ local run = function()
   -- switch 提案 -> n。想定外の入力要求は即失敗させる (黙って詰まらない)。
   local answers = step == '2' and { { 'y', '継承' }, { 'n', 'switch' } } or { { 'n', 'switch' } }
   local switch_offers = 0
-  vim.ui.input = function(opts, cb)
-    local is_switch = (opts.prompt or ''):find('git switch', 1, true) ~= nil
+  local session_handler = require 'review.handlers.session'
+  session_handler._set_confirm(function(prompt, cb)
+    local is_switch = (prompt or ''):find('git switch', 1, true) ~= nil
     if is_switch then
       switch_offers = switch_offers + 1
     end
     local next_q = answers[1]
     if next_q == nil or (next_q[2] == 'switch') ~= is_switch then
-      fail('想定外の入力要求: ' .. tostring(opts.prompt))
+      fail('想定外の入力要求: ' .. tostring(prompt))
     end
     table.remove(answers, 1)
-    cb(next_q[1])
-  end
+    cb(next_q[1] == 'y')
+  end)
 
   -- 2 回目 (STEP=2) は起動 scan の継続通知が出てから (継承対象が store に在る)。
   if step == '2' then

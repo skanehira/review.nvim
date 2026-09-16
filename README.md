@@ -52,7 +52,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
                                 " (カウント・プロンプトは保存済み内容基準)
                                 " :Review delete の <id> と :Review pr の番号も <Tab> で補完
                                 " 同一 refs 組の保存済みセッションがある場合は
-                                " 「継承して comments/完了マークを引き継ぐか」の [y/N] 確認が出る
+                                " 「継承して comments/完了マークを引き継ぐか」の確認が出る (y/n の 1 キー)
 :Review pr 42                   " PR #42 を worktree でレビュー
 :Review                         " 続きのセッションを復元 (複数あれば選択)
 :Review list                    " 保存済みセッション一覧から開く
