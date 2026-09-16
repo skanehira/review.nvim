@@ -49,7 +49,7 @@ setup 側で config を deep merge したい
 ## エッジケースの決定
 
 - active セッションが無い状態の `:Review prompt` / `prompt_*`: `E_NOT_ACTIVE` を同期で返す DESIGN.md「API 一覧」の契約どおり、WARN「レビュー進行中セッションがありません」を出す (クリップボードは触れない)
-- クリップボード provider が無い (`clipboard.provider()` が nil、headless 等): WARN を出し `"0` には入れる (失敗で止めない。E2E はこのレジスタで検証する)
+- クリップボードへの実効性判定は 2 段: (1) 定義済み provider 4 系統 (`g:clipboard` / `clipboard#copy` / `provider#clipboard#Call` / `clipboard.provider()`)、(2) 実書込→読み戻し probe (`+` に書いて `getreg('+')` で確認)。Neovim の provider autoload は**初回 register 操作で遅延ロード**されるため (1) だけでは初回を取りこぼす (実測。macOS の初回 yank 誤 WARN の残因)。(1)(2) とも不成立 (tools 無し headless 等) は WARN を出し `"0` には入れる (失敗で止めない。E2E はこのレジスタで検証する)
 - file 引数に diff に存在しないパス: 「そのファイルはレビュー対象の diff にありません」INFO。曖昧パスの補完 (`<Tab>` customlist = 対象ファイル一覧) を付ける
 - body が空のコメントは作成時点で入力 float が拒否 (1 文字以上必須)
 - 全コメントが outdated のセッション: 見出し + 除外 INFO のみで本文なしのプロンプトは生成しない (「有効なコメントがありません」で終了)

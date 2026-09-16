@@ -16,15 +16,24 @@ local function notify_info(msg)
   vim.notify('review.nvim: ' .. msg, vim.log.levels.INFO)
 end
 
---- クリップボード provider の有無。ai-prompt.md は `clipboard.provider()` を挙げるが
---- nvim 0.13-nightly 実機では該当 Lua API が存在しない (DESIGN.md「既知の制約」)。
---- :help clipboard-provider の定義経路 (g:clipboard テーブル / clipboard#copy autoload)
---- と、将来ビルドの clipboard.provider() を検査する。
+--- クリップボード provider の有無。検出元 4 系統:
+---   1. g:clipboard (command provider の定義)
+---   2. autoload clipboard#copy (vim-clipboard 系レガシー provider)
+---   3. Neovim 標準 provider autoload `provider#clipboard#Call`
+---      (runtime の autoload/provider/clipboard.vim が対応コマンド (pbcopy /
+---      xclip / wl-copy 等) がある環境でのみ関数を登録する。実測: macOS=1 /
+---      tools 無し headless=0)。**旧実装はこの系統を持たず、macOS の既定
+---      provider を「無し」と誤判定して +/* 書込をスキップしていた (ユーザー報告)**
+---   4. 将来ビルド向け require('clipboard').provider() (0.13-nightly 実機には
+---      該当 Lua API が無い — DESIGN.md「既知の制約」)
 function M.has_provider()
   if type(vim.g.clipboard) == 'table' then
     return true
   end
   if vim.fn.exists '*clipboard#copy' == 1 then
+    return true
+  end
+  if vim.fn.exists '*provider#clipboard#Call' == 1 then
     return true
   end
   local ok, clipboard = pcall(require, 'clipboard')
@@ -34,11 +43,38 @@ function M.has_provider()
     and clipboard.provider() ~= nil
 end
 
---- text を常時 "0 へ、provider があれば +/* にもコピーする。
---- provider 無子は WARN して "0 のみ (ai-prompt.md 退路。失敗で止めない)。
+-- 実書込→読み戻し probe の差替え (テスト用 DI)。nil = 実機 probe。
+local clipboard_probe = nil
+
+--- テスト差替え用。fn(text) -> boolean。nil で実機 probe へ戻す。
+function M._set_clipboard_probe(fn)
+  clipboard_probe = fn
+end
+
+--- text が実際に + レジスタへ書けて読み戻せるか。Neovim の clipboard provider
+--- autoload は**初回の register 操作で遅延ロード**されるため、存在チェック 4 系統
+--- (has_provider) だけでは初回が取りこぼされる (実測: fresh 起動直後は
+--- exists('*provider#clipboard#Call')=0 / g:loaded_clipboard_provider=nil、
+--- macOS の初回 yank が誤 WARN したユーザー報告の残因)。実書込は autoload を
+--- 起動してから判定するので初回から正しく、読み戻せない環境 (tools 無し
+--- headless 等) は false (CI stable/0.10 実測: setreg は成功するが保持されない)。
+local function clipboard_writable(text)
+  if clipboard_probe ~= nil then
+    return clipboard_probe(text)
+  end
+  local ok = pcall(vim.fn.setreg, '+', text)
+  if not ok then
+    return false
+  end
+  return vim.fn.getreg '+' == text
+end
+
+--- text を常時 "0 へ、クリップボードが実効なら +/* にもコピーする。
+--- 実効判定は定義済み provider (has_provider) または実書込 round-trip。無しは
+--- WARN して "0 のみ (ai-prompt.md 退路。失敗で止めない)。
 local function copy_text(text)
   vim.fn.setreg('0', text)
-  if not M.has_provider() then
+  if not (M.has_provider() or clipboard_writable(text)) then
     notify_warn 'クリップボード provider がありません。"0 レジスタにのみコピーしました'
     return
   end

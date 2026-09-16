@@ -371,8 +371,23 @@ local function run()
   vim.cmd 'normal iprefer early return'
   vim.cmd('normal ' .. cy)
 
+  -- provider 無し退路の WARN を決定的に pin する: macOS の既定 pbcopy provider は
+  -- provider#clipboard#Call として検出されるため (2026-09 修正)、ログの WARN だけを
+  -- 見ると環境で結果が変わる。検出元 4 系統をこのプロセスで落としてから yank する
+  -- (有り経路は unit spec が provider autoload 配置で決定的に pin する)。
+  vim.g.clipboard = vim.NIL
+  vim.cmd 'silent! delfunction clipboard#copy'
+  vim.cmd 'silent! delfunction provider#clipboard#Call'
+  vim.g.loaded_clipboard_provider = 0
+  package.preload.clipboard = nil
+  package.loaded.clipboard = nil
+  require('review.handlers.prompt')._set_clipboard_probe(function()
+    return false
+  end)
+
   -- y: range 内の行 (2 行目) で見出しなし本文を "0 にコピー
-  vim.api.nvim_win_set_cursor(vim.api.nvim_get_current_win(), { 2, 0 })
+  vim.api.nvim_set_current_win(b_win)
+  vim.api.nvim_win_set_cursor(b_win, { 2, 0 })
   vim.cmd 'normal y'
   -- yank は keygate → schedule 経由で走るので着地を待つ
   wait_for(function()

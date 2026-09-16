@@ -91,9 +91,10 @@ local function use_env()
     end
     -- 外部状態の分離: レジスタと provider 定義を退避し sentinel で初期化する
     -- (after_each で復元。provider 無し経路と有り経路の両方を決定的に検証するため)。
-    -- provider 定義は has_provider の検出元 3 系統すべてを消す。g:clipboard だけ
-    -- 消しても clipboard#copy や package.loaded.clipboard が残留すると、
-    -- 「無し経路」前提のテストが実際には有り経路を通ってしまう。
+    -- provider 定義は has_provider の検出元 4 系統すべてを消す。g:clipboard だけ
+    -- 消しても clipboard#copy / provider#clipboard#Call / package.loaded.clipboard
+    -- が残留すると、「無し経路」前提のテストが実際には有り経路を通ってしまう
+    -- (macOS の既定 pbcopy provider は provider#clipboard#Call として見える)。
     state.saved = {
       r0 = vim.fn.getreg '0',
       rplus = vim.fn.getreg '+',
@@ -102,14 +103,29 @@ local function use_env()
     }
     vim.g.clipboard = vim.NIL
     vim.cmd 'silent! delfunction clipboard#copy'
+    vim.cmd 'silent! delfunction provider#clipboard#Call'
+    -- g:loaded_clipboard_provider=2 のまま関数を消すと nvim core が register 操作で
+    -- «=2 but provider#clipboard#Call is not defined» を投げる (実測)。0 = provider
+    -- 無しの状態へ落としてから register を触る。
+    vim.g.loaded_clipboard_provider = 0
     package.preload.clipboard = nil
     package.loaded.clipboard = nil
-    -- clipboard#copy 検出系統のテスト用定義元ファイル。autoload 名の関数は
-    -- :function では名前不一致で E746 になるため、autoload/clipboard.vim を
-    -- source する形で定義する (実機 probe で exists()==1 を確認済み)。
-    vim.fn.mkdir(state.dir .. '/autoload', 'p')
+    -- clipboard#copy / provider#clipboard#Call 検出系統のテスト用定義元ファイル。
+    -- autoload 名の関数は :function では名前不一致で E746 になるため、autoload/
+    -- 配下を source する形で定義する (実機 probe で exists()==1 を確認済み)。
+    vim.fn.mkdir(state.dir .. '/autoload/provider', 'p')
     state.clipboard_autoload = state.dir .. '/autoload/clipboard.vim'
     vim.fn.writefile({ 'function clipboard#copy()', 'endfunction' }, state.clipboard_autoload)
+    state.provider_autoload = state.dir .. '/autoload/provider/clipboard.vim'
+    vim.fn.writefile(
+      { 'function! provider#clipboard#Call(...)', 'endfunction' },
+      state.provider_autoload
+    )
+    -- 実書込 round-trip probe もテストでは決定的にする (macOS の実 clipboard は
+    -- 動くため、probe 実機のままだと「無し経路」テストが環境依存になる)。
+    prompt_handler._set_clipboard_probe(function()
+      return false
+    end)
     vim.fn.setreg('0', SENTINEL)
     vim.fn.setreg('+', SENTINEL)
     vim.fn.setreg('*', SENTINEL)
@@ -151,6 +167,13 @@ local function use_env()
       end
     end
     vim.notify = REAL_NOTIFY
+    -- provider#clipboard#Call を先に元へ戻してから register を復元する
+    -- (関数が無いまま +/* を触ると nvim core が例外を投げ、復元が中断する — 実測)。
+    -- 実 runtime の autoload を再 source する (対応コマンドがある環境では登録済み、
+    -- 無ければ未定義のまま = 元の状態。g:loaded_clipboard_provider も再設定される)。
+    vim.cmd 'silent! delfunction provider#clipboard#Call'
+    vim.cmd 'unlet! g:loaded_clipboard_provider'
+    pcall(vim.cmd, 'runtime autoload/provider/clipboard.vim')
     vim.fn.setreg('0', state.saved.r0)
     vim.fn.setreg('+', state.saved.rplus)
     vim.fn.setreg('*', state.saved.rstar)
@@ -160,6 +183,7 @@ local function use_env()
     vim.cmd 'silent! delfunction clipboard#copy'
     package.preload.clipboard = nil
     package.loaded.clipboard = nil
+    prompt_handler._set_clipboard_probe(nil)
     paths._set_data_dir(nil)
     store._set_now(nil)
     store._set_notify(nil)
@@ -231,8 +255,9 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
     end
   )
 
-  -- has_provider の検出元 3 系統 (:help clipboard-provider の定義経路 2 つ +
-  -- 将来ビルド向け clipboard.provider()) と全条件不成立の対照を、同一構造
+  -- has_provider の検出元 4 系統 (:help clipboard-provider の定義経路 +
+  -- Neovim 標準 provider#clipboard#Call + 将来ビルド向け clipboard.provider()) と
+  -- 全条件不成立の対照を、同一構造
   -- (provider を配置 -> all() -> 期待を assert) のパラメータとして 1 本に揃える。
   -- 検出元を 1 つでも has_provider から消すと、その系統が「無し経路」に落ち
   -- (WARN があるのに +/* が書けない = 有り経路の assert 側では WARN 0 / 通知数で、無し
@@ -257,6 +282,18 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
       end,
     },
     {
+      -- Neovim 標準 provider autoload。runtime の autoload/provider/clipboard.vim が
+      -- 対応コマンド (pbcopy / xclip / wl-copy 等) がある環境でのみ関数を登録する
+      -- (実測: macOS=1 / tools 無し headless=0)。旧実装はこの系統が無く macOS の
+      -- 既定 provider を誤って「無し」と判定していた (ユーザー報告の clipboard バグ)。
+      name = 'provider#clipboard#Call (Neovim 標準)',
+      arrange = function()
+        vim.cmd 'silent! delfunction provider#clipboard#Call'
+        vim.cmd('source ' .. state.provider_autoload)
+        vim.g.loaded_clipboard_provider = 2 -- 実機 (対応コマンドあり環境) と同じ状態
+      end,
+    },
+    {
       name = "require('clipboard').provider()",
       arrange = function()
         package.preload.clipboard = function()
@@ -277,7 +314,8 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
     },
   }
   it(
-    'provider 検出元 (g:clipboard / clipboard#copy / provider()) なら +/* 書写成功、無しは "0 のみ + WARN',
+    'provider 検出元 4 系統 (g:clipboard / clipboard#copy / provider#clipboard#Call /'
+      .. ' provider()) なら +/* 書写成功、無しは "0 のみ + WARN',
     function()
       local expected = full_prompt { '@a.lua#L2-L3', 'use map' }
       for _, case in ipairs(provider_cases) do
@@ -285,6 +323,8 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
         -- (before_each の無 provider 状態と同じ起点に戻す)。
         vim.g.clipboard = vim.NIL
         vim.cmd 'silent! delfunction clipboard#copy'
+        vim.cmd 'silent! delfunction provider#clipboard#Call'
+        vim.g.loaded_clipboard_provider = 0
         package.preload.clipboard = nil
         package.loaded.clipboard = nil
         vim.fn.setreg('0', SENTINEL)
