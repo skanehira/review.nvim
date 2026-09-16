@@ -103,9 +103,26 @@ function M.add_normal()
   add_with_range(cursor_row(), cursor_row(), true)
 end
 
---- `c` (visual-line): '< -> '> の範囲 (marks から読む — :normal 駆動でも同じ)。
+--- `c` (visual / visual-line / visual-block): 現在の選択範囲の new 側行 range。
+--- expr mapping は visual mode を抜ける前に評価されることがあり、その瞬間
+--- `<` `>` は未設定 — marks 依存だと初回選択の押下が無反応になる (ユーザー報告の
+--- 真因: Ctrl-V で選択 -> c が沈黙、選び直すと動く)。visual/select 中は live 位置
+--- (`getpos('v')` = 開始、cursor = 現在端) から行を取り、抜けた後の呼び出し
+--- (:normal 駆動等) は従来どおり marks にフォールバックする。
 function M.add_visual_marks()
-  add_with_range(vim.fn.getpos("'<")[2], vim.fn.getpos("'>")[2], false)
+  local lo, hi
+  local m = vim.fn.mode()
+  if m == 'v' or m == 'V' or m == '\22' or m == 's' or m == 'S' or m == '\19' then
+    lo = vim.fn.getpos('v')[2]
+    hi = vim.fn.getpos('.')[2]
+  else
+    lo = vim.fn.getpos("'<")[2]
+    hi = vim.fn.getpos("'>")[2]
+  end
+  if hi < lo then
+    lo, hi = hi, lo
+  end
+  add_with_range(lo, hi, false)
 end
 
 -- カーソル行 range に含まれるコメント一覧。該当無しは nil (e と d 共通)。

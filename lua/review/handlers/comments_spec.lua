@@ -189,6 +189,35 @@ describe('comments c (作成 / head バッファ恒等行)', function()
     assert.equals(4, c.end_line)
   end)
 
+  it(
+    'live visual (初回選択で < > 未設定) でも現在範囲で開く (Ctrl-V blockwise 含む)',
+    function()
+      -- 実測: :normal! Vj 直後は mode=V・'< '> = 未設定 (expr mapping は visual を
+      -- 抜ける前に評価されるため marks 依存だと初回押下が無反応になる — ユーザー報告)
+      focus_head_row(1)
+      vim.cmd 'normal! Vj'
+      assert.equals('V', vim.fn.mode()) -- 前提: headless でも visual 継続
+      assert.same({ 0, 0, 0, 0 }, vim.fn.getpos "'<")
+
+      comments_handler.add_visual_marks()
+      type_into_float 'live range'
+      local c = saved().comments[1]
+      assert.equals(1, c.line)
+      assert.equals(2, c.end_line)
+
+      -- Ctrl-V (blockwise) も live 位置から行範囲を取る
+      local cv = vim.api.nvim_replace_termcodes('<C-v>', true, false, true)
+      focus_head_row(2)
+      vim.cmd('normal! ' .. cv .. 'jj')
+      assert.equals(string.char(22), vim.fn.mode())
+      comments_handler.add_visual_marks()
+      type_into_float 'block range'
+      local c2 = saved().comments[2]
+      assert.equals(2, c2.line)
+      assert.equals(4, c2.end_line)
+    end
+  )
+
   it('head 実バッファに extmark が載る (件数 eol + 行下スレッド本文)', function()
     focus_head_row(3)
     comments_handler.add_normal()
