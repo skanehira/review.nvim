@@ -119,7 +119,7 @@ describe('filepanel.render tree (既定)', function()
   it(
     'コメントありファイルの行にコメントアイコン (U+EA6B) が出る (session.comments から解決)',
     function()
-      local session = session_stub { comments = { { path = 'a.lua', body = 'x' } } }
+      local session = session_stub { comments = { { file = 'a.lua', body = 'x' } } }
       local buf =
         filepanel.render(session, { f('a.lua', 'M', 1, 0), f('b.lua', 'A', 1, 0) }, TREE_OPTS)
       assert.same({
@@ -134,7 +134,7 @@ describe('filepanel.render tree (既定)', function()
   it(
     'コメントアイコン (U+EA6B) の hl span は ReviewPanelComment (実 extmark)',
     function()
-      local session = session_stub { comments = { { path = 'a.lua', body = 'x' } } }
+      local session = session_stub { comments = { { file = 'a.lua', body = 'x' } } }
       local buf = filepanel.render(session, { f('a.lua', 'M', 1, 0) }, TREE_OPTS)
       local lines = panel_lines(buf)
       local found

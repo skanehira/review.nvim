@@ -153,10 +153,13 @@ function M.render(session, files, opts)
     prev_entry = rendered[buf].rows[prev_cursor_row]
   end
 
+  -- コメント struct のキーは `file` (core/comment.lua)。旧 `path` 参照は実データに
+  -- 一切一致せずアイコンが永久に出ないバグだった (ユーザー報告: c で追加しても
+  -- ツリーに反映されない)。
   local commented = {}
   for _, comment in ipairs(session.comments or {}) do
-    if comment.path ~= nil then
-      commented[comment.path] = true
+    if comment.file ~= nil then
+      commented[comment.file] = true
     end
   end
   local entries = {}

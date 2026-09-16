@@ -1567,7 +1567,16 @@ function M.commit_comment_change()
       ui_commentmarks.apply(active.session, active.current.head_buf, active.current.path)
     end
   end
-  apply_chrome()
+  -- panel のコメントアイコンを CRUD 直後に反映する (ユーザー報告: c で追加しても
+  -- ツリーに出ない)。表示中のときだけ render し直す — filepanel.render は表示中
+  -- entry を cursor 追従するため panel のカーソル位置は動かない。panel 非表示の
+  -- ときは再表示経路 (focus_sidebar / toggle_panel) が現内容で render するので
+  -- ここでは何もしない (apply_chrome だけ winbar を追随させる)。
+  if ui_windows.win 'panel' ~= nil then
+    refresh_panel()
+  else
+    apply_chrome()
+  end
 end
 
 local function current_path()

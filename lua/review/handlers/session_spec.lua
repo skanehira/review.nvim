@@ -1316,7 +1316,10 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       )
       local sb = vim.fn.bufnr(SIDEBAR_NAME)
       local a_row = panel_row_for('file', 'a.lua')
-      assert.equals('[✓] M a.lua +1 -0', vim.api.nvim_buf_get_lines(sb, 0, -1, false)[a_row])
+      assert.equals(
+        '[✓] M \u{EA6B} a.lua +1 -0',
+        vim.api.nvim_buf_get_lines(sb, 0, -1, false)[a_row]
+      )
     end
   )
 
@@ -1438,7 +1441,7 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       -- 継承後も a.lua は未マーク (開封連動が無い契約の回帰 pin) / b のマークは保持
       local a_row = panel_row_for('file', 'a.lua')
       assert.equals(
-        'M a.lua +1 -0',
+        'M \u{EA6B} a.lua +1 -0',
         vim.api.nvim_buf_get_lines(vim.fn.bufnr(SIDEBAR_NAME), 0, -1, false)[a_row]
       )
     end
@@ -1938,6 +1941,42 @@ describe('commit_comment_change (INV-4 + extmark 再適用)', function()
     assert.is_true(vt:find('\u{EA6B} 2', 1, true) ~= nil, vt)
     assert.equals('main..feature · a.lua · +1 -0 · 2 comments', vim.w[hw].review_winbar)
   end)
+
+  it(
+    'file panel の行がコメント CRUD 直後に追随する (アイコン表示 -> 消滅)',
+    function()
+      start_done('main', 'feature')
+      local pw = ui_windows.win 'panel'
+      local pbuf = vim.api.nvim_win_get_buf(pw)
+      local function row_of(path)
+        for _, line in ipairs(vim.api.nvim_buf_get_lines(pbuf, 0, -1, false)) do
+          if line:find(path, 1, true) ~= nil then
+            return line
+          end
+        end
+        return nil
+      end
+      local before = assert(row_of 'a.lua', 'panel に a.lua 行が無い')
+      assert.is_nil(
+        before:find('\u{EA6B}', 1, true),
+        '前提: コメント 0 件でアイコンが出ている'
+      )
+      inject_comment 'first thread'
+      local after = assert(row_of 'a.lua', 'panel に a.lua 行が無い (commit 後)')
+      assert.is_true(
+        after:find('\u{EA6B}', 1, true) ~= nil,
+        'panel 行にコメントアイコンが反映されない'
+      )
+      -- 削除 (最後の 1 件) でアイコンも消える (同じ render 経路)
+      table.remove(session_handler.active().comments, 1)
+      session_handler.commit_comment_change()
+      local restored = assert(row_of 'a.lua')
+      assert.is_nil(
+        restored:find('\u{EA6B}', 1, true),
+        'panel 行からアイコンが消えない'
+      )
+    end
+  )
 
   it(
     '告知窓 (binary) を開いている間は save と panel winbar のみ (extmark を張らない)',
@@ -3078,11 +3117,11 @@ describe(
           ['c.lua'] = { viewed = false },
         }, saved.files)
 
-        -- ±カウント・panel 再適用
+        -- ±カウント・panel 再適用 (a.lua はコメントあり = アイコン付き)
         assert.same({
           'Changes (2)',
           'Showing changes for: main..作業ツリー',
-          'M a.lua +2 -0',
+          'M \u{EA6B} a.lua +2 -0',
           'A c.lua +1 -0',
         }, panel_rows())
         -- winbar: head 窓は窓変数 chrome (w:review_winbar 一本化)
