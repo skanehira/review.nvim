@@ -28,7 +28,6 @@ local COMMENT_OPS = {
 -- op -> (handler module, 関数名)。focus_panel (<leader>e) は panel への focus
 -- (閉じていれば再建)。旧 S / ]d / [d は issue #18 で廃止 (DESIGN キー表)。
 local DISPATCH = {
-  open_file = { 'review.handlers.session', 'open_file_current' },
   close = { 'review.handlers.session', 'close_by_key' },
   help = { 'review.ui.help', 'open' },
   next_file = { 'review.handlers.session', 'next_file' },
@@ -171,7 +170,6 @@ function M.install(buf, session_id)
   install_one(buf, 'n', k.delete_comment, 'delete_comment')
   install_one(buf, 'n', k.yank_prompt, 'yank_prompt')
   install_one(buf, 'n', k.view_comments, 'view_comments')
-  install_one(buf, 'n', k.open_file, 'open_file')
   install_one(buf, 'n', k.close, 'close')
   install_one(buf, 'n', k.help, 'help')
   -- g? は config を持たない固定の別名 (<F1> が terminal に奪われる環境向け。

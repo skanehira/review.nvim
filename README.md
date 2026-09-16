@@ -69,7 +69,6 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 | レビュー窓 (head/base) | `c` (normal / visual-line)     | コメント作成 (visual は範囲。head 窓のみ) |
 | レビュー窓          | `e` / `d`                         | コメント編集 / 削除 (d は確認の二重押し) |
 | レビュー窓          | `y`                               | カーソル行コメントのプロンプトを yank |
-| レビュー窓          | `o`                               | そのファイルの実ファイルを別 tab で開く |
 | レビュー窓          | `q` / `<F1>` / `g?`               | セッション終了 / help (g? も同じ)    |
 | レビュー窓          | `<Tab>` / `<S-Tab>`               | 次 / 前のファイル (file panel の表示順 = ツリー上→下。端は無動作) |
 | レビュー窓          | `[F` / `]F`                       | 最初 / 最後のファイル |
@@ -77,7 +76,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 | レビュー窓          | `<leader>e`                       | file panel へ移動                    |
 | レビュー窓          | `<leader>b`                       | file panel 表示トグル                |
 | レビュー窓          | `i`                               | カーソル行のコメント全文を閲覧        |
-| file panel          | `<CR>` / `o` / `l`              | entry を開く (ファイル行 = head/base に開く、dir 行 = 折り畳み)。panel の `o` は開くキーでレビュー窓の `o` と意味が違う |
+| file panel          | `<CR>` / `o` / `l`              | entry を開く (ファイル行 = head/base に開く、dir 行 = 折り畳み) |
 | file panel          | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (レビュー窓と同じ動作) |
 | file panel          | `R`                               | 差分を再取得 (レビュー窓と同じ)      |
 | file panel          | `i`                               | list (フルパス 1 行) ⇄ tree 表示切替 |

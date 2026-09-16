@@ -25,7 +25,6 @@ local store = require 'review.store.session'
 local ui_chrome = require 'review.ui.chrome'
 local ui_commentmarks = require 'review.ui.commentmarks'
 local ui_confirm = require 'review.ui.confirm'
-local ui_fileview = require 'review.ui.fileview'
 local ui_keygate = require 'review.ui.keygate'
 local ui_filepanel = require 'review.ui.filepanel'
 local ui_treelist = require 'review.ui.treelist'
@@ -365,7 +364,7 @@ end
 -- レビューが所有するバッファを掃除して active を外す (save しない。close/delete
 -- 経路用)。head の実ファイルバッファはユーザーの所有物 — 開いたままのもの
 -- (modified を含む) は消さない (diff-review「review tab の消滅経路」)。review://*
--- (panel / base / head 縮退 scratch / null / 告知 / fileview) はここで消す。
+-- (panel / base / head 縮退 scratch / null / 告知) はここで消す。
 -- extmark / キーマップはこの時点で張った全バッファから除く (残骸 0 契約)。
 local function detach()
   if active == nil then
@@ -1699,68 +1698,6 @@ function M.toggle_panel()
     return
   end
   M.focus_sidebar()
-end
-
---- 実ファイル参照 `o` (`o` の現窓解決: panel 行 or head/base 窓 = current_path)。
---- 前行儀 tab で repo/worktree 基準の実ファイルを開く (ui/fileview)。削除ファイルは
---- WARN (pr-worktree「実ファイル参照」)。scratch 縮退時は現在のチェックアウトの
---- 実ファイルである旨を INFO。checkout 側に無いファイルは fileview が git show
---- read-only へ倒す。
-function M.open_file_current()
-  if active == nil then
-    notify_warn 'アクティブなセッションがありません'
-    return
-  end
-  local win = vim.api.nvim_get_current_win()
-  local buf = vim.api.nvim_win_get_buf(win)
-  local meta = vim.b[buf].review_meta or {}
-  local path = current_path()
-  if meta.kind == 'sidebar' then
-    local row = vim.api.nvim_win_get_cursor(win)[1]
-    local entry = ui_filepanel.row_entry(buf, row)
-    if entry == nil then
-      return
-    end
-    if entry.kind == 'dir' then
-      toggle_dir_collapse(entry.path)
-      return
-    end
-    path = entry.path
-  end
-  if path == nil then
-    notify_warn '対象ファイルが解決できません'
-    return
-  end
-  local file = active.files_by_path[path]
-  if file ~= nil and file.status == 'D' then
-    notify_warn(('削除ファイル %s は開けません'):format(path))
-    return
-  end
-  if active.degraded then
-    vim.notify(
-      ('review.nvim: %s は現在のチェックアウトの実ファイルです (head の状態は縮退中)'):format(
-        path
-      ),
-      vim.log.levels.INFO
-    )
-  end
-  local wt = worktree_of(active.session)
-  ui_fileview.open({
-    repo = active.session.repo,
-    head = active.session.head,
-    id = active.session.id,
-    path = path,
-    worktree = wt ~= nil and wt.path or nil,
-    winbar = ('%s..%s · %s · read-only (git show)'):format(
-      active.session.base or '',
-      active.session.head or '',
-      path
-    ),
-  }, function(err)
-    if err ~= nil then
-      notify_warn(err.error)
-    end
-  end)
 end
 
 --- panel x: viewed 切替 -> 直後に save (INV-4)。

@@ -241,15 +241,6 @@ local function review_tab()
   return st and st.tab or nil
 end
 
-local function tab_index(t)
-  for i, tab in ipairs(vim.api.nvim_list_tabpages()) do
-    if tab == t then
-      return i
-    end
-  end
-  return nil
-end
-
 local function head_buf_name()
   local w = ui_windows.win 'head'
   return w ~= nil and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)) or nil
@@ -1910,156 +1901,6 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
   end)
 
-  it(
-    'o (head 窓) はレビュー tab の前行儀に別 tab で実ファイルを開く (git show 0 件)',
-    function()
-      start_done('main', 'feature')
-      local review_t = review_tab()
-      local ridx = tab_index(review_t)
-      local calls_before = #state.git_calls
-      local tabs_before = #vim.api.nvim_list_tabpages()
-
-      session_handler.open_file_current()
-
-      assert.equals(tabs_before + 1, #vim.api.nvim_list_tabpages())
-      -- 前行儀: focus の新 tab はレビュー tab の左、レビュー tab は 1 つ右へshift
-      assert.equals(ridx, vim.fn.tabpagenr())
-      assert.equals(ridx + 1, tab_index(review_t))
-      assert.equals(
-        state.repo .. '/a.lua',
-        vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
-      )
-      assert.equals(true, vim.bo[vim.api.nvim_get_current_buf()].modifiable)
-      assert.equals(
-        calls_before,
-        #state.git_calls,
-        'o は git show を呼ばない (checkout 実ファイル)'
-      )
-    end
-  )
-
-  it(
-    'base 窓の o も同じファイルの実ファイルへ開く («base 窓でも同じ動作»)',
-    function()
-      start_done('main', 'feature')
-      vim.api.nvim_set_current_win(ui_windows.win 'base')
-
-      session_handler.open_file_current()
-
-      assert.equals(
-        state.repo .. '/a.lua',
-        vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
-      )
-    end
-  )
-
-  it(
-    'panel の o keymap rhs から同一入口で開く (dangling 検出 / 押下相当)',
-    function()
-      start_done('main', 'feature')
-      local sb = vim.fn.bufnr(SIDEBAR_NAME)
-      focus_panel_file 'b.lua'
-      assert.is_true(review_tab() ~= nil)
-
-      local rhs
-      for _, m in ipairs(vim.api.nvim_buf_get_keymap(sb, 'n')) do
-        if m.lhs == 'o' then
-          rhs = m.rhs
-        end
-      end
-      assert.is_not_nil(rhs)
-      vim.cmd((rhs:gsub('<CR>$', '')))
-
-      assert.equals(
-        state.repo .. '/b.lua',
-        vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
-      )
-    end
-  )
-
-  it('削除ファイルの o は WARN «開けません» で tab を開かない', function()
-    install_git {
-      top_ok,
-      RP_HEAD_MATCH[1],
-      RP_HEAD_MATCH[2],
-      function()
-        return diff_ok(RAW_DIFF_DEL_BIN)
-      end,
-    }
-    session_handler.start { base = 'main', head = 'feature' }
-    session_handler.next_file() -- c.lua (D) 現在位置
-    local tabs_before = #vim.api.nvim_list_tabpages()
-    state.notifications = {}
-
-    session_handler.open_file_current()
-
-    assert.same({
-      msg = 'review.nvim: 削除ファイル c.lua は開けません',
-      level = vim.log.levels.WARN,
-    }, state.notifications[1])
-    assert.equals(tabs_before, #vim.api.nvim_list_tabpages())
-  end)
-
-  it(
-    'scratch 縮退時の o は INFO (現在のチェックアウト宣言) + 実ファイルを開く',
-    function()
-      install_git {
-        top_ok,
-        RP_HEAD_MISMATCH[1],
-        RP_HEAD_MISMATCH[2],
-        showref_ok,
-        status_clean,
-        function()
-          return diff_ok(RAW_DIFF_A_B)
-        end,
-      }
-      state.input_answer = 'n'
-      session_handler.start { base = 'main', head = 'feature' }
-      state.notifications = {}
-
-      session_handler.open_file_current()
-
-      assert.same({
-        msg = 'review.nvim: a.lua は現在のチェックアウトの実ファイルです (head の状態は縮退中)',
-        level = vim.log.levels.INFO,
-      }, state.notifications[1])
-      assert.equals(
-        state.repo .. '/a.lua',
-        vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
-      )
-    end
-  )
-
-  it(
-    'worktree 記録あり: o は <worktree>/<path> の実ファイルを開く (git show を呼ばず・編集可)',
-    function()
-      local wt = wt_path()
-      vim.fn.mkdir(wt, 'p')
-      local f = io.open(vim.fs.joinpath(wt, 'a.lua'), 'w')
-      f:write 'WT-HEAD-CONTENT\n'
-      f:close()
-      started_with_worktree()
-      local calls_before = #state.git_calls
-      local sb = vim.fn.bufnr(SIDEBAR_NAME)
-      vim.api.nvim_set_current_win(vim.fn.win_findbuf(sb)[1])
-      vim.api.nvim_win_set_cursor(0, { 1, 0 })
-
-      local rhs
-      for _, m in ipairs(vim.api.nvim_buf_get_keymap(sb, 'n')) do
-        if m.lhs == 'o' then
-          rhs = m.rhs
-        end
-      end
-      vim.cmd((rhs:gsub('<CR>$', '')))
-
-      local fbuf = vim.fn.bufnr(vim.fs.joinpath(wt, 'a.lua'))
-      assert.not_equals(-1, fbuf)
-      assert.same({ 'WT-HEAD-CONTENT' }, vim.api.nvim_buf_get_lines(fbuf, 0, -1, false))
-      assert.equals(false, vim.bo[fbuf].readonly)
-      assert.equals(calls_before, #state.git_calls)
-    end
-  )
-
   it('q (close_by_key) は無確認で閉じ tab 消滅 INFO も出さない', function()
     start_done('main', 'feature')
     local tab = review_tab()
@@ -3702,13 +3543,13 @@ describe('file panel ツリー / view state (issue-17)', function()
 
       vim.api.nvim_set_current_win(pw)
       vim.api.nvim_win_set_cursor(pw, { dir_row, 0 })
-      session_handler.open_file_current() -- o = dir では折込 (fileview を開かない)
+      session_handler.open_selected_file() -- <CR>/o = dir では折込 (別 tab は開かない)
       local _, lines = panel_window_lines()
       assert.equals('▸ A cmd/', lines[7])
       assert.equals(dir_row, vim.api.nvim_win_get_cursor(pw)[1])
 
       -- 展開に戻す dir 操作では head 窓の中身を替えない (告知 scratch は据え置き)
-      session_handler.open_file_current()
+      session_handler.open_selected_file()
       vim.api.nvim_win_set_cursor(pw, { file_row, 0 })
       session_handler.open_selected_file() -- <CR> on file cmd = open_file (D = 告知 scratch)
       assert.equals(

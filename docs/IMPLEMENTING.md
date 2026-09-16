@@ -48,7 +48,7 @@ nvim を起動せずに通る)。
   差し替わる drift で誤作動したことがある (UX_REVIEW F1 系)
 - 新しい tabpage を作るときは **専有 tab にする** (ユーザー窓と同 tab にすると
   窓 diff の相乗りで base と user file が diff し出す) + `t<tab>` で開き直せること
-- 実ファイル窓を `:edit` で開く経路 (fileview 含む) は、**ユーザーがそのファイルを
+- 実ファイル窓を `:edit` で開く経路 (`:Review` 開始や head 窓の張替) は、**ユーザーがそのファイルを
   既に開いていても同一 buffer を再利用する**。その場合も keygate install と
   owned_bufs 登録は必須 (再利用だけ install を省むと c/e/d が全滅。#16 r1 high で実測)
 - `BufWritePost` に later 載せる: 窓 diff は `:w` 単体では再計算されない (PoC 実測)。

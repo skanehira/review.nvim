@@ -86,12 +86,7 @@ describe('help.open', function()
         '- **<CR>** そのファイルを head/base 窓に開く (dir 行では折り畳み)'
       )
     )
-    assert.is_true(
-      has_line(
-        lines,
-        '- **o** <CR> と同じ (file panel の o = 開く。diff 窓の o とは意味が違う)'
-      )
-    )
+    assert.is_true(has_line(lines, '- **o** <CR> と同じ (file panel の o = entry を開く)'))
     assert.is_true(has_line(lines, '- **l** <CR> と同じ (entry を開く)'))
     -- file panel 節の移動系・refresh (review-18-r1 high 対策)。diff 節と同一文だと
     -- has_line 全文一致が節を区別できず、panel 側の 5 行を消しても緑になる

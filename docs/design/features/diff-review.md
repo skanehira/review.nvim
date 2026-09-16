@@ -67,7 +67,6 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後ファイル = open_file。端無動作、focus は head 窓に留まる |
 | `<leader>e` / `<leader>b` | panel focus (閉じていれば再建) / panel 表示トグル (閉じても tab とレビュー窓は残る) |
 | `R` | リフレッシュ (上記) + 窓の役割 drift の復旧 |
-| `o` | そのファイルの実ファイルを**レビュー tab の外** (前行儀の tab) で開く — diff ペアを壊さず通常編集文脈へ出る。scratch 縮退時は「現在のチェックアウトの実ファイル」である旨を INFO 添えて開く (存在しなければ git show read-only scratch fallback)。削除ファイルは WARN |
 | `q` | `:Review close` 相当 (pr-worktree「セッションとレビューの終了」)。tab を閉じる。ユーザー窓・開いたままの実ファイルバッファ (modified を含む) は消さない |
 | `<F1>` / `g?` | help float (内容は markdown。`g?` は固定の別名 = 同一呼び出し。file panel でも同じ) |
 | `[c` / `]c` / fold 鍵 | マップしない — Neovim 標準 (窓 diff の hunk 移動。filetype 非依存で効く) |
@@ -104,7 +103,7 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 | ツリーモデル (純ロジック: path→node、連結、集約、fold 集合) | ui (純) | `lua/review/ui/treelist.lua` (新規 + `_spec`) |
 | 現行 `ui/diffbuffer.lua` | — | **削除** (unified 描画の撤廃。fold/virt_text 経験は commentmarks へ) |
 | セッション一覧 (変更なし) | ui | `lua/review/ui/list.lua` (sidebar 分を filepanel へ移し sessionlist のみ) |
-| 現行 `ui/fileview.lua` | — | 縮小 (`o` の前行儀 tab open + 削除ファイル git show fallback) |
+| `ui/fileview.lua` | — | **削除** (`o` = 実ファイル別 tab の廃止で不要。head 窓自体が実ファイル) |
 
 ## エッジケースの決定
 

@@ -20,7 +20,6 @@ M.defaults = {
       edit_comment = 'e',
       delete_comment = 'd',
       yank_prompt = 'y',
-      open_file = 'o',
       close = 'q',
       help = '<F1>',
       next_file = '<Tab>',

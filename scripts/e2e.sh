@@ -5,7 +5,7 @@
 # golden path: fixture repo (main / feature, 複数ファイル・複数 hunk) で
 # headless nvim を起動 -> :Review start -> 専有 tab 3 窓 (panel│base│head) +
 # tcd==repo + head 実ファイル -> head 窓 c キーでコメント (extmark 実ファイル) ->
-# panel <CR> 切替 -> panel o (前行儀 tab に実ファイル・編集可) -> 視覚選択で
+# panel <CR> 切替 -> head 窓実ファイル (編集可) -> 視覚選択で
 # range コメント -> y で "0 に @path#L.. + 本文 ->
 # :Review prompt で見出し + 全件全文一致 (issue #7) -> 正常終了 ->
 # 別プロセスで VimEnter notify -> :Review 復元 -> 本文・行位置・viewed が元の
@@ -95,7 +95,7 @@ grep -q 'E2E-L1 wins=3 tcd=repo' "$OUT1" || {
 }
 grep -q 'E2E-W1 winbar=true' "$OUT1" || { echo 'e2e: phase1 winbar chrome (w: のみ) が入っていない' >&2; exit 1; }
 grep -q 'E2E-T1 thread=eol+virtlines' "$OUT1" || { echo 'e2e: コメント行下スレッド (件数 eol + virt_lines 本文) が表示されない' >&2; exit 1; }
-grep -q 'E2E-O1 fileview=real-editable' "$OUT1" || { echo 'e2e: phase1 head 窓 o で前行儀 tab に実ファイル (編集可) が開かない' >&2; exit 1; }
+grep -q 'E2E-O1 fileview=real-editable' "$OUT1" || { echo 'e2e: phase1 head 窓が実ファイル (編集可) でない' >&2; exit 1; }
 grep -q 'E2E-M1 S-Tab=prev' "$OUT1" || {
   echo 'e2e: phase1 `<S-Tab>` 前ファイル移動が効かない (最終キー表 #18)' >&2
   exit 1

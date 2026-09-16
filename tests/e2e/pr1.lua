@@ -74,20 +74,8 @@ local run = function()
     fail 'worktree 実ファイルが read-only (編集可でなければならない)'
   end
 
-  -- head 窓 o: レビュー tab の外 (前行儀 tab) に worktree 基準パスで開く
-  local tabs_before = #vim.api.nvim_list_tabpages()
-  vim.api.nvim_win_set_cursor(head_win, { 1, 0 })
-  vim.cmd 'normal o'
-  wait_for(function()
-    return #vim.api.nvim_list_tabpages() == tabs_before + 1
-  end, 'o で前行儀 tab 増加')
-  if vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf()) ~= fname then
-    fail(
-      'o 先が worktree 基準の実ファイルパスでない: '
-        .. vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
-    )
-  end
-  vim.cmd 'tabclose'
+  -- o (別 tab に実ファイル) は 2026-09 削除。head 窓自体が worktree 実ファイル
+  -- であることを上の assert が担保する (marker は shell 互換のため据え置き)。
   vim.api.nvim_set_current_tabpage(st.tab)
   print('E2E-PR1 wt-file=' .. fname)
 

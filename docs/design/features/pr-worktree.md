@@ -30,7 +30,7 @@
 **head 窓と実ファイル (`o`)**:
 
 - head 窓そのものが worktree 実ファイル (`:edit`、編集可・LSP attach)。レビュー中の編集は保存でリフレッシュされ、差分・カウント・prompt に反映される (diff-review「リフレッシュ (未コミット反映契約)」)
-- `o` = そのファイルの実ファイルを**前行儀の tab** で `:edit` (レビュー tab の窓 diff を壊さず通常編集・移動経路へ出る)。worktree セッションでは `<worktree>/<path>`、branch 通常経路では `<repo>/<path>` を開く
+- 旧 `o` (前行儀 tab に実ファイルを開く導線) は 2026-09 削除。head 窓自体が worktree 実ファイル (`:edit`) に変わったため不要 (導線の二重化を解消)
 - head 窓で編集した内容はセッション保存対象ではない (保存されるのは comments / viewed / refs のみ。編集がディスクにある限り復元後のレビュー内容に現れる — branch/PR 共通、DESIGN 不変条件 INV-4)
 - レビュー対象のファイルそのものが無い (削除ファイル) head 窓は告知 scratch のみで編集不可。base 窓側の削除前コンテンツは読める
 
@@ -60,7 +60,7 @@
 | worktree add/remove/prune/status | adapters | `lua/review/git/worktree.lua` (+ `_spec`) |
 | PR セッション開始・worktree 判断 | handlers | `lua/review/handlers/pr.lua`, `lua/review/handlers/session.lua` (拡張) |
 | close / delete フロー (確認→save→掃除) | handlers | `lua/review/handlers/session.lua` |
-| 実ファイル open (worktree / git show) | ui | `lua/review/ui/fileview.lua` |
+| 実ファイル open (worktree / git show) | — | 廃止 (`ui/fileview.lua` 削除。head 窓が実ファイル) |
 | worktree 残骸掃除 | handlers | `lua/review/handlers/health.lua` |
 
 ## エッジケースの決定

@@ -3,7 +3,7 @@
 -- head 窓は実ファイル (a.lua 実パス・編集可) -> head 窓で c キー (keygate 実経路)
 -- -> 実ファイルへの extmark (件数 eol + 行下スレッド) と w:review_winbar ->
 -- panel <CR> で b.lua へ (追加ファイル: base=null scratch, focus は head) ->
--- head 窓 o で前行儀 tab に実ファイル (編集可) -> <S-Tab>/]F/[F/i/<leader>e の
+-- head 窓が実ファイル (編集可) -> <S-Tab>/]F/[F/i/<leader>e の
 -- 窓移動 (最終キー表 #18) -> panel l で entry 開く -> 視覚選択で range コメント ->
 -- y で "0 -> :Review prompt 全文一致 -> 正常終了 (status=open)。
 -- 失敗は E2E-FAIL を stdout へ出して cquit する (-c 実行中に error を素出しすると
@@ -264,16 +264,23 @@ local function run()
     fail('open だけで [✓] が付いた: ' .. tostring(sb_lines[brow]))
   end
 
-  -- head 窓 o: 前行儀 tab に実ファイルを開く (review tab を壊さず・編集可)。
-  -- #18 で panel の o は <CR>/l と同じ «entry を開く» になったため、実ファイル
-  -- 導線の押下は head 窓で行う (<CR> 後の focus は head 窓)。(縮退/checkout 側に
-  -- 無いファイルの git show read-only fallback は unit pin)
+  -- head 窓 = b.lua の実ファイル (編集可)。#18 以降はこの窓自体が実ファイルなので
+  -- 別 tab に実ファイルを開く o 導線は削除された (2026-09。導線の二重化を解消)。
+  local b_real = realpath(vim.fs.joinpath(top, 'b.lua'))
   expect(
-    win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'b.lua')),
+    win_buf_name(vim.api.nvim_get_current_win()) == b_real,
     '<CR> 後の focus が b.lua の head 窓でない'
   )
-  -- b.lua に x でマーク付与 (focus を一時的に panel へ戻す)。以後の head 窓 o に
-  -- 備えて focus は head 窓へ戻す。
+  local fbuf = vim.fn.bufnr(b_real)
+  local b_lines = vim.api.nvim_buf_get_lines(fbuf, 0, -1, false)
+  if b_lines[1] ~= 'feature addition' or b_lines[2] ~= 'second line' then
+    fail('head 実ファイル内容不一致: ' .. table.concat(b_lines, ' / '))
+  end
+  if vim.bo[fbuf].readonly then
+    fail 'head 実ファイルが read-only (編集可でなければならない)'
+  end
+  print 'E2E-O1 fileview=real-editable'
+  -- b.lua に x でマーク付与 (focus は head 窓へ戻す)
   vim.api.nvim_set_current_win(panel_win)
   vim.api.nvim_win_set_cursor(panel_win, { brow, 0 })
   vim.cmd 'normal x'
@@ -283,35 +290,6 @@ local function run()
   end, 'x で b.lua 行に [✓]')
   vim.api.nvim_set_current_win(head_win)
   print 'E2E-VW x=mark'
-
-  local tabs_before = #vim.api.nvim_list_tabpages()
-  vim.cmd 'normal o'
-  wait_for(function()
-    return #vim.api.nvim_list_tabpages() == tabs_before + 1
-  end, 'o で前行儀 tab 増加')
-  local b_real = realpath(vim.fs.joinpath(top, 'b.lua'))
-  if win_buf_name(vim.api.nvim_get_current_win()) ~= b_real then
-    fail(
-      'o 後の現在 buf が実ファイルで無い: '
-        .. win_buf_name(vim.api.nvim_get_current_win())
-    )
-  end
-  local fbuf = vim.fn.bufnr(b_real)
-  local b_lines = vim.api.nvim_buf_get_lines(fbuf, 0, -1, false)
-  if b_lines[1] ~= 'feature addition' or b_lines[2] ~= 'second line' then
-    fail('o の実ファイル内容不一致: ' .. table.concat(b_lines, ' / '))
-  end
-  if vim.bo[fbuf].readonly then
-    fail 'o の実ファイルが read-only (編集可でなければならない)'
-  end
-  print 'E2E-O1 fileview=real-editable'
-  -- o で作った tab を閉じてレビュー tab へ戻る (レビュー tab は無傷のはず)
-  vim.cmd 'tabclose'
-  vim.api.nvim_set_current_tabpage(st.tab)
-  expect(
-    #vim.api.nvim_tabpage_list_wins(windows.state().tab) == 3,
-    'o の tab を閉じた後にレビュー tab の 3 窓が壊れた'
-  )
 
   -- 移動キー (最終キー表 #18 の表示順版): <S-Tab> で a.lua -> ]F 最後 (b.lua) ->
   -- [F 最初 (src/deep/new.lua, ツリーは dir 先行) -> <Tab>/<S-Tab> 往復

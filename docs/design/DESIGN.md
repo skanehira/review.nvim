@@ -137,10 +137,9 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | head/base 窓 | `<Tab>` / `<S-Tab>` | 次 / 前のファイル (file panel の表示順 = ツリー上→下。折りたたみ・絞り込みを反映。端は無動作。panel `<CR>` と同一の open 経路 = マークは変えない。diff ペアが切れていれば張直す) |
 | head/base 窓 | `<leader>e` / `<leader>b` | file panel へ focus / file panel 表示トグル (panel を閉じても tab とレビュー窓は残る) |
 | head/base 窓 | `R` | 差分再取得 (`git diff` 引数形は head 解決に一致 — 通常 `<base>` / 縮退 `<base> <head>`) → 再パース → anchor 検証 → ±カウント・スレッド・panel 更新 → :diffupdate |
-| head/base 窓 | `o` | そのファイルの実ファイルをレビュー tab の外 (前行儀の tab) で開く — diff ペアを壊さず通常編集文脈へ出る経路。scratch 縮退時・base 窓でも同じ動作 |
 | head/base 窓 | `q` | `:Review close` 相当 (コメントありなら確認プロンプト。tab を閉じる。実ファイルバッファとユーザー窓には触れない) |
 | head/base 窓 | `<F1>` / `g?` | help float (内容は markdown。`g?` は config を持たない固定の別名で `<F1>` と同一呼び出し) |
-| file panel | `<CR>` / `o` / `l` | カーソル entry を開く (ファイル = 実ファイル窓に張って focus、dir = fold トグル)。(file panel 上の `o` = 開く。diff 窓の `o` とは意味が違う) |
+| file panel | `<CR>` / `o` / `l` | カーソル entry を開く (ファイル = 実ファイル窓に張って focus、dir = fold トグル)。file panel 上の `o` は «開く» (旧 diff 窓の `o` = 実ファイル別 tab は 2026-09 削除 — head 窓が実ファイルそのもののため) |
 | file panel | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (開いて focus は diff 窓と同一動作) |
 | file panel | `i` | list 表示 (フルパス 1 行) と tree 表示の切替 (view state。session JSON に載せない) |
 | file panel | `x` | レビュー完了マーク `[✓]` 切替 (open では付かない) |

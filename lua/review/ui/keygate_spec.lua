@@ -148,7 +148,6 @@ describe('keygate.install / uninstall', function()
       k.edit_comment,
       k.delete_comment,
       k.yank_prompt,
-      k.open_file,
       k.close,
       k.help,
       k.next_file,
@@ -271,9 +270,10 @@ describe('keygate.install / uninstall', function()
           ours = ours + 1
         end
       end
-      -- config.keymaps.diff の n -mode 全キー = 15 (c/e/d/y/i/o/q/<F1>/<Tab>/
-      -- <S-Tab>/[F/]F/R/<leader>e/<leader>b) + g? 別名 = 16。v の c は別 mode。
-      assert.equals(16, ours)
+      -- config.keymaps.diff の n -mode 全キー = 14 (c/e/d/y/i/q/<F1>/<Tab>/
+      -- <S-Tab>/[F/]F/R/<leader>e/<leader>b) + g? 別名 = 15。v の c は別 mode。
+      -- (o = 実ファイル別 tab は 2026-09 削除)
+      assert.equals(15, ours)
     end
   )
 
