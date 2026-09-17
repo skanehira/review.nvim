@@ -23,6 +23,9 @@
 # 跨プロセスで pin)。tabclose シナリオは :tabclose -> status=open 保存 + extmark
 # 残骸 0。
 # E2E は clipboard provider 無しで走る (クリップボード非依存、"0 レジスタ比較のみ)。
+# phase6: 横断コメント一覧 (issue #31) — 2 ファイルにコメント -> <leader>c ->
+# 一覧 2 行 -> <CR> ジャンプ -> 一覧へ戻り d 二重押し -> 行消滅 + 実ディスク JSON 1 件
+# (comment-list「テスト方針」e2e golden path)。
 #
 # 契約: 毎回 mktemp の一意ディレクトリに fixture repo と XDG_DATA_HOME を作り、
 # 終了時に掃除する (直列/並列どちらでも競合しない)。失敗は exit 1。
@@ -249,6 +252,34 @@ grep -q 'E2E-U2 yank=saved-baseline' "$OUT5" || {
 # 手動 R キー (#18 登録): BufWritePost を通さない再取得経路が効く
 grep -q 'E2E-R2 manual-refresh=ok' "$OUT5" || {
   echo 'e2e: head 窓 R での手動リフレッシュが ±カウントに反映されない (E2E-R2 欠落)' >&2
+  exit 1
+}
+
+# --- phase 6: 横断コメント一覧の削除 (issue #31 comment-list golden path) ------
+# 専有 XDG data dir (保存セッション 0) で 2 ファイルにコメント -> head 窓
+# <leader>c -> 一覧 2 行 -> <CR> ジャンプ -> 一覧へ戻り d 二重押し -> 行消滅 +
+# カーソル位置 + 実ディスク JSON 1 件 (INV-4)。E2E-CL3 が一覧追随の陽性マーカー。
+D_CLIST="$WORK/d-clist"
+mkdir -p "$D_CLIST"
+OUT6=$(mktemp "$WORK/phase6.out.XXXXXX")
+if ! ( cd "$REPO" && XDG_DATA_HOME="$D_CLIST" REVIEW_E2E_LOG="$LOG" \
+    nvim --headless --noplugin -u "$REPO_ROOT/tests/e2e_init.lua" \
+    -c "luafile $REPO_ROOT/tests/e2e/phase6.lua" ) >"$OUT6" 2>&1; then
+  cat "$OUT6" >&2
+  echo "e2e: phase 6 nvim 終了コード非ゼロ" >&2
+  exit 1
+fi
+cat "$OUT6" | tee -a "$WORK/e2e-report.txt"
+grep -q 'E2E-CL1 rows=2' "$OUT6" || {
+  echo 'e2e: <leader>c の一覧が 2 行にならない (E2E-CL1 欠落)' >&2
+  exit 1
+}
+grep -q 'E2E-CL2 jump=a.lua:3' "$OUT6" || {
+  echo 'e2e: 一覧 <CR> が記録行 a.lua:3 へジャンプしない (E2E-CL2 欠落)' >&2
+  exit 1
+}
+grep -q 'E2E-CL3 deleted rows=1 json=1 cursor=1' "$OUT6" || {
+  echo 'e2e: d 二重押しの削除で行消滅 / カーソル / ディスク JSON が契約と違う (E2E-CL3 欠落)' >&2
   exit 1
 }
 
@@ -516,4 +547,4 @@ if git -C "$REPO_PR" rev-parse --verify -q review-nvim/pr-7 >/dev/null; then
 fi
 [ ! -f "$(JSON_OF "$D_PR5")" ] || { echo 'e2e: delete 後にセッション JSON が残っている' >&2; exit 1; }
 
-echo "e2e: OK — golden path line=$L1 + 未コミット反映 (E2E-R1/U1/U2/R2) + head 解決フロー (switch / 縮退 / 縮退再開始 / 復元再評価) + tab 消滅 (open 維持・残骸 0) + PR worktree (o 実ファイル / close 掃除 / crash 回復 / --force 確認 / delete dir+ref)"
+echo "e2e: OK — golden path line=$L1 + 未コミット反映 (E2E-R1/U1/U2/R2) + 横断コメント一覧 (E2E-CL1/CL2/CL3: 開く / ジャンプ / 削除追随) + head 解決フロー (switch / 縮退 / 縮退再開始 / 復元再評価) + tab 消滅 (open 維持・残骸 0) + PR worktree (o 実ファイル / close 掃除 / crash 回復 / --force 確認 / delete dir+ref)"

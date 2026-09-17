@@ -1,12 +1,14 @@
--- handlers/comments_list: 横断コメント一覧の開閉・ジャンプ (docs/design/features/
--- comment-list.md「操作」「ジャンプ」「エッジケースの決定」)。
+-- handlers/comments_list: 横断コメント一覧の開閉・ジャンプ・行操作 (docs/design/
+-- features/comment-list.md「操作」「ジャンプ」「追随」「エッジケースの決定」)。
 -- session_spec と同じ git 注入スタブ + 実 FS fixture で active セッションを立て、
 -- 一覧窓 / head 窓の実バッファ・カーソル・通知文言 (確定文言の正本) を検証する。
 -- 折畳・絞り込み・list 表示は panel の view state 側で動かし、一覧の表示順が
 -- { collapsed = {}, mode = 'tree' } 解決 (折畳無視・tree 固定) であることを pin する。
+-- e の永続化はディスクの session JSON を読んで判定する (INV-4)。
 local cli = require 'review.git.cli'
 local commentlist = require 'review.ui.commentlist'
 local comments_list = require 'review.handlers.comments_list'
+local comments_handler = require 'review.handlers.comments'
 local config = require 'review.config'
 local paths = require 'review.store.paths'
 local session_handler = require 'review.handlers.session'
@@ -15,6 +17,22 @@ local ui_windows = require 'review.ui.windows'
 
 local SLUG = 'main--feature'
 local COMMENTS_BUF = 'review://comments/' .. SLUG
+
+-- コメント入力 float の確定 (insert の <C-y>)。実 float を実打鍵で駆動する
+-- (vim.ui.input はセッション close 確認 / 絞り込み用で、編集 float は別実装)。
+local CY = vim.api.nvim_replace_termcodes('<C-y>', true, false, true)
+
+-- 編集中の float の先頭行を消してから本文を打ち <C-y> で確定する。
+local function type_into_float(body)
+  vim.cmd 'normal 0d$'
+  vim.cmd('normal i' .. body .. CY)
+end
+
+-- float の title (input.lua の契約: 0.10 は文字列 / 0.13 は chunk table)。
+local function title_text()
+  local t = vim.api.nvim_win_get_config(0).title
+  return type(t) == 'table' and (type(t[1]) == 'table' and t[1][1] or t[1]) or (t or '')
+end
 
 -- a.lua: M (実ファイル) / bin.dat: binary / c.lua: D / src/deep/new.lua: A。
 -- tree 表示順 = src/deep/new.lua -> a.lua -> bin.dat -> c.lua。
@@ -176,6 +194,7 @@ local function use_env()
     store._set_now(nil)
     store._set_notify(nil)
     session_handler._set_now(nil)
+    comments_list._set_now(nil)
     session_handler._reset()
     config.reset()
     cli._set_system(nil)
@@ -661,4 +680,266 @@ describe('comments_list の閉じ方と窓の掃除', function()
       assert.is_true(gone)
     end
   )
+end)
+
+describe('comments_list.delete_current (一覧専用 arming)', function()
+  use_env()
+
+  local function seed_two()
+    start_done()
+    add_comment { file = 'a.lua', line = 1, body = 'one' }
+    add_comment { file = 'a.lua', line = 2, body = 'two' }
+    comments_list.open()
+    focus_list_row(1)
+  end
+
+  it(
+    'd: 1 回目は arming の WARN で消さず、同じ行の 2 回目で削除 + save + INFO',
+    function()
+      seed_two()
+
+      comments_list.delete_current()
+
+      assert.same({
+        {
+          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)',
+          level = vim.log.levels.WARN,
+        },
+      }, state.notifications)
+      assert.equals(2, #session_handler.active().comments)
+      assert.same({ 'a.lua:1  [c1]  one', 'a.lua:2  [c2]  two' }, list_lines())
+
+      comments_list.delete_current()
+
+      assert.same({
+        {
+          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)',
+          level = vim.log.levels.WARN,
+        },
+        { msg = 'review.nvim: コメント c1 を削除しました', level = vim.log.levels.INFO },
+      }, state.notifications)
+      assert.same({ 'a.lua:2  [c2]  two' }, list_lines())
+      -- INV-4: ディスクの session JSON を読んで判定する (メモリ状態は見ない)
+      local disk = store.load(state.repo, SLUG).data
+      assert.equals(1, #disk.comments)
+      assert.equals('c2', disk.comments[1].id)
+    end
+  )
+
+  it('d: 2 秒窓を過ぎた 2 回目は 1 目に戻る (削除しない)', function()
+    seed_two()
+
+    local clock = 100
+    comments_list._set_now(function()
+      return clock
+    end)
+    comments_list.delete_current() -- armed (clock=100)
+    clock = clock + 3 -- DELETE_ARM_WINDOW_S=2.0 を過ぎる
+    comments_list.delete_current() -- 窓外 = 1 目として再 armed、まだ消えない
+    assert.equals(2, #session_handler.active().comments)
+
+    comments_list.delete_current() -- 同一窓 2 回目で削除
+    assert.equals(1, #session_handler.active().comments)
+  end)
+
+  it(
+    'd: diff 窓の arming とは共有しない (diff で armed でも一覧の 1 回目は消さない)',
+    function()
+      start_done()
+      add_comment { file = 'a.lua', line = 1, body = 'one' }
+      comments_list.open()
+
+      -- diff 側の arming: head 窓 (a.lua) の同じ行で d を 1 回だけ押す
+      local hw = ui_windows.win 'head'
+      vim.api.nvim_set_current_win(hw)
+      vim.api.nvim_win_set_cursor(hw, { 1, 0 })
+      comments_handler.delete_current()
+      assert.equals(1, #session_handler.active().comments)
+
+      -- 一覧の d 1 回目: diff の arming を引き継がない (まだ削除されない)
+      focus_list_row(1)
+      comments_list.delete_current()
+      assert.equals(1, #session_handler.active().comments)
+      -- diff 側の arming WARN + 一覧側の arming WARN (削除は起きていない)
+      assert.same({
+        {
+          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)',
+          level = vim.log.levels.WARN,
+        },
+        {
+          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)',
+          level = vim.log.levels.WARN,
+        },
+      }, state.notifications)
+
+      -- 一覧の 2 回目で確定削除 (一覧側の arming が独立に効いている)
+      comments_list.delete_current()
+      assert.equals(0, #session_handler.active().comments)
+    end
+  )
+
+  it(
+    'd: 削除後のカーソルは同じ行位置の次コメント・末尾は最終行・0 件は 1 行目',
+    function()
+      start_done()
+      add_comment { file = 'a.lua', line = 1, body = 'one' }
+      add_comment { file = 'a.lua', line = 2, body = 'two' }
+      add_comment { file = 'a.lua', line = 3, body = 'three' }
+      comments_list.open()
+
+      -- 2 行目 (c2) を削除 -> 同じ行位置の次コメント (c3) へ
+      focus_list_row(2)
+      comments_list.delete_current()
+      comments_list.delete_current()
+      assert.same({ 2, 0 }, vim.api.nvim_win_get_cursor(list_win()))
+      assert.same({ 'a.lua:1  [c1]  one', 'a.lua:3  [c3]  three' }, list_lines())
+
+      -- 末尾 (c3) を削除 -> 最終行へクランプ
+      focus_list_row(2)
+      comments_list.delete_current()
+      comments_list.delete_current()
+      assert.same({ 1, 0 }, vim.api.nvim_win_get_cursor(list_win()))
+      assert.same({ 'a.lua:1  [c1]  one' }, list_lines())
+
+      -- 0 件 -> «コメントはありません» の 1 行目
+      focus_list_row(1)
+      comments_list.delete_current()
+      comments_list.delete_current()
+      assert.same({ 1, 0 }, vim.api.nvim_win_get_cursor(list_win()))
+      assert.same({ 'コメントはありません' }, list_lines())
+    end
+  )
+end)
+
+describe('comments_list.edit_current / yank_current', function()
+  use_env()
+
+  it(
+    'e: 入力 float (現 body + path:line hint) の確定で body 更新 + ディスク保存 + 追随',
+    function()
+      start_done()
+      add_comment { file = 'a.lua', line = 2, end_line = 2, body = 'orig' }
+      comments_list.open()
+      focus_list_row(1)
+
+      comments_list.edit_current()
+
+      -- 編集 float: 現在 body が事前入力され、title に対象行が出る
+      assert.same({ 'orig' }, vim.api.nvim_buf_get_lines(0, 0, -1, false))
+      assert.equals(' Comment [a.lua:2]  <CR> 確定  q 閉じる ', title_text())
+      type_into_float 'edited'
+
+      -- INV-4: ディスクの session JSON を読んで body 更新を確認する
+      local disk = store.load(state.repo, SLUG).data
+      assert.equals(1, #disk.comments)
+      assert.equals('edited', disk.comments[1].body)
+      assert.same({ 'a.lua:2  [c1]  edited' }, list_lines())
+    end
+  )
+
+  it(
+    'e: 編集確定は一覧の delete arming を解除する (diff 窓と同じ規則)',
+    function()
+      start_done()
+      add_comment { file = 'a.lua', line = 1, body = 'orig' }
+      comments_list.open()
+      focus_list_row(1)
+
+      comments_list.delete_current() -- arming
+      comments_list.edit_current()
+      type_into_float 'edited' -- 編集確定 = arming 解除
+      comments_list.delete_current() -- 解除済み = 1 目、まだ消えない
+      assert.equals(1, #session_handler.active().comments)
+
+      comments_list.delete_current() -- 2 回目で削除
+      assert.equals(0, #session_handler.active().comments)
+    end
+  )
+
+  it('y: カーソル行 1 件の prompt を "0 へコピーする', function()
+    start_done()
+    add_comment { file = 'a.lua', line = 1, body = 'yank me' }
+    comments_list.open()
+    focus_list_row(1)
+
+    comments_list.yank_current()
+
+    assert.equals('@a.lua#L1\nyank me', vim.fn.getreg '0')
+  end)
+
+  it(
+    'y: outdated 行はコピーせず INFO «outdated のためプロンプトに含めませんでした»',
+    function()
+      start_done()
+      add_comment { file = 'a.lua', line = 1, body = 'old', state = 'outdated' }
+      comments_list.open()
+      focus_list_row(1)
+      vim.fn.setreg('0', 'sentinel')
+
+      comments_list.yank_current()
+
+      assert.same({
+        {
+          msg = 'review.nvim: outdated のためプロンプトに含めませんでした',
+          level = vim.log.levels.INFO,
+        },
+      }, state.notifications)
+      assert.equals('sentinel', vim.fn.getreg '0')
+    end
+  )
+end)
+
+describe('comments_list の追随 (再 render)', function()
+  use_env()
+
+  it(
+    'コメント CRUD (diff 窓の c 追加) に追随して一覧が再 render される',
+    function()
+      start_done()
+      add_comment { file = 'a.lua', line = 1, body = 'one' }
+      comments_list.open()
+
+      -- diff 窓からの追加経路 (commit_comment_change) を通す
+      local hw = ui_windows.win 'head'
+      vim.api.nvim_set_current_win(hw)
+      vim.api.nvim_win_set_cursor(hw, { 2, 0 })
+      comments_handler.add_normal()
+      type_into_float 'added'
+
+      assert.same({ 'a.lua:1  [c1]  one', 'a.lua:2  [c2]  added' }, list_lines())
+    end
+  )
+
+  it('差分再取得 (refresh) に追随して一覧が再 render される', function()
+    start_done()
+    add_comment { file = 'a.lua', line = 1, body = 'one' }
+    comments_list.open()
+    assert.same({ 'a.lua:1  [c1]  one' }, list_lines())
+
+    -- 差分がまるごと消滅する再取得 (apply_refresh が全コメントを outdated 化)
+    install_git {
+      function()
+        return diff_ok ''
+      end,
+      sha(SAME_SHA),
+      sha(SAME_SHA),
+    }
+    session_handler.refresh()
+
+    assert.same({ 'a.lua:1  [c1]  one ⚠ outdated' }, list_lines())
+    assert.equals('main..作業ツリー · 1 comment · ⚠1', vim.w[list_win()].review_winbar)
+  end)
+
+  it('絞り込み (/) の適用に追随して一覧の対象集合が変わる', function()
+    start_done()
+    add_comment { file = 'a.lua', line = 1, body = 'A' }
+    add_comment { file = 'src/deep/new.lua', line = 1, body = 'D' }
+    comments_list.open()
+    assert.same({ 'src/deep/new.lua:1  [c2]  D', 'a.lua:1  [c1]  A' }, list_lines())
+
+    state.input_answer = 'deep'
+    session_handler.filter_sidebar()
+
+    assert.same({ 'src/deep/new.lua:1  [c2]  D' }, list_lines())
+  end)
 end)

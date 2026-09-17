@@ -335,7 +335,7 @@ describe('commentlist の buffer-local キー', function()
   use_env()
 
   it(
-    'config.keymaps.commentlist の jump / close が張られ rhs が実関数として解決できる',
+    'config.keymaps.commentlist の全キーが張られ rhs が実関数として解決できる (dangling 検出)',
     function()
       local session = session_stub { files = { ['a.lua'] = { viewed = false } } }
       local buf = commentlist.render(session, { order = { 'a.lua' } })
@@ -344,7 +344,7 @@ describe('commentlist の buffer-local キー', function()
         by_lhs[m.lhs] = m.rhs
       end
       local k = config.get().keymaps.commentlist
-      for _, name in ipairs { 'jump', 'close' } do
+      for _, name in ipairs { 'jump', 'delete', 'edit', 'yank', 'close' } do
         local lhs = k[name]
         assert.is_not_nil(lhs, 'config.keymaps.commentlist.' .. name .. ' が無い')
         local rhs = by_lhs[lhs]
