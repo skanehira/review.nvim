@@ -118,11 +118,12 @@ end
 local function paint_keymaps(buf)
   local k = config.get().keymaps.commentlist
   -- 押下時点の窓 gate は不要 (一覧 buffer を表示し得る窓はこの一覧だけ)。rhs は
-  -- 発火時に解決する (ui -> handlers の module-load 循環回避)。issue-2 の
-  -- delete / edit / yank は handler 実装と同時に config とここへ足す
-  -- (dangling な config キーを作らない)。
+  -- 発火時に解決する (ui -> handlers の module-load 循環回避)。
   for _, kmap in ipairs {
     { k.jump, "require('review.handlers.comments_list').jump_current()" },
+    { k.delete, "require('review.handlers.comments_list').delete_current()" },
+    { k.edit, "require('review.handlers.comments_list').edit_current()" },
+    { k.yank, "require('review.handlers.comments_list').yank_current()" },
     { k.close, "require('review.handlers.comments_list').close_current()" },
   } do
     if kmap[1] ~= nil then

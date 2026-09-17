@@ -49,7 +49,7 @@ prompt yank までできる (diff 窓の同名キーと同一動作)。
 | --- | --- |
 | `<leader>c` / `:Review comments` | 一覧を開く (current tab に vsplit — `:Review list` と同型)。既に開いていればその窓へ focus (別 tab でも tab を切替えて focus。再 vsplit しない。内容は常に最新)。active 0 件はコマンド層が WARN «アクティブなセッションがありません»、handler は `E_NOT_ACTIVE` を返す |
 | `<CR>` | カーソル行コメントの位置へジャンプ (下記) |
-| `d` | 行コメントを削除 (一覧専用の arming 二重押し = 同じ comment id・2 秒内。diff 窓の arming とは共有しない。通知文言は diff と同じ «コメント %s を削除しました») |
+| `d` | 行コメントを削除 (一覧専用の arming 二重押し = 同じ comment id・2 秒内。diff 窓の arming とは共有しない。arming は編集確定・削除確定で解除する (diff 窓と同じ規則)。通知文言は diff と同じ «コメント %s を削除しました») |
 | `e` | 行コメントを編集 (diff `e` と同じ float。確定で session 永続化 + 追随) |
 | `y` | 行コメント 1 件の prompt を "0 (+クリップボード) へ (書式は features/ai-prompt.md「出力経路」。outdated 行は diff 窓と同じくコピーせず INFO «outdated のためプロンプトに含めませんでした») |
 | `q` | 一覧窓を閉じる (セッション状態は変えない) |
@@ -99,7 +99,7 @@ prompt yank までできる (diff 窓の同名キーと同一動作)。
 | 既定キー | config | `lua/review/config.lua` に `keymaps.diff.comments_list` / `keymaps.sidebar.comments_list` + `keymaps.commentlist` (`jump='<CR>'` / `delete='d'` / `edit='e'` / `yank='y'` / `close='q'`。意味は diff と同一・config 節は独立) |
 | `:Review comments` | facade | `lua/review/init.lua` に `cmd_comments` を追加し、`M.subcommands` / `USAGE` / customlist 補完を更新 (`plugin/review.lua` は登録のみで変更不要) |
 | close 経路の一覧掃除 | ui/handlers | `lua/review/ui/windows.lua` / `handlers/session.lua` (既存 close 掃除に一覧を追加) |
-| 再 render の呼び出し | handlers | `lua/review/handlers/session.lua` の `commit_comment_change` / `apply_refresh` / 絞り込み適用 (`filter_sidebar`) の 3 経路から `comments_list.refresh()` を呼ぶ |
+| 再 render の呼び出し | handlers | `lua/review/handlers/session.lua` の `commit_comment_change` / `apply_refresh` / 絞り込み適用 (`filter_sidebar`) の 3 経路から `comments_list.refresh()` を呼ぶ (一覧 handler は session を top-level require するため、session 側は発火時に `require('review.handlers.comments_list').refresh()` を遅延解決する — DESIGN「既知の制約」) |
 
 キー追加に伴う docs 同期義務 (AGENTS.md の 6 点) を実装に含める: `config.lua`
 defaults + `config_spec` のリテラル期待 2 箇所 / `ui/help.lua` SECTIONS +

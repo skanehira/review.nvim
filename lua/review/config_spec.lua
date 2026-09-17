@@ -56,6 +56,9 @@ describe('config.get', function()
         },
         commentlist = {
           jump = '<CR>',
+          delete = 'd',
+          edit = 'e',
+          yank = 'y',
           close = 'q',
         },
       },
@@ -116,6 +119,9 @@ describe('config.get', function()
         },
         commentlist = {
           jump = '<CR>',
+          delete = 'd',
+          edit = 'e',
+          yank = 'y',
           close = 'q',
         },
       },

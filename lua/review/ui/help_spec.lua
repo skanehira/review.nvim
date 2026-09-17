@@ -152,6 +152,16 @@ describe('help.open', function()
       has_line(lines, '- **<CR>** カーソル行のコメント位置へジャンプ')
     )
     assert.is_true(
+      has_line(
+        lines,
+        '- **d** カーソル行のコメントを削除 (一覧専用 arming: 同じ行でもう一度 d)'
+      )
+    )
+    assert.is_true(has_line(lines, '- **e** カーソル行のコメントを編集'))
+    assert.is_true(
+      has_line(lines, '- **y** カーソル行のコメントのプロンプトを yank')
+    )
+    assert.is_true(
       has_line(lines, '- **q** 一覧を閉じる (セッション状態は変えない)')
     )
     vim.cmd 'normal q'

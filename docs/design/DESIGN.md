@@ -154,7 +154,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | file panel | `<leader>c` | コメント一覧 (横断) を開く (diff 窓と同じ) |
 | file panel | `help` (`<F1>` 既定) / `g?` | help float (diff 窓と同じ。`g?` は固定の別名) |
 | commentlist (`:Review comments` の一覧) | `<CR>` | カーソル行のコメント位置へジャンプ (ファイル open + 移動行 + fold を開く。outdated は記録行へ INFO、binary/削除・差分外は WARN。確定文言の正本は comment-list「ジャンプ」) |
-| commentlist | `d` / `e` / `y` | カーソル行コメントの削除 (arming 二重押し) / 編集 / 単一 prompt yank (diff 窓の同名キーと同一動作) |
+| commentlist | `d` / `e` / `y` | カーソル行コメントの削除 (一覧専用の arming 二重押し = 同じ comment id・2 秒内。diff 窓の arming とは共有しない) / 編集 / 単一 prompt yank (e / y は diff 窓の同名キーと同一動作) |
 | commentlist | `q` | 一覧バッファを閉じる (セッション状態は変えない) |
 | sessionlist (`:Review list` のバッファ) | `<Enter>` | 選択セッションを開く (closed → open。head 解決フロー・worktree 要否は pr-worktree の作成判断で再開時に再評価) |
 | sessionlist | `d` | 選択セッションを削除 (`:Review delete` と同一の確認フロー) |
@@ -223,6 +223,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - `bufadd` / `:edit` は buffer 名を symlink 解決後の正規パスで持つ (macOS の mktemp は `/var` -> `/private/var`。0.10 実測)。head 実ファイル窓の buf 名を assert する spec / e2e は期待値を `fs_realpath` 経由で比較する。git に渡す cwd は記録された path のままなので正規化されない (2 つを混同しない)
 - 手動 tmux 実測の `nvim --server ... --remote-expr` は editor.lua の関数 shim 経由で評価され、**list index が 0 base** (`tabpagebuflist(2)[2]` = 3 番窓 / 3 窓の tab で `[3]` は E684。関数呼び出しは shim 経由で動き `mode()` 等は使える)。同一状態で `getbufline('<bufname>')` は `[]` を返し `luaeval` + `nvim_buf_get_lines` では内容が読める (0.13 実測・issue #18) — 窓 buffer 特定は index、buffer 内容の実測は luaeval 経由で行うこと (無音の false PASS を防ぐ)
 - **TabClosed 発火時点の tab handle 失効がバージョン差**: TabClosed autocmd 発火時、閉じた tabpage handle の失効状態が 0.10.0 と stable で違う (実測: 0.10.0 は `nvim_tabpage_is_valid` が **true** を返す=未失効、stable は false。`nvim_list_tabpages()` の現存有無は両版一致で false)。帰属判定 (「閉じられたのが自前 tab か」) を is_valid に頼ると 0.10.0 で「別の tab が閉じた」と誤判定しフックが永久に発火しない。`ui/windows.lua` は `nvim_list_tabpages()` への現存有無で判定する (`ev.data` は両版 nil で使えない)。両版共通の振る舞い (tab 消滅 → 掃除 1 回・state 解任・status=open 保存) は session_spec / windows_spec の互換 pin test で固定 (issue #26)
+- **Lua の require 循環は実行時 error**: 2 module が相互に top-level require すると、後から読まれた側で `loop or previous error loading module '<name>'` を投げて module state が未完成のまま残る (実測: 相互 require の最小 fixture)。`handlers/comments_list` は `handlers/session` を top-level require しているため、`session` 側から一覧を追随させる 3 経路 (`commit_comment_change` / `apply_refresh` / `filter_sidebar`) は top-level require を置けず、呼び出し時に `require('review.handlers.comments_list').refresh()` を遅延解決する (top-level に置くと `:Review` 系の操作が module load で落ちる)
 
 ## 未解決の論点
 

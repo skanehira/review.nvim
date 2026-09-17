@@ -63,10 +63,13 @@ M.defaults = {
       close = 'q',
       delete = 'd',
     },
-    -- コメント一覧 (横断) の buffer-local キー。delete / edit / yank は一覧内
-    -- CRUD (issue-2) の handler 実装と同時に足す (dangling なキーを作らない)。
+    -- コメント一覧 (横断) の buffer-local キー。意味は diff 窓の同名キーと同一
+    -- (d の arming だけは一覧専用の状態 — DESIGN「デフォルトキーマップ」commentlist 行)。
     commentlist = {
       jump = '<CR>',
+      delete = 'd',
+      edit = 'e',
+      yank = 'y',
       close = 'q',
     },
   },

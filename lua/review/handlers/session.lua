@@ -40,6 +40,14 @@ function M._set_now(fn)
   now = fn or os.time
 end
 
+-- コメント一覧の追随 (comment-list「追随 (再 render)」)。コメント CRUD / 差分
+-- 再取得 / 絞り込み適用の 3 経路から呼ぶ。一覧 handler は本 module を top で
+-- require しているため、module-load の循環を避けて発火時に解決する (表示中の
+-- 一覧窓があるときだけ再 render — 非表示は開く時に最新を render する)。
+local function refresh_commentlist()
+  require('review.handlers.comments_list').refresh()
+end
+
 -- 差分がまるごと消えた開通の情報プレースホルダ path (diff-review「セッション開始時の
 -- 初期開き」: open_file の代わりに「変更なし」scratch を base/head 窓へ張り、
 -- outdated 集約もそこへ出す)。
@@ -680,6 +688,7 @@ function M.filter_sidebar()
     end
     sidebar_filter = (text == '') and nil or text
     refresh_panel()
+    refresh_commentlist()
   end)
 end
 
@@ -1637,6 +1646,7 @@ function M.commit_comment_change()
   else
     apply_chrome()
   end
+  refresh_commentlist()
 end
 
 local function current_path()
@@ -1951,6 +1961,7 @@ local function apply_refresh(current, files)
     ui_commentmarks.apply(session, cur.head_buf, cur.path)
   end
   refresh_panel()
+  refresh_commentlist()
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     if
       vim.api.nvim_win_is_valid(win)
