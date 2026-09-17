@@ -10,7 +10,7 @@ review.nvim の骨格: `:Review` コマンド登録、`setup()` と config 合�
 ## 入出力と振る舞い
 
 - `require("review").setup(opts)` — opts を DESIGN.md「API 一覧」の既定値と shallow+deep 合成して内部 config に保存。2 回目以降の呼び出しも同じ opts + 既定値で再合成する (冪等)。不正値 (git_bin が実行不能など) は setup 時ではなく初回実行時に結果型で返す (起動を壊さない)
-- `plugin/review.lua` — `vim.g.loaded_review_nvim` ガード + `:Review` を `nargs=* complete=customlist` (サブコマンド start/pr/list/close/delete/prompt) で登録し、args[1] でハンドラに振り分け (`:Review` 無印は復元)。引数個数の検証は各ハンドラ (`:Review start` は 1〜2、`:Review pr` は 1、`:Review delete` は 1)。本文は `require("review").command(...)` に委譲するだけ
+- `plugin/review.lua` — `vim.g.loaded_review_nvim` ガード + `:Review` を `nargs=* complete=customlist` (サブコマンド start/pr/list/close/delete/prompt) で登録し、args[1] でハンドラに振り分け (`:Review` 無印は復元)。サブコマンドの正本は `lua/review/init.lua` の `M.subcommands` / `USAGE` で、コメント一覧の `comments` も含む。引数個数の検証は各ハンドラ (`:Review start` は 1〜2、`:Review pr` は 1、`:Review delete` は 1)。本文は `require("review").command(...)` に委譲するだけ
 - git/gh アダプタ `git/cli.lua` — `run(bin, args, opts, cb)`。`vim.system` を使い、コールバックは fast event 判定して `vim.schedule` で返し、`stdout` を結果型 `{ok, data={stdout, code}, error, code=E_GIT|E_GH}` に変換する。失敗時の `error` は stderr 主メッセージ行を採取して整形 (ユーザー通知にそのまま使える文字列。末尾 1 行だと usage 続きを拾う — DESIGN「既知の制約」)
 - 結果型とエラーコード (`core/result.lua`): `ok(data)`, `err(error, code)`。API 戻り値の結果型は同期的判定分のみを表し、git/gh 実行の結果はディスパッチ後に非同期 UI / notify で返す (DESIGN.md「API 一覧」の契約)。コードは `E_GIT`, `E_GH`, `E_REF`, `E_PR`, `E_WORKTREE`, `E_STORE`, `E_CANCELLED`, `E_NOT_ACTIVE`
 

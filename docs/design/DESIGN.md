@@ -1,4 +1,5 @@
 <!-- product-mode: cli -->
+<!-- 変更履歴 [2026-09-17]: コメント一覧 (横断) 機能の追加 + focus_panel/toggle_panel の同期 mapping + 確認プロンプト vim.ui.input 復帰 + コメントアイコン nf-cod-comment -->
 <!-- 変更履歴 [2026-09-12]: 2 窓窓 diff + head 実ファイル + branch mode worktree 撤廃 + file panel ツリー + diffview 風キー + PoC 結果反映 -->
 # review.nvim 設計書
 
@@ -15,6 +16,7 @@ Neovim 内で GitHub の Files changed のようにブランチ/PR 差分をレ�
 3. **head 側は実ファイルバッファとして開き、編集可・LSP が効いた状態で差分を追える** (コード追跡が「レビューしながら」できること)。base 側との比較は Neovim 標準の窓 diff で行う。レビューは専有 tabpage で開き、file panel をトグルできる
 4. PR を指定した場合は head を git worktree にチェックアウトし、**worktree 内の実ファイル**を tab-local cwd (`tcd`) で開いた状態でレビューする。レビュー終了時に worktree をクリーンアップする
 5. 蓄積したコメントを AI エージェントに渡すプロンプトとしてクリップボードに出力できる。ファイルパスは先頭トークン `@<path>` の形式を含む
+6. 蓄積した全コメントをファイル横断の一覧 (`<leader>c` / `:Review comments`) で閲覧でき、任意のコメント位置へ移動・その場で編集/削除/yank できる
 
 **review 対象の定義**: branch モードは base vs **現在のチェックアウトの作業ツリー** (未コミット変更を含む。保存時は自動再取得)。PR モードは base vs **自前 worktree の状態** (チェックアウト時点 = head コミット内容。worktree 内で編集すればそれも対象)。`staged` / `working` / `.` などの特殊引数は作らない — 引数で対象を切り替えず、常に上記の定義で自動確定する。
 
@@ -34,7 +36,7 @@ plugin/review.lua            # :Review コマンド登録 + VimEnter 起動 scan
       ├ core/                # diff パース、コメントモデル、anchor 検証、prompt ビルダー (純粋ロジック)
       ├ git/                 # git / gh / worktree / switch アダプタ (vim.system 境界。外界 DI)
       ├ store/               # セッション JSON の永続化 (stdpath("data"))
-      └ ui/                  # file panel (ツリー)・base scratch・窓 diff レイアウト・実ファイル窓・入力/閲覧/help float
+      └ ui/                  # file panel (ツリー)・base scratch・窓 diff レイアウト・実ファイル窓・入力/閲覧/help float・コメント一覧 (横断)
 ```
 
 主要な決定 (変更コストが高いもの。根拠つき):
@@ -49,6 +51,7 @@ plugin/review.lua            # :Review コマンド登録 + VimEnter 起動 scan
 | LSP 連携 | レビュー tab 作成時に `:tcd` で tab-local cwd を向く。LSP の root_dir はファイルパス起点の root marker 遡上で決まり、**tcd/cwd は root_dir 自体には効かない** (server プロセスの spawn cwd に効く)。worktree を開けば `.git` pointer file / go.mod 等のマーカーで通常は worktree root に解決できる | tab-local-cwd-lsp-root 実測 (0.10.0/0.13、lua_ls markers=`.git`・gopls markers=`go.mod` で sent root_dir=workspaceFolders=worktree、workspace/symbol 応答確認)。dir 限定マーカーのみの設定に関する制約は「既知の制約」 |
 | review キーの実装 | **buffer-local + 押下時点 window role gate**: 実ファイルバッファはユーザーが自分の窓でも開くため、マップは buffer-local に張り、rhs expr gate で `w:review_key_gate == winid` 一致 + `nvim_win_is_valid` + 押下時点のバッファ内容フィンガープリント照合を通ったときだけ review 操作を、不成立時は built-in 挙動を返す (focus_panel / toggle_panel のみ非 expr の同期 mapping・不成立 no-op — expr+schedule の遅延実測)。張込前に `nvim_buf_get_keymap` でユーザー既存マップを検出し衝突キーはスキップ | window-local keymap API は Neovim に存在しない (0.13 で pcall nil 実測)。gate 不成立窓ではユーザーの 1 キーストロークが built-in になる副作用がある — user doc (help) に明記 (head-window-key-gate verified) |
 | file panel 表示 | フラット一覧でなくフォルダツリー (折りたたみ・`i` で list/tree 切替・単一-child 連鎖連結表示)。ヘッダに `Changes (N)` と `Showing changes for: <base>..<head 表示名>` (通常経路の head 表示名は `作業ツリー`、縮退時は ref 名 — 書式の詳細は features/diff-review)、行は `[✓?] <status> <コメントアイコン?> <icon?> <basename>` + `+a` (緑) / `-d` (赤)。コメントありはコメントアイコン (nf-cod-comment U+EA6B)、親パスサフィックスは持たない (ツリー indent が文脈)。`<Tab>`/`<S-Tab>`/`[F`/`]F` は表示順 (ツリー上→下、折りたたみ・絞り込み反映) を辿り、選択行と head 窓は相互追従 | 深さのあるリポジトリでフラット一覧が読めない (diffview と同じ動機)。`[✓]` レビュー完了マーク (x で手動トグル)・絞り込みは review.nvim 独自機能として維持 |
+| コメント一覧 (横断) | セッションのコメント (絞り込み (`/`) 適用後の集合) を `review://comments/<session-id>` の専用 vsplit バッファに 1 行 = 1 コメントで表示 (`<leader>c` / `:Review comments` — MUST 6。折畳は反映しない)。並びは file panel と同一の tree 表示順 (`visible_order()` を公開し `treelist.build` を単一源) → 同一ファイル内 line 昇順。outdated は含めて ⚠ 表示。`<CR>` ジャンプ / `d` 削除 (一覧専用 arming) / `e` 編集 / `y` 単一 prompt / `q` 閉じる。コメント CRUD・差分再取得・絞り込み適用に追随して再 render (close では一覧窓を閉じる) | 既存 `i` (単一ファイルの閲覧 float) は横断には狭くレビュー全体の見直しに使えない。`:Review list` と同じ vsplit idiom で新規の窓種・tab を増やさない。ジャンプは open_file に «移動行» を渡す形にして縮退 head の非同期充填と競合させない |
 | 永続化 | JSON 1 ファイル / セッション。`stdpath("data")/review.nvim/sessions/<repo-hash>/<slug>.json`。コメント CRUD ごとに即時アトミック書込 (tmp + rename) | MUST 2。Vim の session/view 機構は窓 diff と実ファイル open の状態と噛み合わず、独自書式のほうが復元時の検証 (下述 anchor) ができる |
 | 復元検証 | コメントに new 側行番号 + anchor (対象行テキスト + 前後 1 行) を保存。再開時に**直近パーサ結果**と突き合わせ、±20 行以内に同一テキストを検索・無ければ `outdated`。検証の正本テキスト源は core/diff パーサ出力 (add/context 可視行) | 黙って捨てず、黙って誤った場所につけない。head が作業ツリー基準になっても anchor の意味 (new 側行) は不変で、スキーマは無変更 |
 | 起動時復元 | VimEnter で当該 repo の open セッションを検出して notify。`:Review` (無印) が即復元 (複数あれば vim.ui.select)。復元時も head 解決フロー (switch 提案/scratch 縮退) を通す | 「起動後すぐに復元できる」= 1 操作。勝手にウィンドウを開く surprise は避け、検知と通知までを自動で行う |
@@ -119,11 +122,12 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | `:Review start <base> [head]` | ブランチレビュー開始。`<base>` / `[head]` は cmdline `<Tab>` で branches → tags 順に補完。**head 省略 = `rev-parse --abbrev-ref HEAD` を自動採用・保存** (「データスキーマ」)。head 指定時は現在の HEAD と違えば switch 提案、不可なら scratch 縮退 (決定表) | diff-review |
 | `:Review pr <number\|url>` | PR レビュー開始 (gh 連携 + worktree + `tcd`)。`<number>` は cmdline `<Tab>` で gh の open PR 番号を補完 | pr-worktree |
 | `:Review list` | 保存済みセッションの一覧表示 | persistence-restore |
+| `:Review comments` | active セッションのコメント (絞り込み適用後) を横断一覧 (`<leader>c` と同一。active 0 件は WARN、handler は `E_NOT_ACTIVE`) | comment-list |
 | `:Review close` | 現セッションの save + worktree クリーンアップ (pr のみ) (実ファイル窓と張った extmark の掃除もここ) | pr-worktree (セッションとレビューの終了) |
 | `:Review delete <id>` | 保存済みセッションの削除 (comments も失う。active なら先に close 相当の掃除をしてから削除、確認付き)。`<id>` は cmdline `<Tab>` で保存済み id を補完 | pr-worktree (セッションの削除) |
 | `:Review prompt [file]` | プロンプトをクリップボードへ (省略 = 全コメント、file 指定 = そのファイル分) | ai-prompt |
 
-**Lua API**: `require("review").setup(opts)` / `.start({base[, head]})` / `.start_pr({number})` (URL から番号を抽出するのはコマンド層。facade は number のみ) / `.resume({id})` / `.close()` / `.delete({id})` / `.prompt_all(opts)` / `.prompt_for_file(path, opts)`。戻り値の結果型 `{ok, data, error, code}` は**同期的に判定できる失敗** (引数不正、active 不在、config 不正) のみを表し、git/gh を伴う操作は「ディスパッチを受け付けた」ことの `ok` として返る。実行の成否 (差分取得の結果) は非同期に UI 開閉か vim.notify でフィードバックする (UI をブロックしないため `:wait()` は使わない。例外は cmdline ref 補完のみ — 「既知の制約」参照)。**active セッションを必要とする API (close / prompt_* / レビュー操作) が active 0 件で呼ばれた場合は `E_NOT_ACTIVE` を同期で返す** (`:Review` 無印・`:Review list`・`:Review delete` は active 不要)。
+**Lua API**: `require("review").setup(opts)` / `.start({base[, head]})` / `.start_pr({number})` (URL から番号を抽出するのはコマンド層。facade は number のみ) / `.resume({id})` / `.close()` / `.delete({id})` / `.prompt_all(opts)` / `.prompt_for_file(path, opts)`。戻り値の結果型 `{ok, data, error, code}` は**同期的に判定できる失敗** (引数不正、active 不在、config 不正) のみを表し、git/gh を伴う操作は「ディスパッチを受け付けた」ことの `ok` として返る。実行の成否 (差分取得の結果) は非同期に UI 開閉か vim.notify でフィードバックする (UI をブロックしないため `:wait()` は使わない。例外は cmdline ref 補完のみ — 「既知の制約」参照)。**active セッションを必要とする API (close / prompt_* / レビュー操作) が active 0 件で呼ばれた場合は `E_NOT_ACTIVE` を同期で返す** (WARN 文言は操作文脈の既存文言 — コメント系 = «アクティブなセッションがありません»、prompt 系 = «レビュー進行中セッションがありません»。`:Review` 無印・`:Review list`・`:Review delete` は active 不要)。
 
 **config (setup で受け付ける既定値)**: `git_bin="git"`、`gh_bin="gh"`、`diff_context=nil` (git 既定の 3。差分パースの文脈行数)、`auto_notify_resume=true`、`panel_width=35` (file panel 窓幅)、`keymaps={...}` (下記のデフォルト表)、`highlight={}` (グループ別 override)、`winbar=true` / `number=false` (review 窓の装飾 — diff-review「窓装飾 (chrome)」)。
 
@@ -136,6 +140,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | head/base 窓 | `[F` / `]F` | 最初 / 最後のファイル (`]c` / `[c` は **マップせず Neovim 標準の hunk 移動**に任せる) |
 | head/base 窓 | `<Tab>` / `<S-Tab>` | 次 / 前のファイル (file panel の表示順 = ツリー上→下。折りたたみ・絞り込みを反映。端は無動作。panel `<CR>` と同一の open 経路 = マークは変えない。diff ペアが切れていれば張直す) |
 | head/base 窓 | `<leader>e` / `<leader>b` | file panel へ focus / file panel 表示トグル (panel を閉じても tab とレビュー窓は残る) |
+| head/base 窓 | `<leader>c` | コメント一覧 (横断) を開く (`:Review comments` と同一)。既に開いていればその窓へ focus。非 expr の同期 mapping (「既知の制約」キー) |
 | head/base 窓 | `R` | 差分再取得 (`git diff` 引数形は head 解決に一致 — 通常 `<base>` / 縮退 `<base> <head>`) → 再パース → anchor 検証 → ±カウント・スレッド・panel 更新 → :diffupdate |
 | head/base 窓 | `q` | `:Review close` 相当 (コメントありなら確認プロンプト。tab を閉じる。実ファイルバッファとユーザー窓には触れない) |
 | head/base 窓 | `<F1>` / `g?` | help float (内容は markdown。`g?` は config を持たない固定の別名で `<F1>` と同一呼び出し) |
@@ -146,13 +151,17 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | file panel | `/` | 絞り込み (大文字小文字無視の path 部分一致。空入力 = 解除、キャンセル = 現状維持。`<Tab>`/`[F`/`]F` と `<CR>` は絞り込み後の集合だけを辿る) |
 | file panel | `R` | 差分再取得 (レビュー窓の `R` と同一) |
 | file panel | `q` | `:Review close` 相当 (diff 窓の `q` と同じ) |
+| file panel | `<leader>c` | コメント一覧 (横断) を開く (diff 窓と同じ) |
 | file panel | `help` (`<F1>` 既定) / `g?` | help float (diff 窓と同じ。`g?` は固定の別名) |
+| commentlist (`:Review comments` の一覧) | `<CR>` | カーソル行のコメント位置へジャンプ (ファイル open + 移動行 + fold を開く。outdated は記録行へ INFO、binary/削除・差分外は WARN。確定文言の正本は comment-list「ジャンプ」) |
+| commentlist | `d` / `e` / `y` | カーソル行コメントの削除 (arming 二重押し) / 編集 / 単一 prompt yank (diff 窓の同名キーと同一動作) |
+| commentlist | `q` | 一覧バッファを閉じる (セッション状態は変えない) |
 | sessionlist (`:Review list` のバッファ) | `<Enter>` | 選択セッションを開く (closed → open。head 解決フロー・worktree 要否は pr-worktree の作成判断で再開時に再評価) |
 | sessionlist | `d` | 選択セッションを削除 (`:Review delete` と同一の確認フロー) |
 | sessionlist | `q` | 一覧バッファを閉じる (セッション状態は変えない) |
 
 - fold 操作 (`za` / `zo` / `zc` / `zR` / `zM`) と panel の `j`/`k` 移動はマップせず標準挙動に任せる
-- 移動系で「ファイルを開く」経路はすべて同一処理 `open_file(path)` (head 窓に実ファイル張付・base 窓に scratch 張付・panel 再描画 = 永続状態は変えない) を呼ぶ
+- 移動系で「ファイルを開く」経路はすべて同一処理 `open_file(path)` (head 窓に実ファイル張付・base 窓に scratch 張付・panel 再描画 = 永続状態は変えない) を呼ぶ。コメント一覧の `<CR>` ジャンプは移動行を伴う `open_file(path, {line})` (comment-list「ジャンプ」)
 
 ## 横断規約
 
@@ -160,8 +169,8 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - **非同期**: 単発実行は `vim.system`。コールバックはアダプタ境界で `vim.in_fast_event()` を判定して `vim.schedule` でイベントループへ回す。**UI 操作はスローイベント限定**
 - **永続化**: 書き込みは即時・アトミック (同一ディレクトリの tmp に書いて `os.rename`)。読み込み失敗 (JSON 破損) は `.corrupt` に退避してから空セッション扱いとし、通知する (レビュー不能にしない)。例外: 読み取り不能 (権限等) で退避自体ができない場合は退避せず WARN のみ「存在しない」扱いとする (例外の条件は persistence-restore「読込」が正本)
 - **エラー表示**: `vim.notify` (エラー = WARN、情報 = INFO)。レビュー操作の途中失敗は元の状態を保持したまま理由 1 行を出す
-- **命名**: namespace は `review` (`lua/review/`、`plugin/review.lua`)。highlight グループは `ReviewCommentLine` (コメント range の下線)、`ReviewCommentBody` / `ReviewCommentOutdated` (行下スレッド本文 / outdated の gray)、`ReviewPanelFile` / `ReviewPanelDir` / `ReviewPanelStatus` / `ReviewPanelComment` / `ReviewPanelAdd` / `ReviewPanelRemove` (file panel の basename / dir 行 / git status 記号 / コメント有無 / +数 / -数。± は標準 `Added` / `Removed` link) / `ReviewPanelMeta` (session 一覧 の grey 行 = repo path 消失で <Enter> 不可)。差分行の着色は **Neovim 標準 `DiffAdd` / `DiffDelete` / `DiffText`** を使う (窓 diff が直接適用するため自前 diff グループを持たない。`config.highlight` の override は上記 review 自前グループ + 標準 Diff* の両名を受け付ける)。テストはソースと同ディレクトリに `*_spec.lua` (例外: `plugin/` 配下のファイルの spec は `lua/review/` 直下に置く)
-- **UI**: `[y/N]` 確認は `vim.ui.input` (cmdline) で行い、応答 (y/n + `<Enter>`) のあとに空 echo (`nvim_echo({}, false, {})`) で cmdline をクリアする (残留した打鍵が入力に混ざらない — UX review F15)。help float は内容を **markdown** で組み立てて描く (buffer filetype=markdown + `conceallevel=3`。キーは config の現在値、`##` 見出しと `**キー**` の箇条書きは conceal で装飾だけ見せる)。float は `border="rounded"`。入力に telescope 等は使わず `vim.ui.input` / 標準バッファに載せる。scratch 系バッファは filetype を意図的に集約する: file panel と `:Review list` のセッション一覧は共通の `review-list`、base 窓 scratch は内容に応じた file-type detect。**buffer-local キーマップ・extmark namespace ともにバッファ作成元 (`review_meta`) では判定を決めつけず、窓 role (実ファイル窓は `w:review_key_gate` + 押下時点内容照合、scratch 系は `review_meta`) から導く** (FileType autocmd 分岐は使わない)。実ファイルバッファへ張るコメント extmark は**セッション open 中はそのバッファの全窓に見える** (窓単位抑止 API が無い実測)。閉じる時に張った全バッファの namespace を明示 clear する (残骸 0 をアサーションで保証)
+- **命名**: namespace は `review` (`lua/review/`、`plugin/review.lua`)。highlight グループは `ReviewCommentLine` (コメント range の下線)、`ReviewCommentBody` / `ReviewCommentOutdated` (行下スレッド本文 / outdated の gray)、`ReviewPanelFile` / `ReviewPanelDir` / `ReviewPanelStatus` / `ReviewPanelComment` / `ReviewPanelAdd` / `ReviewPanelRemove` (file panel の basename / dir 行 / git status 記号 / コメント有無 / +数 / -数。± は標準 `Added` / `Removed` link。`ReviewPanelFile` はコメント一覧の path span にも流用) / `ReviewPanelMeta` (session 一覧 の grey 行 = repo path 消失で <Enter> 不可)。差分行の着色は **Neovim 標準 `DiffAdd` / `DiffDelete` / `DiffText`** を使う (窓 diff が直接適用するため自前 diff グループを持たない。`config.highlight` の override は上記 review 自前グループ + 標準 Diff* の両名を受け付ける)。テストはソースと同ディレクトリに `*_spec.lua` (例外: `plugin/` 配下のファイルの spec は `lua/review/` 直下に置く)
+- **UI**: `[y/N]` 確認は `vim.ui.input` (cmdline) で行い、応答 (y/n + `<Enter>`) のあとに空 echo (`nvim_echo({}, false, {})`) で cmdline をクリアする (残留した打鍵が入力に混ざらない — UX review F15)。help float は内容を **markdown** で組み立てて描く (buffer filetype=markdown + `conceallevel=3`。キーは config の現在値、`##` 見出しと `**キー**` の箇条書きは conceal で装飾だけ見せる)。float は `border="rounded"`。入力に telescope 等は使わず `vim.ui.input` / 標準バッファに載せる。scratch 系バッファは filetype を意図的に集約する: file panel・`:Review list` のセッション一覧・コメント一覧 (`review://comments/<session-id>`) は共通の `review-list` (`review_meta = { kind = 'commentlist', session_id }`)、base 窓 scratch は内容に応じた file-type detect。**buffer-local キーマップ・extmark namespace ともにバッファ作成元 (`review_meta`) では判定を決めつけず、窓 role (実ファイル窓は `w:review_key_gate` + 押下時点内容照合、scratch 系は `review_meta`) から導く** (FileType autocmd 分岐は使わない)。実ファイルバッファへ張るコメント extmark は**セッション open 中はそのバッファの全窓に見える** (窓単位抑止 API が無い実測)。閉じる時に張った全バッファの namespace を明示 clear する (残骸 0 をアサーションで保証)
 - **窓の所有**: レビュー用 tabpage は専有。file panel / base / head 窓の役割は id ではなく**内容と窓変数から導く** (drift recovery)。ユーザーがレビュー窓で `:edit` 等して窓の役割が壊れたときは復旧経路 (`R` / `<Tab>` / panel `<CR>` の open_file 共通処理) で張り直す。レビュー中は `diffopt` の既定値を変えない
 
 ## ドメインモデル
@@ -179,7 +188,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 
 実装が必ず従う、検証済みのプラットフォーム上限・ライブラリの性質 (根拠 = FEASIBILITY.md「PoC 結果」と実測コミット):
 
-- **キー**: window-local keymap API は Neovim に存在しない (`nvim_win_set_keymap` は nil。keymap API は global 3 + buffer 3 のみ、0.10/0.13 実測)。実ファイル窓の review キーは buffer-local + window role gate で実装する。副作用として gate 不成立窓ではユーザーの同キー既存マップが再現されず 1 キーストロークが built-in になる (help に明記)。ユーザー buffer-local の同キーマップは張込みで恒久失効するため張込前検出し衝突キーはスキップする。なお衝突判定で読む `nvim_buf_get_keymap` の entry は **Lua 関数形のキーマップ (`vim.keymap.set` に関数を渡すと) では `rhs` フィールドが無く `callback` に Lua 関数が載る** (0.10/stable 実測) — `m.rhs` を index する前に `type(m.rhs) ~= 'string'` を衝突 (ユーザーマップとして温存) 扱いで弾かないと張込が例外で途中中断する。expr キーマップの rhs は **textlock 下で評価**され、その場で窓作成 / バッファ変更を行うと E565 になる (0.13-nightly 実測。textlock を問う API は無い)。review キーの dispatch 本体 (float・窓操作を伴う handlers) は `vim.schedule` でロック解除直後のイベントループへ回して発火する (expr の返り値でキーストロークは確定消費され built-in 化しない)。ただし **focus_panel / toggle_panel は非 expr の同期関数 mapping** で張る — expr+schedule 経路は環境によって «次の打鍵まで画面に反映されない» 遅延が出る (実測。ユーザー報告の <leader>e 1 打鍵遅延)。非 expr は textlock 外なので窓切替 (panel 再建を含む) を同期実行でき、gate 不成立 (ユーザー窓) は no-op になる (leader 前置キーに built-in の意味は無い)
+- **キー**: window-local keymap API は Neovim に存在しない (`nvim_win_set_keymap` は nil。keymap API は global 3 + buffer 3 のみ、0.10/0.13 実測)。実ファイル窓の review キーは buffer-local + window role gate で実装する。副作用として gate 不成立窓ではユーザーの同キー既存マップが再現されず 1 キーストロークが built-in になる (help に明記)。ユーザー buffer-local の同キーマップは張込みで恒久失効するため張込前検出し衝突キーはスキップする。なお衝突判定で読む `nvim_buf_get_keymap` の entry は **Lua 関数形のキーマップ (`vim.keymap.set` に関数を渡すと) では `rhs` フィールドが無く `callback` に Lua 関数が載る** (0.10/stable 実測) — `m.rhs` を index する前に `type(m.rhs) ~= 'string'` を衝突 (ユーザーマップとして温存) 扱いで弾かないと張込が例外で途中中断する。expr キーマップの rhs は **textlock 下で評価**され、その場で窓作成 / バッファ変更を行うと E565 になる (0.13-nightly 実測。textlock を問う API は無い)。review キーの dispatch 本体 (float・窓操作を伴う handlers) は `vim.schedule` でロック解除直後のイベントループへ回して発火する (expr の返り値でキーストロークは確定消費され built-in 化しない)。ただし **focus_panel / toggle_panel / `<leader>c` (comments_list) は非 expr の同期関数 mapping** で張る — expr+schedule 経路は環境によって «次の打鍵まで画面に反映されない» 遅延が出る (実測。ユーザー報告の <leader>e 1 打鍵遅延)。非 expr は textlock 外なので窓切替・vsplit 作成を同期実行でき、gate 不成立 (ユーザー窓) は no-op になる (leader 前置キーに built-in の意味は無い)
 - **窓 diff**: `:w` 単体では Neovim は窓 diff を**再計算しない** (BufWritePost で `:diffupdate` を明示発火するまで fold が古い。実測 3s 収束せず)。binary 注釈窓・削除告知 scratch など窓 diff から外す窓は必ず `diffoff` (退避は `foldclosed()` が -1 になることで検証可 — 但し `:diffoff` / `foldmethod=manual` へ切り替えても diff 由来の**保存 fold は残る**ため `zE` で解消してから測る。0.13 実測)。窓 diff opts (`setl diff foldmethod=diff`) を**空 [No Name] 共有の雛形窓に先に当てると、その後の set_buf で fold が再計算されず foldclosed() が永久に -1 になる** (0.13 実測。bind = buf 張付と同時に適用する)。窓再利用の `nvim_win_set_buf` 張替では**古い buffer は hidden でも diff group に残積する** (group は全体 8 buffer 上限、9 個目の張付は E96 «Cannot diff more than 8 buffers»。0.13/stable 実測。窓そのものの close/:tabclose は残積しない = 張替経路限定)。open 反復で同じ窓へ張り返す bind 実装は set_buf 前に現窓 buf へ `:diffoff` して刈ること (issue #19 CI 後の実運用で E96 報告、windows_spec の bind 反復 test で pin)
 - **diff fold の帯域**: diff fold の張区は build の diffopt に依存し、**変更行が fold になるとは限らない** (0.13.0-nightly 既定 `diffopt=internal,filler,closeoff,indent-heuristic,inline:char,linematch:40` 実測: 30 行ファイルで変更域 11-16 のとき開始時 `foldmethod=diff`+`foldlevel=0` でも foldclosed()=-1、zM で閉じる帯は hunk の foldcontext の外 = 1-4 と 23-30。単独行の変更は fold を作らない = zc が E490)。「fold 時にスレッド virt_lines が画面に出ない」系の検証 (e2e / tmux) は変更行=fold 帯を仮定せず、まず foldclosed(1..N) を走査して実際に閉じる行へコメントを置き、fold 開閉 (zR/zM) と foldclosed の数値変化を陽性・陰性対照として対にする
 - **窓 diff 性能** (Apple M3 Ultra / nvim 0.13-nightly / -u NONE / 3 回中位数): 初回計算 50k 行×hunk50 = 24ms、50k×1 = 19.6ms、20k = 11ms、2k = 1.7ms。保存 1 行後の `:diffupdate` 再計算 ≤ 24.2ms、scrollbind 連打 ≤ 0.03ms/key。UI 実負荷・CI マシンは未計測だが 60 倍の余裕がある

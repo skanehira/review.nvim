@@ -33,6 +33,7 @@ setup 側で config を deep merge したい
 | --- | --- |
 | `:Review prompt [file]` | 全コメント (file 指定時はそのファイルのみ) を 1 文字列に整形。クリップボード provider (`+`/`*` レジスタ) があれば両方に、常に `"0` へも入れる。本文 0 件なら「コメントがありません」INFO |
 | キーマップ `y` (head 窓) | カーソル行 range に含まれるコメントのみ同上 (outdated の既定除外も同じルール。カーソル行のコメントがすべて outdated の場合はコピーせず INFO「outdated のためプロンプトに含めませんでした」) |
+| キーマップ `y` (コメント一覧) | カーソル行 1 件のコメントのみ同上 (単一 range と同じ規則。outdated 行はコピーせず INFO「outdated のためプロンプトに含めませんでした」) |
 | Lua API | `require("review").prompt_all(opts)` / `prompt_for_file(path, opts)` が結果型 `{ok, data={text, count}}` を返し、copy を opts (`copy=false` 可) で制御 (テストフック) |
 
 整形は純粋関数 `core/prompt.lua` (build(comments, ctx) → string) に置き、UI 層はクリップボード書込のみ担う。
@@ -45,6 +46,7 @@ setup 側で config を deep merge したい
 | コピー先解決 (レジスタ・クリップボード) | handlers | `lua/review/handlers/prompt.lua` |
 | `:Review prompt` 委譲・file 引数解決 | facade | `lua/review/init.lua` (command 拡張) |
 | `y` キーマップ | handlers | `lua/review/handlers/comments.lua` (既存拡張) |
+| `y` キーマップ (コメント一覧) | handlers | `lua/review/handlers/comments_list.lua` (comment-list) |
 
 ## エッジケースの決定
 
