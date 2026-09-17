@@ -484,6 +484,13 @@ describe('filepanel キー割り当て', function()
       for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
         by_lhs[m.lhs] = m.rhs
       end
+      -- get_keymap の lhs は <leader> 展開済みの実キーで返る (<leader>c → \c)
+      local function expand_lhs(key)
+        if key:sub(1, 8) == '<leader>' then
+          return (vim.g.mapleader or '\\') .. key:sub(9)
+        end
+        return key
+      end
       local k = config.get().keymaps.sidebar
       for _, name in ipairs {
         'open_diff',
@@ -498,11 +505,14 @@ describe('filepanel キー割り当て', function()
         'filter',
         'close',
         'toggle_style',
+        'comments_list',
       } do
         local lhs = k[name]
         assert.is_not_nil(lhs, 'config.keymaps.sidebar.' .. name .. ' が無い')
-        assert.is_not_nil(by_lhs[lhs], 'keymap 未張付: ' .. name .. ' (' .. lhs .. ')')
-        local mod_path, func_name = tostring(by_lhs[lhs]):match "require%('([^']+)'%)%.([%w_]+)%("
+        local stored = expand_lhs(lhs)
+        assert.is_not_nil(by_lhs[stored], 'keymap 未張付: ' .. name .. ' (' .. lhs .. ')')
+        local mod_path, func_name =
+          tostring(by_lhs[stored]):match "require%('([^']+)'%)%.([%w_]+)%("
         assert.is_not_nil(mod_path, 'rhs が require 呼び出し形でない: ' .. lhs)
         local ok_mod, mod = pcall(require, mod_path)
         assert.is_true(ok_mod, 'rhs の require が解決できない: ' .. mod_path)

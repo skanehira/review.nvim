@@ -37,6 +37,7 @@ local DISPATCH = {
   refresh = { 'review.handlers.session', 'refresh' },
   focus_panel = { 'review.handlers.session', 'focus_sidebar' },
   toggle_panel = { 'review.handlers.session', 'toggle_panel' },
+  comments_list = { 'review.handlers.comments_list', 'open' },
   -- comment ops は handlers.comments へ comment_dispatch で寄る
 }
 
@@ -115,8 +116,15 @@ vim.api.nvim_create_autocmd('BufUnload', {
 })
 
 local function user_keytaken(buf, mode, lhs)
+  -- nvim_buf_get_keymap の lhs は <leader> 展開済みの実キー (例 \c) で返るため、
+  -- 生の '<leader>c' と比較すると衝突を見逃し、ユーザーマップを上書きしてしまう
+  -- (<leader> 前置の同期 mapping で顕在化)。比較前に実キーへ展開する。
+  local want = lhs
+  if lhs:sub(1, 8) == '<leader>' then
+    want = (vim.g.mapleader or '\\') .. lhs:sub(9)
+  end
   for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, mode)) do
-    if m.lhs == lhs then
+    if m.lhs == want then
       -- vim.keymap.set の関数形は get_keymap で rhs フィールドが無く callback に
       -- 関数が載る (rhs を無検証に index するとクラッシュ = 衝突検出が例外で
       -- 壊れる)。自前マップは nvim_buf_set_keymap の文字列 rhs のみなので、
@@ -156,11 +164,11 @@ local function install_one(buf, mode, lhs, op)
   return true
 end
 
--- 窓切替系 (focus_panel / toggle_panel) の同期張込。expr mapping の rhs は textlock
--- 下で評価されるため buffer/窓を作る dispatch は vim.schedule に回すが、環境に
--- よって «次の打鍵まで反映されない» 遅延が出る (実測: ユーザー設定で <leader>e の
+-- 窓切替系 (focus_panel / toggle_panel / comments_list) の同期張込。expr mapping の
+-- rhs は textlock 下で評価されるため buffer/窓を作る dispatch は vim.schedule に回すが、
+-- 環境によって «次の打鍵まで反映されない» 遅延が出る (実測: ユーザー設定で <leader>e の
 -- focus が 1 打鍵遅延 — ユーザー報告)。非 expr の関数 mapping は textlock 外なので
--- buffer 変更 (panel 再建) も安全に同期実行できる。gate 不成立 (ユーザー窓) は
+-- 窓作成 (panel 再建・一覧 vsplit) も安全に同期実行できる。gate 不成立 (ユーザー窓) は
 -- no-op (leader 前置のキーに built-in の意味は無い)。
 local function install_sync(buf, lhs, op)
   if user_keytaken(buf, 'n', lhs) then
@@ -212,6 +220,9 @@ function M.install(buf, session_id)
   end
   if k.toggle_panel ~= nil then
     install_sync(buf, k.toggle_panel, 'toggle_panel')
+  end
+  if k.comments_list ~= nil then
+    install_sync(buf, k.comments_list, 'comments_list')
   end
   return session_id
 end

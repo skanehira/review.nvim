@@ -31,7 +31,7 @@ vim.cmd 'Review definitely-unknown-sub'
 vim.notify = real_notify
 
 local usage = 'usage: :Review [start <base> [head] | pr <number|url> | list | '
-  .. 'close | delete <id> | prompt [file]]'
+  .. 'comments | close | delete <id> | prompt [file]]'
 if #notified ~= 1 then
   fail('通知が ' .. #notified .. ' 件 (期待 1 件)')
 end

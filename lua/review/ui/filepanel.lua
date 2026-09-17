@@ -116,6 +116,7 @@ local function paint_keymaps(buf)
     { k.first_file, "require('review.handlers.session').first_file()" },
     { k.last_file, "require('review.handlers.session').last_file()" },
     { k.refresh, "require('review.handlers.session').refresh()" },
+    { k.comments_list, "require('review.handlers.comments_list').open()" },
     { k.toggle_viewed, "require('review.handlers.session').toggle_viewed_current()" },
     { k.filter, "require('review.handlers.session').filter_sidebar()" },
     { k.toggle_style, "require('review.handlers.session').toggle_listing_style()" },

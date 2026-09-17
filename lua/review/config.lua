@@ -32,6 +32,9 @@ M.defaults = {
       focus_panel = '<leader>e',
       toggle_panel = '<leader>b',
       view_comments = 'i',
+      -- コメント一覧 (横断) を開く (:Review comments と同一。既に開いていれば
+      -- その窓へ focus。非 expr の同期 mapping — DESIGN「既知の制約」キー)
+      comments_list = '<leader>c',
     },
     sidebar = {
       open_diff = '<CR>',
@@ -52,11 +55,19 @@ M.defaults = {
       -- help float は <F1> (config) に加え固定の別名 g? でも開く (keygate/
       -- filepanel の張込側。DESIGN キー表「g? は <F1> と同じ機能呼び出し」)。
       help = '<F1>',
+      -- コメント一覧 (横断) を開く (diff 窓と同じ。sidebar キーは filepanel が張る)
+      comments_list = '<leader>c',
     },
     sessionlist = {
       open = '<CR>',
       close = 'q',
       delete = 'd',
+    },
+    -- コメント一覧 (横断) の buffer-local キー。delete / edit / yank は一覧内
+    -- CRUD (issue-2) の handler 実装と同時に足す (dangling なキーを作らない)。
+    commentlist = {
+      jump = '<CR>',
+      close = 'q',
     },
   },
   highlight = {},

@@ -6,10 +6,10 @@ local result = require 'review.core.result'
 local M = {}
 
 -- DESIGN.md「API 一覧」のコマンド表順。Tab 補完と unknown 判定の正本。
-M.subcommands = { 'start', 'pr', 'list', 'close', 'delete', 'prompt' }
+M.subcommands = { 'start', 'pr', 'list', 'comments', 'close', 'delete', 'prompt' }
 
 local USAGE = 'usage: :Review [start <base> [head] | pr <number|url> | list | '
-  .. 'close | delete <id> | prompt [file]]'
+  .. 'comments | close | delete <id> | prompt [file]]'
 
 local function usage(msg)
   vim.notify('review.nvim: ' .. msg, vim.log.levels.WARN)
@@ -47,6 +47,17 @@ end
 function M.cmd_list(_args)
   require('review.handlers.sessions_list').open()
   return result.ok()
+end
+
+--- `:Review comments` (comment-list.md「操作」): active セッションのコメント
+--- (絞り込み適用後) を横断一覧で開く (`<leader>c` と同一)。active 0 件は WARN
+--- (handler は E_NOT_ACTIVE を返す)。
+function M.cmd_comments(_args)
+  local res = require('review.handlers.comments_list').open()
+  if not res.ok then
+    vim.notify(res.error, vim.log.levels.WARN)
+  end
+  return res
 end
 
 function M.cmd_close(_args)
