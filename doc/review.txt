@@ -160,6 +160,9 @@ KEYMAPS						*review-keymaps*
 		},
 		commentlist = {               -- :Review comments の一覧
 			jump           = '<CR>',
+			delete         = 'd',
+			edit           = 'e',
+			yank           = 'y',
 			close          = 'q',
 		},
 	}
@@ -272,6 +275,12 @@ KEYMAPS						*review-keymaps*
 			は最終行へクランプ。fold は開く)。outdated は記録行へ
 			移動して INFO。binary / 削除の告知表示のファイル、
 			現在の差分に無いファイルは移動せず WARN
+	d		カーソル行のコメントを削除 (一覧専用の arming。同じ
+			行でもう一度 d で確定)
+	e		カーソル行のコメントを編集 (diff 窓と同じ入力 float。
+			確定で保存し一覧も追随する)
+	y		カーソル行のコメント 1 件のプロンプトを "0 (+クリップ
+			ボード) へコピー (outdated はコピーせず INFO)
 	q		一覧を閉じる (セッション状態は変えない)
 
 セッション一覧 (:Review list)			*review-keymaps-sessionlist* *review-list*
