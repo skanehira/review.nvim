@@ -79,6 +79,13 @@ describe('help.open', function()
         '- **<leader>b** file panel の表示トグル (閉じても tab とレビュー窓は残る)'
       )
     )
+    assert.is_true(
+      has_line(
+        lines,
+        '- **<leader>c** コメント一覧 (横断) を開く (:Review comments と同じ。'
+          .. '既に開いていればその窓へ focus)'
+      )
+    )
     assert.is_true(has_line(lines, '- **i** カーソル行のコメントを閲覧 (read-only)'))
     assert.is_true(
       has_line(
@@ -109,6 +116,11 @@ describe('help.open', function()
     assert.is_true(
       has_line(lines, '- **x** レビュー完了マーク [✓] 切替 (open では付かない)')
     )
+    -- コメント一覧への導線は diff 節と同一文にすると has_line が節を区別できず
+    -- (検出能力ゼロ)、文言を一意化している。
+    assert.is_true(
+      has_line(lines, '- **<leader>c** コメント一覧 (横断) を開く (diff 窓と同じ)')
+    )
     -- gate 不成立窓の 1 keystroke built-in 副作用の help 明記契約 (DESIGN 決定表
     -- 「review キーの実装」)。文案の正本はこの行。
     assert.is_true(
@@ -134,6 +146,13 @@ describe('help.open', function()
     assert.is_true(has_line(lines, '## セッション一覧 (:Review list)'))
     assert.is_true(
       has_line(lines, '- **d** 選択セッションを削除 (:Review delete と同じ確認)')
+    )
+    assert.is_true(has_line(lines, '## コメント一覧 (横断)'))
+    assert.is_true(
+      has_line(lines, '- **<CR>** カーソル行のコメント位置へジャンプ')
+    )
+    assert.is_true(
+      has_line(lines, '- **q** 一覧を閉じる (セッション状態は変えない)')
     )
     vim.cmd 'normal q'
   end)

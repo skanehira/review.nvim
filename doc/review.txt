@@ -51,6 +51,12 @@ USAGE						*review-usage*
 					実ファイルになる (worktree 作成は pr
 					モードのみ。掃除は |review-sessions|)
 	:Review list				保存済みセッション一覧 |review-list|
+	:Review comments			現セッションのコメント (絞り込み
+					適用後) を横断一覧で開く
+					(<leader>c と同じ)。開いていれば
+					その窓へ focus。active が無ければ
+					WARN。操作は
+					|review-keymaps-commentlist|
 	:Review close				現セッションを保存して閉じる |review-sessions|
 	:Review delete {id}			保存済みセッションを削除
 					<id> は <Tab> で保存済み id が補完できる
@@ -129,6 +135,7 @@ KEYMAPS						*review-keymaps*
 			focus_panel    = '<leader>e',
 			toggle_panel   = '<leader>b',
 			view_comments  = 'i',
+			comments_list  = '<leader>c', -- 横断コメント一覧
 		},
 		sidebar = {                   -- file panel (変更ファイル一覧)
 			open_diff      = '<CR>',
@@ -144,11 +151,16 @@ KEYMAPS						*review-keymaps*
 			filter         = '/',    -- |review-keymaps-sidebar|
 			help           = '<F1>', -- g? も固定別名で同じ呼び出し
 			close          = 'q',
+			comments_list  = '<leader>c', -- 横断コメント一覧
 		},
 		sessionlist = {               -- :Review list の一覧
 			open           = '<CR>',
 			close          = 'q',
 			delete         = 'd',
+		},
+		commentlist = {               -- :Review comments の一覧
+			jump           = '<CR>',
+			close          = 'q',
 		},
 	}
 
@@ -196,6 +208,8 @@ KEYMAPS						*review-keymaps*
 	<leader>e	file panel (変更ファイル一覧) へ移動 (窓が閉じて
 			いれば左に再建してから移動)
 	<leader>b	file panel の表示トグル (閉じても tab とレビュー窓は残る)
+	<leader>c	コメント一覧 (横断) を開く (:Review comments と同じ。
+			既に開いていればその窓へ focus)
 	i		カーソル行のコメント全文を read-only 窓で閲覧
 			(編集は e)。q / <Esc> で閉じる
 
@@ -236,11 +250,29 @@ KEYMAPS						*review-keymaps*
 			一致集合内だけを辿る (winbar に一致数と filter が
 			出る)
 	q		セッションを閉じる (diff の q と同じ)
+	<leader>c	コメント一覧 (横断) を開く (diff 窓と同じ)
 	<F1> / g?	キーバインドの help float (diff 窓と同じ。g? は固定別名)
 
 	panel のカーソル移動だけでは diff を切り替えない。逆にファイルを open_file
 	すると panel のカーソルがその行へ追従する (相互ハイライト: 選択行 +
 	cursorline)。
+
+ コメント一覧 (横断)			*review-keymaps-commentlist*
+
+	セッションの全コメントをファイル横断の一覧
+	(`review://comments/<session-id>`) で見る。1 行 = 1 コメントで
+	«<path>:<line>[-<end>]  [<id>]  <body 1 行目>» (60 文字を超える分は …。
+	outdated は末尾に « ⚠ outdated»)。並びは file panel と同一の tree 表示順
+	(折畳・list 表示は反映しない) → 同一ファイル内 line 昇順。絞り込み (/)
+	は反映し、winbar に «<base>..<head 表示名> · N comments [· ⚠M]» を出す
+	(0 件でも開ける)。
+
+	<CR>		カーソル行のコメント位置へジャンプ。実ファイル (または
+			縮退 head の scratch) を開いて記録行へ移動する (行数外
+			は最終行へクランプ。fold は開く)。outdated は記録行へ
+			移動して INFO。binary / 削除の告知表示のファイル、
+			現在の差分に無いファイルは移動せず WARN
+	q		一覧を閉じる (セッション状態は変えない)
 
 セッション一覧 (:Review list)			*review-keymaps-sessionlist* *review-list*
 

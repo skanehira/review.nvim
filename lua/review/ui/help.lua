@@ -35,6 +35,10 @@ local SECTIONS = {
         'toggle_panel',
         'file panel の表示トグル (閉じても tab とレビュー窓は残る)',
       },
+      {
+        'comments_list',
+        'コメント一覧 (横断) を開く (:Review comments と同じ。既に開いていればその窓へ focus)',
+      },
       { 'view_comments', 'カーソル行のコメントを閲覧 (read-only)' },
     },
   },
@@ -61,6 +65,15 @@ local SECTIONS = {
       { 'filter', '一覧を絞り込む (空入力で解除)' },
       { 'help', 'このヘルプ (file panel でも g? で開く)' },
       { 'close', 'セッションを閉じる' },
+      { 'comments_list', 'コメント一覧 (横断) を開く (diff 窓と同じ)' },
+    },
+  },
+  {
+    title = 'コメント一覧 (横断)',
+    keymap = 'commentlist',
+    rows = {
+      { 'jump', 'カーソル行のコメント位置へジャンプ' },
+      { 'close', '一覧を閉じる (セッション状態は変えない)' },
     },
   },
   {

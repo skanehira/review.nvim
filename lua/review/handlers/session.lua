@@ -24,6 +24,7 @@ local result = require 'review.core.result'
 local store = require 'review.store.session'
 local ui_chrome = require 'review.ui.chrome'
 local ui_commentmarks = require 'review.ui.commentmarks'
+local ui_commentlist = require 'review.ui.commentlist'
 local ui_keygate = require 'review.ui.keygate'
 local ui_filepanel = require 'review.ui.filepanel'
 local ui_treelist = require 'review.ui.treelist'
@@ -373,6 +374,10 @@ local function detach()
     ui_keygate.uninstall(buf)
   end
   ui_windows.close()
+  -- コメント一覧は current tab の vsplit (review tab 以外にも移され得る) なので、
+  -- レビュー tab の close とは別に明示的に閉じる (残骸の窓・バッファを残さない —
+  -- comment-list「エッジケースの決定」)。
+  ui_commentlist.close_all()
   for _, buf in ipairs(current.scratch_bufs) do
     close_buffer(buf)
   end
@@ -506,6 +511,15 @@ local function panel_head_display()
     return active.session.head
   end
   return '作業ツリー'
+end
+
+--- panel / コメント一覧 winbar の head 表示名 (通常経路 = 作業ツリー、scratch 縮退 =
+--- ref 名 — diff-review「窓装飾」)。active 不在は nil。
+function M.head_display()
+  if active == nil then
+    return nil
+  end
+  return panel_head_display()
 end
 
 local function plural(n, word)
@@ -688,9 +702,30 @@ local function track_scratch(bufnr)
   ui_keygate.install(bufnr)
 end
 
+-- «移動行つき open» の位置決め (コメント一覧の <CR> ジャンプ): head 窓がその
+-- バッファを表示中のときだけ行をクランプして移動し、fold に隠れた行を zv で開く。
+-- 充填完了後に窓が別バッファへ差し替わっていれば触らない。
+local function move_head_to(buf, line)
+  local hw = ui_windows.win 'head'
+  if hw == nil or vim.api.nvim_win_get_buf(hw) ~= buf then
+    return
+  end
+  local count = vim.api.nvim_buf_line_count(buf)
+  if count == 0 then
+    return
+  end
+  local row = math.max(1, math.min(line, count))
+  vim.api.nvim_win_set_cursor(hw, { row, 0 })
+  vim.api.nvim_win_call(hw, function()
+    pcall(vim.cmd, 'normal! zv')
+  end)
+end
+
 -- git show 充填の非同期コールバックが old open のものだった場合の破棄
 -- (高速 <CR> 連打 / close 後着。fill_token で世代管理)。
-local function fill_show(bufnr, ref, path, token)
+-- move_line: «移動行つき open» (コメント一覧の <CR> ジャンプ)。充填完了後に
+-- 位置決めする (呼び出し側は待たない — comment-list「ジャンプ」)。
+local function fill_show(bufnr, ref, path, token, move_line)
   git_ref.show_text({ ref = ref, path = path, cwd = review_dir() }, function(res)
     if active == nil or active.fill_token ~= token then
       return -- 開き直し済み / close 済み: 結果を捨てて窓の状態を守る
@@ -699,6 +734,9 @@ local function fill_show(bufnr, ref, path, token)
       return
     end
     ui_scratchwin.set_content(bufnr, res.ok and res.data or {})
+    if move_line ~= nil then
+      move_head_to(bufnr, move_line)
+    end
   end)
 end
 
@@ -749,10 +787,13 @@ end
 --- 初期開き) が
 --- 必ず通る単一经路 (diff-review「open_file(path)」)。種別解決 → 窓に base/head を
 --- 張り、chrome 再適用、panel 再描画、コメント extmark 再適用 (マークは変えない)。
-local function resolve_and_open(path)
+--- opts = { line? }: «移動行つき open» (コメント一覧の <CR> ジャンプ)。実ファイルは
+--- bind 後に、縮退 head は git show の非同期充填後に位置決めする。
+local function resolve_and_open(path, opts)
   if active == nil then
     return
   end
+  local move_line = opts ~= nil and opts.line or nil
   local session = active.session
   local cur = { path = path }
   active.fill_token = active.fill_token + 1
@@ -803,7 +844,7 @@ local function resolve_and_open(path)
       ui_scratchwin.detect_filetype(hb, path)
       track_scratch(hb)
       cur.head_buf = hb
-      fill_show(hb, session.head, path, token)
+      fill_show(hb, session.head, path, token, move_line)
       ui_windows.bind(cur.base_buf, hb)
     else
       local full = vim.fs.joinpath(review_dir(), path)
@@ -841,11 +882,18 @@ local function resolve_and_open(path)
   -- (INV-4 の save 対象 = コメント CRUD / マーク切替 / 差分再取得)。
   refresh_panel(path == M.NO_CHANGES and nil or { kind = 'file', path = path })
   apply_chrome()
+  -- 移動行つき open: 実ファイルは即時、縮退 head は充填前でも bind 後の窓で
+  -- クランプまで位置決めし、充填完了時に改めて移動する (呼び出し側で待たない)。
+  if move_line ~= nil and (cur.kind == 'real' or cur.kind == 'degraded') then
+    move_head_to(cur.head_buf, move_line)
+  end
 end
 
 --- panel 外導線 (open_selected_file / <Tab>/<S-Tab>/[F/]F / API) 共通の open_file。
 --- active が無いか path が現差分に一覧化されていない場合は WARN/no-op。
-function M.open_file(path)
+--- opts = { line? } は «移動行つき open» (コメント一覧の <CR> ジャンプ。既存
+--- 呼び出しは nil)。
+function M.open_file(path, opts)
   if active == nil then
     notify_warn 'アクティブなセッションがありません'
     return
@@ -853,7 +901,16 @@ function M.open_file(path)
   if path == nil or (active.files_by_path[path] == nil and active.session.files[path] == nil) then
     return
   end
-  resolve_and_open(path)
+  resolve_and_open(path, opts)
+end
+
+--- 現在の差分のファイル状態 (active.files_by_path) を返す (無ければ nil)。
+--- コメント一覧のジャンプが binary / 削除告知 / 差分外を判別するための読み出し口。
+function M.file_of(path)
+  if active == nil then
+    return nil
+  end
+  return active.files_by_path[path]
 end
 
 -- ============================================================================
@@ -874,6 +931,9 @@ local function on_review_tab_closed()
   for buf in pairs(current.owned_bufs) do
     ui_keygate.uninstall(buf)
   end
+  -- 旧 session の一覧を close 経路で閉じる (auto 再オープンはしない —
+  -- comment-list「エッジケースの決定」)。
+  ui_commentlist.close_all()
   -- 開いていた窓は消えている (tab 全体)。scratch buffer は hide 状態で残るが、
   -- 開き直し時に同一名的のまま中身再充填るので残置 (セッション open のまま、が
   -- 定義)。extmark だけ実ファイル窓から確実に消す (上の clear_tracked)。
@@ -1587,7 +1647,14 @@ end
 -- 対象を解決し open_file (処理は panel <CR> と同一)。render と同じ treelist.build
 -- を単一源にし、折りたたみ dir の子・絞り込み外は表示と同一規則で飛ばす。
 -- 現在位置が順序に無い (折りたたみ・絞り込みで隠れた) ときは次 = 先頭、前 = 無動作。
-local function visible_order()
+--- 表示順の file path 一覧を公開する (コメント一覧の並びの起点。file_order_sorted の
+--- path 昇順は使わない — comment-list「実装の配置」)。opts = { collapsed?, mode? }、
+--- 省略時は panel の現行 view state (= 移動系の現行動作)。コメント一覧は
+--- { collapsed = {}, mode = 'tree' } を明示して「折畳無視・tree 固定」で呼ぶ。
+function M.visible_order(opts)
+  opts = opts or {}
+  local collapsed = opts.collapsed or panel_collapsed
+  local mode = opts.mode or panel_mode
   local order = {}
   if active == nil then
     return order
@@ -1603,8 +1670,8 @@ local function visible_order()
     }
   end
   local rows = ui_treelist.build(entries, {
-    mode = panel_mode,
-    collapsed = panel_collapsed,
+    mode = mode,
+    collapsed = collapsed,
     base = active.session.base,
     head_display = panel_head_display(),
   })
@@ -1617,7 +1684,7 @@ local function visible_order()
 end
 
 local function step_file(delta)
-  local order = visible_order()
+  local order = M.visible_order()
   if #order == 0 then
     return
   end
@@ -1648,7 +1715,7 @@ end
 
 --- `[F`: 最初のファイルへ (現対象が最初なら無動作)。
 function M.first_file()
-  local order = visible_order()
+  local order = M.visible_order()
   local target = order[1]
   if target == nil or target == current_path() then
     return
@@ -1658,7 +1725,7 @@ end
 
 --- `]F`: 最後のファイルへ (現対象が最後なら無動作)。
 function M.last_file()
-  local order = visible_order()
+  local order = M.visible_order()
   local target = order[#order]
   if target == nil or target == current_path() then
     return

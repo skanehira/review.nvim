@@ -31,6 +31,7 @@ describe('config.get', function()
           focus_panel = '<leader>e',
           toggle_panel = '<leader>b',
           view_comments = 'i',
+          comments_list = '<leader>c',
         },
         sidebar = {
           open_diff = '<CR>',
@@ -46,11 +47,16 @@ describe('config.get', function()
           toggle_style = 'i',
           refresh = 'R',
           help = '<F1>',
+          comments_list = '<leader>c',
         },
         sessionlist = {
           open = '<CR>',
           close = 'q',
           delete = 'd',
+        },
+        commentlist = {
+          jump = '<CR>',
+          close = 'q',
         },
       },
       highlight = {},
@@ -85,6 +91,7 @@ describe('config.get', function()
           focus_panel = '<leader>e',
           toggle_panel = '<leader>b',
           view_comments = 'i',
+          comments_list = '<leader>c',
         },
         sidebar = {
           open_diff = '<CR>',
@@ -100,11 +107,16 @@ describe('config.get', function()
           toggle_style = 'i',
           refresh = 'R',
           help = '<F1>',
+          comments_list = '<leader>c',
         },
         sessionlist = {
           open = '<CR>',
           close = 'q',
           delete = 'd',
+        },
+        commentlist = {
+          jump = '<CR>',
+          close = 'q',
         },
       },
       highlight = {},

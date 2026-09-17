@@ -108,6 +108,23 @@ local function restore_spies()
   state.spies = nil
 end
 
+-- comments_list.open の dispatch 観測 (同期発火 / 衝突 skip の pin 用)。
+local function spy_comments_list()
+  local module = require 'review.handlers.comments_list'
+  state.comments_open_real = module.open
+  module.open = function()
+    table.insert(state.notifications, { msg = 'SPY:comments_list.open', level = 0 })
+  end
+end
+
+local function restore_comments_list()
+  local module = require 'review.handlers.comments_list'
+  if state.comments_open_real ~= nil then
+    module.open = state.comments_open_real
+    state.comments_open_real = nil
+  end
+end
+
 -- dispatch は vim.schedule で textlock 解除後のイベントループへ回される
 -- (keygate.fire の NOTE)。押下後の観測は発火待ちの条件待機で行う。
 local function wait_msg(pat)
@@ -129,7 +146,10 @@ describe('keygate.install / uninstall', function()
   before_each(function()
     buf = scratch_buf 'review://head/sx/a.lua'
   end)
-  after_each(restore_spies)
+  after_each(function()
+    restore_spies()
+    restore_comments_list()
+  end)
 
   it('config.keymaps.diff の全キーが buffer-local に張られる', function()
     keygate.install(buf, 'sx')
@@ -161,6 +181,7 @@ describe('keygate.install / uninstall', function()
       k.focus_panel,
       k.toggle_panel,
       k.view_comments,
+      k.comments_list,
     } do
       local lhs = expand_lhs(key)
       assert.is_true(present[lhs] == true, 'map 缺失: ' .. key)
@@ -276,10 +297,11 @@ describe('keygate.install / uninstall', function()
           ours = ours + 1
         end
       end
-      -- config.keymaps.diff の n -mode 全キー = 14 (c/e/d/y/i/q/<F1>/<Tab>/
-      -- <S-Tab>/[F/]F/R/<leader>e/<leader>b) + g? 別名 = 15。v の c は別 mode。
-      -- focus_panel / toggle_panel は非 expr の callback map (同期発火) で数える。
-      assert.equals(15, ours)
+      -- config.keymaps.diff の n -mode 全キー = 15 (c/e/d/y/i/q/<F1>/<Tab>/
+      -- <S-Tab>/[F/]F/R/<leader>e/<leader>b/<leader>c) + g? 別名 = 16。v の c は別 mode。
+      -- focus_panel / toggle_panel / comments_list は非 expr の callback map
+      -- (同期発火) で数える。
+      assert.equals(16, ours)
     end
   )
 
@@ -336,7 +358,10 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       'close_by_key',
     }
   end)
-  after_each(restore_spies)
+  after_each(function()
+    restore_spies()
+    restore_comments_list()
+  end)
 
   it(
     '実ファイル head 窓の <Tab>/<S-Tab>/[F/]F/R は対応 handlers を発火する',
@@ -401,6 +426,52 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       vim.api.nvim_set_current_win(state.user_win)
       state.notifications = {}
       press(head_buf, expand(k.focus_panel), state.user_win)
+      assert.equals(0, #state.notifications)
+    end
+  )
+
+  it(
+    '<leader>c (comments_list) は同期発火し、ユーザー衝突キーはスキップ (上書きしない)',
+    function()
+      windows.bind(base_buf, head_buf, { head_kind = 'real' })
+      local k = config.get().keymaps.diff
+      local function expand(key)
+        if key:sub(1, 8) == '<leader>' then
+          return (vim.g.mapleader or '\\') .. key:sub(9)
+        end
+        return key
+      end
+      local lhs = expand(k.comments_list)
+
+      -- 非 expr の同期 mapping: 押下で即時に dispatch が載る (schedule 遅延なし)
+      spy_comments_list()
+      state.notifications = {}
+      press(head_buf, lhs, windows.win 'head')
+      assert.equals(1, #state.notifications, '同期発火していない (schedule 遅延)')
+      assert.equals('SPY:comments_list.open', state.notifications[1].msg)
+
+      -- ユーザー既存の buffer-local マップが先に張られていれば gate map はスキップ
+      local buf = scratch_buf('review://head/sx/conflict.lua', {
+        kind = 'scratch',
+        scratch = 'head',
+        session_id = 'sx',
+        path = 'conflict.lua',
+      })
+      vim.api.nvim_buf_set_keymap(buf, 'n', lhs, '<Cmd>echo "user"<CR>', { noremap = true })
+      keygate.install(buf, 'sx')
+      local rhs = nil
+      for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+        if m.lhs == lhs then
+          rhs = m.rhs
+        end
+      end
+      assert.equals('<Cmd>echo "user"<CR>', rhs)
+
+      -- gate 不成立 (ユーザー窓で同一 buf) は no-op (leader 前置に built-in は無い)
+      vim.api.nvim_win_set_buf(state.user_win, head_buf)
+      vim.api.nvim_set_current_win(state.user_win)
+      state.notifications = {}
+      press(head_buf, lhs, state.user_win)
       assert.equals(0, #state.notifications)
     end
   )
