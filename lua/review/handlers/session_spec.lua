@@ -930,7 +930,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       for _, chunk in ipairs(above[4].virt_lines[1] or {}) do
         text = text .. (type(chunk[1]) == 'table' and chunk[1][1] or chunk[1])
       end
-      assert.equals(' ⚠ 1 outdated (prompt 除外中)', text)
+      assert.equals(' 1 outdated (prompt 除外中)', text)
     end
   )
 
@@ -994,7 +994,7 @@ describe('panel winbar ⚠N (集約先 head 窓の無い outdated)', function()
   )
 
   it(
-    'head 実窓がある outdated は ⚠N に入れず、head バッファ内で (⚠M) 併記にする',
+    'head 実窓がある outdated は ⚠N に入れず、head バッファ内の id 接頭辞を warning 色にする',
     function()
       start_done('main', 'feature')
       inject_comment 'resolvable thread'
@@ -1005,7 +1005,7 @@ describe('panel winbar ⚠N (集約先 head 窓の無い outdated)', function()
       -- ⚠N 対象ではない (head 窓に集約先がある)
       local pw = ui_windows.win 'panel'
       assert.equals('main..feature · 2 files · 1 comment', vim.w[pw].review_winbar)
-      -- 対象行の mark に outdated 併記が立ってること (対照: 見逃さない)
+      -- 件数に ⚠ を付けず、本文先頭の id 接頭辞だけ warning 色にする
       local head_buf = vim.api.nvim_win_get_buf(ui_windows.win 'head')
       local ns = vim.api.nvim_get_namespaces().review_comment
       local found = nil
@@ -1014,11 +1014,12 @@ describe('panel winbar ⚠N (集約先 head 窓の無い outdated)', function()
         for _, chunk in ipairs(m[4].virt_text or {}) do
           vt = vt .. (type(chunk[1]) == 'table' and chunk[1][1] or chunk[1])
         end
-        if vt:find('(⚠1)', 1, true) ~= nil then
+        if vt == ' \u{EA6B} 1' then
           found = m
         end
       end
-      assert.is_not_nil(found, 'outdated 混在 (⚠1) mark が無い')
+      assert.is_not_nil(found, 'outdated 混在 mark が無い')
+      assert.equals('ReviewCommentOutdated', found[4].virt_lines[1][1][2])
     end
   )
 end)

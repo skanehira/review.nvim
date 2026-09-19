@@ -43,10 +43,11 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 
 **コメント表示 (head バッファの extmark)**:
 
-- 対象行 = コメントの `line`〜`end_line` の範囲 (new 側行番号 = head バッファの行番号そのもの。**行写像変換は存在しない** — head 実窓では行番号が恒等で、unified バッファ時代の変換経路 (`new_line_at`) は持たない)。namespace `review_comment` の extmark 1 個に virt_text (行末 `コメントアイコン (nf-cod-comment U+EA6B) N`、outdated 混在は `コメントアイコン N (⚠M)`) と virt_lines (行下スレッド本文 `[c1] …`、10 行で `… (i で全文)`、group 内は id 行 + continuation インデント) を併合する (同一位置に複数 extmark を作ると取得順不定で spec 契約にできない)。下線 hl `ReviewCommentLine`
+- 対象行 = コメントの `line`〜`end_line` の範囲 (new 側行番号 = head バッファの行番号そのもの。**行写像変換は存在しない** — head 実窓では行番号が恒等で、unified バッファ時代の変換経路 (`new_line_at`) は持たない)。namespace `review_comment` の extmark 1 個に virt_text (行末 `コメントアイコン (nf-cod-comment U+EA6B) N`、hl `ReviewPanelComment`。outdated 混在でも件数表示は変えず、outdated は行下スレッドの id 接頭辞だけ `ReviewCommentOutdated` にする) と virt_lines (行下スレッド本文 `[c1] …`、10 行で `… (i で全文)`、group 内は id 行 + continuation インデント) を併合する (同一位置に複数 extmark を作ると取得順不定で spec 契約にできない)。下線 hl `ReviewCommentLine`
+- 行下スレッド本文は `ReviewCommentBody` のプレーン表示 (markdown 構文色は付けない。extmark は buffer filetype を持てず、head/base 実バッファの ft は変更しない)。outdated コメントは id 接頭辞 (`[c1]`・打ち切り行 `… (i で全文)`) のみ `ReviewCommentOutdated`、本文は `ReviewCommentBody`。全文閲覧 `i` の float buffer は filetype=markdown
 - eol anchor (end_col 指定なし start col 対応) + `right_gravity=true` (boolean 指定。`gravity` 文字列は invalid) で編集時の行移動に自動追従
 - **同一バッファの全窓にスレッドが見える (仕様)**。窓単位抑止 API は実測で存在しない。セッション close / delete 時に張った全バッファの ns を明示 clear し、残骸 0 を spec で pin する
-- 位置を解けない outdated (= new 側に該当テキスト無し) は当該 head バッファ **1 行目の virt_lines_above** に集約: `⚠ N outdated (prompt 除外中)` + 本文一覧。head 窓が存在しないファイル (deleted・binary 告知窓) に紐づく outdated は panel winbar の末尾要素 `⚠N` (「窓装飾 (chrome)」参照) とプロンプト除外 INFO で可視化する
+- 位置を解けない outdated (= new 側に該当テキスト無し) は当該 head バッファ **1 行目の virt_lines_above** に集約: `N outdated (prompt 除外中)` (hl `ReviewCommentOutdated`) + 本文一覧。head 窓が存在しないファイル (deleted・binary 告知窓) に紐づく outdated は panel winbar の末尾要素 `⚠N` (「窓装飾 (chrome)」参照) とプロンプト除外 INFO で可視化する
 - 再描画は常に session.comments から捨てて再構成 (バッファ側に真実を置かない — 現行契約)
 
 **リフレッシュ (未コミット反映契約)**:
@@ -82,7 +83,7 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 
 **セッション開始時の初期開き**: 一覧先頭ファイルの open_file (focus は head 窓)。files が空の開通 (復元時に差分がまるごと消滅) は open_file の代わりに「変更なし」プレースホルダ scratch を base/head 窓へ張り、outdated 集約もそこへ出す (persistence-restore「差分がまるごと消滅」)。
 
-**窓装飾 (chrome)**: winbar 文字列 — head 窓 `base..<head> · path · +a -d · N comments`、base 窓 `base · path (git show)`、panel `base..head · N files · M comments [· filter=…] [· ⚠N]` (`⚠N` = 位置を解けず集約先 (head 窓) さえない outdated — deleted/binary 告知窓のファイル — の件数、0 件なら非表示)、commentlist `base..head · N comments [· ⚠M]` (`⚠M` = 一覧に表示中の outdated 総数 — panel の `⚠N`・head 窓 virt_text の `(⚠M)` とは別の数、0 件なら非表示)。機構: `'winbar'` は global-only option なので global 式 `%{get(w:,"review_winbar","")}` を 1 度だけ入れ、表示文字列は**窓変数 `w:review_winbar` のみ**に持つ (b: 変数は実ファイルバッファ経由でユーザー窓・他 tab の winbar に漏れるため使わない — 窓単位が正。ユーザーが既に winbar を設定している場合は上書きしない)。render 直後の handlers 側 `chrome.window()` 再適用と `config.number` の窓単位 off は現行契約そのまま。**review セッションが閉じたとき (`q` close / review tab 消滅) は自前式が入っている場合だけ global を空へ戻す** (`chrome.restore_global`、書込/復元は scope=global の API = `:set` の window-local 波及を避ける)。戻さないとユーザー窓が 2 窓以上のレイアウトで空のヘッダー行が残る (実測のユーザー報告)
+**窓装飾 (chrome)**: winbar 文字列 — head 窓 `base..<head> · path · +a -d · N comments`、base 窓 `base · path (git show)`、panel `base..head · N files · M comments [· filter=…] [· ⚠N]` (`⚠N` = 位置を解けず集約先 (head 窓) さえない outdated — deleted/binary 告知窓のファイル — の件数、0 件なら非表示)、commentlist `base..head · N comments [· ⚠M]` (`⚠M` = 一覧に表示中の outdated 総数 — panel の `⚠N` とは別の数、0 件なら非表示)。機構: `'winbar'` は global-only option なので global 式 `%{get(w:,"review_winbar","")}` を 1 度だけ入れ、表示文字列は**窓変数 `w:review_winbar` のみ**に持つ (b: 変数は実ファイルバッファ経由でユーザー窓・他 tab の winbar に漏れるため使わない — 窓単位が正。ユーザーが既に winbar を設定している場合は上書きしない)。render 直後の handlers 側 `chrome.window()` 再適用と `config.number` の窓単位 off は現行契約そのまま。**review セッションが閉じたとき (`q` close / review tab 消滅) は自前式が入っている場合だけ global を空へ戻す** (`chrome.restore_global`、書込/復元は scope=global の API = `:set` の window-local 波及を避ける)。戻さないとユーザー窓が 2 窓以上のレイアウトで空のヘッダー行が残る (実測のユーザー報告)
 
 **開始と既存セッションの継承**: 現行契約そのまま (同一 refs 組は継承 / 別 refs 組は save→close / 上書き開始なし — INV-1)。復元・開き直しも head 解決フローを毎回再評価する (session JSON の mode/base/head は変わらない)。
 

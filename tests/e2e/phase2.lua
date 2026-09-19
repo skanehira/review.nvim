@@ -61,18 +61,44 @@ local function run()
   end
   local virt = marks[1][4].virt_text and marks[1][4].virt_text[1] and marks[1][4].virt_text[1][1]
     or ''
-  -- 行下スレッド表示 (GitHub 風): eol は件数、本文は virt_lines 先頭行
+  -- 行下スレッド表示 (GitHub 風): eol は件数、本文は virt_lines 先頭行。
+  -- 本文は hl の異なる chunk に分割されうる (outdated の id 接頭辞と本文の分離
+  -- など) ため、全文連結で照合する。
+  local function chunk_text(chunk)
+    if type(chunk) == 'table' then
+      local inner = chunk[1]
+      return type(inner) == 'table' and inner[1] or inner
+    end
+    return chunk
+  end
+  local function line_text(chunks)
+    local parts = {}
+    for _, chunk in ipairs(chunks or {}) do
+      parts[#parts + 1] = chunk_text(chunk)
+    end
+    return table.concat(parts)
+  end
   if not virt:find('\u{EA6B}', 1, true) then
     fail('復元 extmark の件数表示が無い: ' .. virt)
   end
   local vlines = marks[1][4].virt_lines or {}
-  local first_line = vlines[1] and vlines[1][1] and vlines[1][1][1] or ''
+  local first_line = line_text(vlines[1])
   if not first_line:find('use a map here', 1, true) then
     fail('復元 extmark virt_lines 本文不一致: ' .. first_line)
   end
-  local all = virt .. first_line
-  if all:find('⚠', 1, true) ~= nil then
-    fail('anchor 検証で active のはずが outdated 表示: ' .. all)
+  local found_body = false
+  for _, line in ipairs(vlines) do
+    for _, chunk in ipairs(line) do
+      if chunk[2] == 'ReviewCommentOutdated' then
+        fail('anchor 検証で active のはずが outdated prefix: ' .. line_text(line))
+      end
+      if chunk[2] == 'ReviewCommentBody' then
+        found_body = true
+      end
+    end
+  end
+  if not found_body then
+    fail 'active コメント本文の ReviewCommentBody chunk が無い'
   end
 
   -- tree 既定: 行番号でなく entry 写像で行を引く。phase1 で x 付与した b.lua の

@@ -213,7 +213,7 @@ KEYMAPS						*review-keymaps*
 	<leader>b	file panel の表示トグル (閉じても tab とレビュー窓は残る)
 	<leader>c	コメント一覧 (横断) を開く (:Review comments と同じ。
 			既に開いていればその窓へ focus)
-	i		カーソル行のコメント全文を read-only 窓で閲覧
+	i		カーソル行のコメント全文を read-only 窓 (markdown) で閲覧
 			(編集は e)。q / <Esc> で閉じる
 
  file panel (変更ファイル一覧)			*review-keymaps-sidebar*
@@ -322,9 +322,10 @@ SESSION 状態と復旧				*review-sessions*
 			コメントを保持する
 
 outdated 認定 (差分の揺れで対象行を特定できないコメント) は head バッファで
- 解ける位置にあえば行末 `(コメントアイコン N (⚠M))` と gray スレッド、head 窓に解けない分は
- head バッファ 1 行目の行上に «⚠ N outdated (prompt 除外中)» として集約、窓の
- さえないファイル (削除/binary 告知) の分は file panel winbar 末尾の `⚠N` で示す
+ 解ける位置にあれば行末 `コメントアイコン N` と行下スレッド (outdated は id
+ 接頭辞が警告色、本文は通常色)、head 窓に解けない分は head バッファ 1 行目の
+ 行上に «N outdated (prompt 除外中)» として集約、窓のさえないファイル (削除/
+ binary 告知) の分は file panel winbar 末尾の `⚠N` で示す
  (:h review-display)。`:Review prompt` の既定出力からは除外される。本文は失わず
  closed 前の JSON に残るため、refs を戻せば再度 active として扱える場合がある。
 
@@ -348,19 +349,21 @@ outdated 認定 (差分の揺れで対象行を特定できないコメント) �
 		(INFO 通知済み)。
 
 	コメントは head 実バッファの extmark (対象行の下線 + 行末
-	`コメントアイコン N`、outdated 混在は `コメントアイコン N (⚠M)`、本文は
-	**行下スレッド** virt_lines に GitHub 風、
-	10 行で打ち切れ全文は `i` 窓)。スレッドはそのバッファを見る全窓に
+	`コメントアイコン N`。outdated 混在でも件数は変えず、outdated は行下
+	スレッドの id 接頭辞を警告色にする)、本文は **行下スレッド** virt_lines に
+	GitHub 風 (記号はそのまま)、10 行で打ち切れ全文は markdown filetype の
+	`i` 窓)。
+	スレッドはそのバッファを見る全窓に
 	見える (窓単位で抑える API が Neovim に無い実測。バッファ行を占有しない
 	ので行番号写像は不変)。位置を解けない outdated は その head バッファ
-	1 行目の行上に «⚠ N outdated (prompt 除外中)» + 本文一覧として集約、
+	1 行目の行上に «N outdated (prompt 除外中)» + 本文一覧として集約、
 	窓のさえないファイル (告知窓 / 差分から消えたファイル) の分は file panel
 	の winbar 末尾 `⚠N` に出す。
 
 ==============================================================================
 COMMENT INPUT					*review-comment-input*
 
-c/e で開くコメント入力 (float) の確定と閉じる操作:
+c/e で開くコメント入力 (float、filetype=markdown) の確定と閉じる操作:
 
 	<CR>		Normal で確定。insert 中はただの改行
 	q		Normal で閉じる。本文がなければキャンセル。

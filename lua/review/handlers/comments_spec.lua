@@ -240,12 +240,19 @@ describe('comments c (作成 / head バッファ恒等行)', function()
           end
           return chunk
         end
+        local function line_text(chunks)
+          local parts = {}
+          for _, chunk in ipairs(chunks or {}) do
+            parts[#parts + 1] = text_of(chunk)
+          end
+          return table.concat(parts)
+        end
         local vt = m[4].virt_text and text_of(m[4].virt_text[1]) or ''
         if type(vt) == 'string' and vt:find('\u{EA6B}', 1, true) ~= nil then
           found_cnt = true
         end
         for _, vl in ipairs(m[4].virt_lines or {}) do
-          local t = vl[1] and text_of(vl[1]) or nil
+          local t = line_text(vl)
           if type(t) == 'string' and t:find('inline thread', 1, true) ~= nil then
             found_body = true
           end
@@ -435,6 +442,7 @@ describe('comments y / i', function()
       { '[1] c1  a.lua:2', '  view me', '  second line' },
       vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     )
+    assert.equals('markdown', vim.bo[buf].filetype)
     assert.equals(0, #state.notifications)
   end)
 

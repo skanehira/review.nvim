@@ -216,7 +216,23 @@ local function run()
     )
   )
 
-  -- コメント行下スレッド (GitHub 風): eol に件数、virt_lines に本文 (同一 mark)
+  -- コメント行下スレッド (GitHub 風): eol に件数、virt_lines に本文 (同一 mark)。
+  -- 本文行は hl の異なる chunk に分割されうる (outdated の id 接頭辞と本文の分離
+  -- など) ため、全文連結で照合する。
+  local function chunk_text(chunk)
+    if type(chunk) == 'table' then
+      local inner = chunk[1]
+      return type(inner) == 'table' and inner[1] or inner
+    end
+    return chunk
+  end
+  local function line_text(chunks)
+    local parts = {}
+    for _, chunk in ipairs(chunks or {}) do
+      parts[#parts + 1] = chunk_text(chunk)
+    end
+    return table.concat(parts)
+  end
   local found_cnt, found_body = false, false
   for _, m in ipairs(vim.api.nvim_buf_get_extmarks(a_buf, ns, 0, -1, { details = true })) do
     local d = m[4] or {}
@@ -225,7 +241,7 @@ local function run()
       found_cnt = true
     end
     for _, vl in ipairs(d.virt_lines or {}) do
-      if vl[1] and vl[1][1] and vl[1][1]:find(body, 1, true) ~= nil then
+      if line_text(vl):find(body, 1, true) ~= nil then
         found_body = true
       end
     end

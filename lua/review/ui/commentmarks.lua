@@ -30,9 +30,10 @@ end
 -- 全文 float (i) へ逃がす行下スレッドの打ち切り行数 (現行契約踏襲)。
 local MAX_THREAD_LINES = 10
 
--- head バッファに解けない outdated を集約する mark の見出し文言。
-local OUTDATED_HEAD_FMT = ' ⚠ %d outdated (prompt 除外中)'
-local OUTDATED_HEAD_HL = 'Comment'
+-- 行末コメント表示と、head バッファに解けない outdated を集約する mark の hl。
+local OUTDATED_HEAD_FMT = ' %d outdated (prompt 除外中)'
+local COMMENT_HEAD_HL = 'ReviewPanelComment'
+local OUTDATED_HEAD_HL = 'ReviewCommentOutdated'
 
 -- 差分まるごと消滅 placeholder path (handlers/session NO_CHANGES と同一文字列)。
 -- この path では「解ける行が存在しない全 outdated」(file を問わない) を集約する。
@@ -80,20 +81,37 @@ function M.apply(session, bufnr, path)
     end
   end
 
-  -- 行下スレッド行の生成 (見出し行 + continuation)。outdated の本文行は
-  -- ReviewCommentOutdated で gray に寄せる (highlight.lua の命名)。
+  -- 行下スレッド行の生成 (見出し行 + continuation)。本文は常に
+  -- ReviewCommentBody。outdated の id 接頭辞だけ warning 色にする。
   local function thread_lines(c)
     local out = {}
-    local prefix = c.state == 'outdated' and ('⚠ [%s] '):format(c.id) or ('  [%s] '):format(c.id)
+    local prefix = ('  [%s] '):format(c.id)
     local pad = string.rep(' ', vim.fn.strchars(prefix))
-    local hl = c.state == 'outdated' and 'ReviewCommentOutdated' or 'ReviewCommentBody'
+    local prefix_hl = c.state == 'outdated' and 'ReviewCommentOutdated' or 'ReviewCommentBody'
+    local body_hl = 'ReviewCommentBody'
     local blines = vim.split(c.body, '\n', { plain = true })
     for i, bl in ipairs(blines) do
       if i > MAX_THREAD_LINES then
-        out[#out + 1] = { { pad .. '… (i で全文)', hl } }
+        -- 打ち切り導線: pad は本文色、文言のみ警告色 (id 接頭辞と同じ扱い)
+        if prefix_hl == body_hl then
+          out[#out + 1] = { { pad .. '… (i で全文)', body_hl } }
+        else
+          out[#out + 1] = { { pad, body_hl }, { '… (i で全文)', prefix_hl } }
+        end
         break
       end
-      out[#out + 1] = { { (i == 1 and prefix or pad) .. bl, hl } }
+      if i > 1 then
+        -- continuation の pad は本文色 (警告色は id 行の接頭辞のみ)
+        out[#out + 1] = { { pad .. bl, body_hl } }
+      elseif prefix_hl == body_hl then
+        out[#out + 1] = { { prefix .. bl, body_hl } }
+      else
+        local chunks = { { prefix, prefix_hl } }
+        if bl ~= '' then
+          chunks[#chunks + 1] = { bl, body_hl }
+        end
+        out[#out + 1] = chunks
+      end
     end
     return out
   end
@@ -112,19 +130,13 @@ function M.apply(session, bufnr, path)
     return acc
   end
 
-  -- 群毎に 1 extmark: 見出し virt_text (件数 / outdated 混在は (⚠M)) と
+  -- 群毎に 1 extmark: 見出し virt_text (件数) と
   -- 行下スレッド virt_lines を併合する。eol anchor (end_col 指定なし start col
   -- 対応) + right_gravity=true (boolean 指定) で編集時の行移动に自動追従。
   for _, row in ipairs(group_order) do
     local cs = groups[row]
-    local n_out = 0
-    for _, c in ipairs(cs) do
-      if c.state == 'outdated' then
-        n_out = n_out + 1
-      end
-    end
     -- nf-cod-comment (U+EA6B)。旧 💬 は廃止 (panel アイコンと同一グリフ)。
-    local text = (' \u{EA6B} %d'):format(#cs) .. (n_out > 0 and (' (⚠%d)'):format(n_out) or '')
+    local text = (' \u{EA6B} %d'):format(#cs)
     local underline_end = row
     for _, c in ipairs(cs) do
       local er = math.min(c.end_line or c.line, line_count)
@@ -136,7 +148,7 @@ function M.apply(session, bufnr, path)
       end_row = underline_end - 1,
       end_col = #vim.api.nvim_buf_get_lines(bufnr, underline_end - 1, underline_end, false)[1],
       hl_group = 'ReviewCommentLine',
-      virt_text = { { text, OUTDATED_HEAD_HL } },
+      virt_text = { { text, COMMENT_HEAD_HL } },
       virt_text_pos = 'eol',
       virt_lines = group_thread(cs),
       right_gravity = true,
@@ -144,7 +156,7 @@ function M.apply(session, bufnr, path)
   end
 
   -- 位置を解けない outdated の集約: 当該 head バッファ 1 行目の virt_lines_above
-  -- に「⚠ N outdated (prompt 除外中)」見出し行 + 本文一覧を並べる
+  -- に「N outdated (prompt 除外中)」見出し行 + 本文一覧を並べる
   -- (diff-review「コメント表示」)。見出しは eol virt_text にしない — 1 行目が
   -- 実ファイルの 1 行目なので編集で先頭に別行が足されると見出しがずれる。
   -- virt_lines_above はバッファ行に占有されず行写像も不変 (AGENTS 実測の教訓)。

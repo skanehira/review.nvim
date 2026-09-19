@@ -30,6 +30,7 @@ function M.open(opts)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = 'nofile'
   vim.bo[buf].bufhidden = 'wipe'
+  vim.bo[buf].filetype = 'markdown'
   vim.bo[buf].swapfile = false
 
   local lines = opts.value ~= nil and vim.split(opts.value, '\n', { plain = true }) or {}

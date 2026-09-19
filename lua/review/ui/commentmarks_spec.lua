@@ -10,6 +10,17 @@
 --     pin する (DESIGN「UI」横断規約。ユーザー窓にもスレッドは見える仕様)
 local commentmarks = require 'review.ui.commentmarks'
 
+-- virt_lines の 1 行は hl の異なる chunk に分割されうる (outdated の id 接頭辞と
+-- 本文の分離など)。表示文字列の契約は chunk 全体の連結で見る (chunk 数や分割位置は
+-- 実装細部)。
+local function line_text(chunks)
+  local out = {}
+  for _, chunk in ipairs(chunks or {}) do
+    out[#out + 1] = chunk[1]
+  end
+  return table.concat(out)
+end
+
 local function comment(over)
   local c = {
     id = 'c1',
@@ -85,13 +96,32 @@ describe('commentmarks.apply: 併合 extmark', function()
         vt:find('\u{EA6B}', 1, true) ~= nil,
         '件数 eol 表示が無い: ' .. tostring(vt)
       )
+      assert.equals('ReviewPanelComment', h[4].virt_text[1][2])
       local vl = h[4].virt_lines
       assert.is_true(#vl >= 1, '行下スレッド本文が無い')
-      assert.is_true(vl[1][1][1]:find('first thought', 1, true) ~= nil)
-      assert.is_true(
-        vl[1][1][1]:find('[c1]', 1, true) ~= nil,
-        'id 接頭辞が無い: ' .. vl[1][1][1]
+      local body = line_text(vl[1])
+      assert.is_true(body:find('first thought', 1, true) ~= nil)
+      assert.is_true(body:find('[c1]', 1, true) ~= nil, 'id 接頭辞が無い: ' .. body)
+    end
+  )
+
+  it(
+    'コメント本文は markdown 構文色を付けず、ReviewCommentBody の chunk で表示する',
+    function()
+      local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/md.lua')
+      commentmarks.apply(
+        session_of { comment { body = '**bold** and `code` 日本語' } },
+        buf,
+        'a.lua'
       )
+      local line = nil
+      for _, m in ipairs(marks(buf)) do
+        if m[4].virt_text ~= nil then
+          line = (m[4].virt_lines or {})[1]
+        end
+      end
+      assert.is_not_nil(line, '行下スレッド本文が無い')
+      assert.same({ { '  [c1] **bold** and `code` 日本語', 'ReviewCommentBody' } }, line)
     end
   )
 
@@ -152,7 +182,7 @@ describe('commentmarks.apply: 併合 extmark', function()
     end
   )
 
-  it('outdated 混在群の件数表示はコメントアイコン N (⚠M)', function()
+  it('outdated 混在群の件数表示はコメントアイコン N のみ', function()
     local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/e.lua')
     commentmarks.apply(
       session_of {
@@ -162,13 +192,13 @@ describe('commentmarks.apply: 併合 extmark', function()
       buf,
       'a.lua'
     )
-    local hit = false
+    local text = nil
     for _, m in ipairs(marks(buf)) do
-      if m[4].virt_text and m[4].virt_text[1][1]:find('(⚠1)', 1, true) then
-        hit = true
+      if m[4].virt_text then
+        text = m[4].virt_text[1][1]
       end
     end
-    assert.is_true(hit, '(⚠M) 集計表示が無い')
+    assert.equals(' \u{EA6B} 2', text)
   end)
 end)
 
@@ -201,7 +231,7 @@ describe('commentmarks.apply: outdated 集約', function()
       for _, chunk in ipairs(above[4].virt_lines[1] or {}) do
         text = text .. chunk[1]
       end
-      assert.equals(' ⚠ 2 outdated (prompt 除外中)', text)
+      assert.equals(' 2 outdated (prompt 除外中)', text)
     end
   )
 
@@ -224,7 +254,7 @@ describe('commentmarks.apply: outdated 集約', function()
     assert.is_not_nil(above, 'virt_lines_above の集約 mark が無い')
     assert.equals(0, above[2], '集約は 1 行目 (row 0)')
     -- 見出し行 = virt_lines[1]、本文 = その続く行 (1 extmark 併合のまま)
-    assert.equals(' ⚠ 2 outdated (prompt 除外中)', (above[4].virt_lines[1] or { {} })[1][1])
+    assert.equals(' 2 outdated (prompt 除外中)', (above[4].virt_lines[1] or { {} })[1][1])
     local joined = {}
     for i = 2, #(above[4].virt_lines or {}) do
       joined[#joined + 1] = above[4].virt_lines[i][1][1]
@@ -270,9 +300,9 @@ describe(
         commentmarks.apply(session_of { comment { body = table.concat(long, '\n') } }, buf, 'a.lua')
         local vl = head_virt_lines(buf)
         assert.equals(11, #vl, '10 行 + 導線 1 行で無い: ' .. tostring(#vl))
-        assert.equals('  [c1] line1', vl[1][1][1])
-        assert.equals('       line10', vl[10][1][1])
-        assert.equals('       … (i で全文)', vl[11][1][1])
+        assert.equals('  [c1] line1', line_text(vl[1]))
+        assert.equals('       line10', line_text(vl[10]))
+        assert.equals('       … (i で全文)', line_text(vl[11]))
       end
     )
 
@@ -282,12 +312,12 @@ describe(
         local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/cont.lua')
         commentmarks.apply(session_of { comment { body = 'first\nsecond' } }, buf, 'a.lua')
         local vl = head_virt_lines(buf)
-        assert.same({ '  [c1] first', '       second' }, { vl[1][1][1], vl[2][1][1] })
+        assert.same({ '  [c1] first', '       second' }, { line_text(vl[1]), line_text(vl[2]) })
       end
     )
 
     it(
-      'outdated でも行が可視なら本文先頭 ⚠ + ReviewCommentOutdated / 件数 (⚠M)',
+      'outdated でも行が可視なら ⚠ なしの id 接頭辞 + ReviewCommentBody 本文 / 件数は N のみ',
       function()
         local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/ov.lua')
         commentmarks.apply(
@@ -296,9 +326,50 @@ describe(
           'a.lua'
         )
         local vl, vt = head_virt_lines(buf)
-        assert.equals(' \u{EA6B} 1 (⚠1)', vt)
-        assert.equals('⚠ [c1] kept', vl[1][1][1])
-        assert.equals('ReviewCommentOutdated', vl[1][1][2])
+        assert.equals(' \u{EA6B} 1', vt)
+        assert.same(
+          { { '  [c1] ', 'ReviewCommentOutdated' }, { 'kept', 'ReviewCommentBody' } },
+          vl[1]
+        )
+      end
+    )
+
+    it(
+      'outdated の continuation 行は警告色を id 接頭辞に限定し、本文行は ReviewCommentBody で出す',
+      function()
+        local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/ov2.lua')
+        commentmarks.apply(
+          session_of { comment { state = 'outdated', body = 'first\nsecond' } },
+          buf,
+          'a.lua'
+        )
+        local vl = head_virt_lines(buf)
+        assert.same(
+          { { '  [c1] ', 'ReviewCommentOutdated' }, { 'first', 'ReviewCommentBody' } },
+          vl[1]
+        )
+        assert.same({ { '       second', 'ReviewCommentBody' } }, vl[2])
+      end
+    )
+
+    it(
+      'outdated の打ち切り導線は pad を本文色、文言のみ警告色にする',
+      function()
+        local long = {}
+        for i = 1, 13 do
+          long[#long + 1] = 'line' .. i
+        end
+        local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/ovtrunc.lua')
+        commentmarks.apply(
+          session_of { comment { state = 'outdated', body = table.concat(long, '\n') } },
+          buf,
+          'a.lua'
+        )
+        local vl = head_virt_lines(buf)
+        assert.same(
+          { { '       ', 'ReviewCommentBody' }, { '… (i で全文)', 'ReviewCommentOutdated' } },
+          vl[11]
+        )
       end
     )
 

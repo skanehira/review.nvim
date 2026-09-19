@@ -368,7 +368,7 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
         end
       end
       assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
-      assert.equals(' ⚠ 1 outdated (prompt 除外中)', above[4].virt_lines[1][1][1])
+      assert.equals(' 1 outdated (prompt 除外中)', above[4].virt_lines[1][1][1])
       assert.is_true(
         above[4].virt_lines[2][1][1]:find('[c1]', 1, true) ~= nil,
         vim.inspect(above[4].virt_lines)
@@ -446,7 +446,7 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
         end
       end
       assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
-      assert.equals(' ⚠ 2 outdated (prompt 除外中)', above[4].virt_lines[1][1][1])
+      assert.equals(' 2 outdated (prompt 除外中)', above[4].virt_lines[1][1][1])
       local bodies = {}
       for i = 2, #above[4].virt_lines do
         bodies[#bodies + 1] = above[4].virt_lines[i][1][1]

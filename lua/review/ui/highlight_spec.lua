@@ -11,12 +11,20 @@ describe('highlight.setup', function()
   it('既定では DESIGN.md「命名」の全グループが定義される', function()
     highlight.setup()
     assert.equals(true, vim.api.nvim_get_hl(0, { name = 'ReviewCommentLine' }).underline)
+    assert.equals(
+      'Normal',
+      vim.api.nvim_get_hl(0, { name = 'ReviewCommentBody', link = true }).link
+    )
     assert.equals('DiffAdd', vim.api.nvim_get_hl(0, { name = 'ReviewDiffAdd', link = true }).link)
     assert.equals(
       'DiffDelete',
       vim.api.nvim_get_hl(0, { name = 'ReviewDiffDelete', link = true }).link
     )
     assert.equals('diffLine', vim.api.nvim_get_hl(0, { name = 'ReviewDiffHunk', link = true }).link)
+    assert.equals(
+      'DiagnosticWarn',
+      vim.api.nvim_get_hl(0, { name = 'ReviewCommentOutdated', link = true }).link
+    )
     -- file panel の 4 グループ (DESIGN「命名」。旧 ReviewSidebar* は panel 側へ統合)
     assert.equals('Normal', vim.api.nvim_get_hl(0, { name = 'ReviewPanelFile', link = true }).link)
     assert.equals(

@@ -231,6 +231,11 @@ describe('input.open 表示契約', function()
     assert.equals(wins_here, tab_wins())
   end)
 
+  it('入力 float の buffer は markdown filetype', function()
+    open()
+    assert.equals('markdown', vim.bo[0].filetype)
+  end)
+
   it('窓 title に確定/閉じる的操作ヒントが表示される', function()
     open()
     local text = title_text()

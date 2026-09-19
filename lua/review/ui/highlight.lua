@@ -9,9 +9,9 @@ local M = {}
 -- 独立グループで下線を持つ (DESIGN.md「既知の制約」extmark と syntax の競合)。
 local DEFAULTS = {
   ReviewCommentLine = { underline = true },
-  -- eol の件数表示の下に出すスレッド本文行 (行下 virt_lines)。
+  -- eol の件数表示の下に出すスレッド本文行 (行下 virt_lines)。colorscheme 追従。
   ReviewCommentBody = { link = 'Normal' },
-  ReviewCommentOutdated = { link = 'Comment' },
+  ReviewCommentOutdated = { link = 'DiagnosticWarn' },
   ReviewDiffAdd = { link = 'DiffAdd' },
   ReviewDiffDelete = { link = 'DiffDelete' },
   ReviewDiffHunk = { link = 'diffLine' },

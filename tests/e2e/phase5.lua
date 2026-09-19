@@ -144,8 +144,22 @@ local function run()
   end
   local mk = vim.api.nvim_buf_get_extmarks(b_buf, ns, 0, -1, { details = true })[1]
   local vt = (mk and mk[4] and mk[4].virt_text and mk[4].virt_text[1] or { [1] = '' })[1] or ''
-  if vt:find('⚠', 1, true) ~= nil then
-    fail('outdated 0 のはずが extmark に ⚠ が出た: ' .. vt)
+  if not vt:find('\u{EA6B}', 1, true) then
+    fail('active extmark の件数表示が無い: ' .. vt)
+  end
+  local found_body = false
+  for _, line in ipairs((mk and mk[4] and mk[4].virt_lines) or {}) do
+    for _, chunk in ipairs(line) do
+      if chunk[2] == 'ReviewCommentOutdated' then
+        fail('outdated 0 のはずが outdated prefix: ' .. tostring(chunk[1]))
+      end
+      if chunk[2] == 'ReviewCommentBody' then
+        found_body = true
+      end
+    end
+  end
+  if not found_body then
+    fail 'active コメント本文の ReviewCommentBody chunk が無い'
   end
   print 'E2E-U1 anchor=active+corrected'
 
