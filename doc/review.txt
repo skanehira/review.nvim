@@ -102,7 +102,7 @@ SETUP						*review-setup*
 		panel_width = 35,          -- file panel (左窓) の幅
 		keymaps = {},              -- buffer-local キーマップ override
 		highlight = {},            -- グループ別 highlight override
-		winbar = true,           -- review 窓に winbar 情報 (既定 on)
+		winbar = true,           -- review 窓に winbar 情報 (review 外 tab は行を確保しない)
 		number = false,            -- review 窓の行番号 (既定 off、global は不変)
 	})
 <

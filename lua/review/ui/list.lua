@@ -23,6 +23,9 @@ vim.api.nvim_create_autocmd('BufUnload', {
     local meta = vim.b[ev.buf].review_meta or {}
     if meta.kind == 'sessionlist' then
       chrome.restore_global_if_unused()
+      -- セッション開中でも、現在 tab にバーの窓が無くなれば式を戻す (式が非空だと
+      -- 空評価でも 1 行確保される。review tab へ戻れば TabEnter が再適用する)。
+      chrome.sync_tab()
     end
   end,
 })
@@ -41,6 +44,8 @@ vim.api.nvim_create_autocmd('BufWinLeave', {
         vim.w[win].review_winbar = nil
       end
     end
+    -- 表示文字列を消した窓が現在 tab の最後のバーだったなら式も戻す
+    chrome.sync_tab()
   end,
 })
 

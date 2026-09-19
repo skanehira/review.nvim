@@ -21,7 +21,8 @@
 # 実ファイル窓) / scratch 縮退 (n -> 両窓 review:// scratch + INFO) / 縮退再開始
 # (継承時も再評価) / 復元時の head 解決再評価 (scratch <-> 実窓の切り替わりを
 # 跨プロセスで pin)。tabclose シナリオは :tabclose -> status=open 保存 + extmark
-# 残骸 0。
+# 残骸 0。tabswitch シナリオは review tab を離れると global winbar 式が戻り
+# (空ヘッダー行なし)、戻ると再適用されることを pin する。
 # E2E は clipboard provider 無しで走る (クリップボード非依存、"0 レジスタ比較のみ)。
 # phase6: 横断コメント一覧 (issue #31) — 2 ファイルにコメント -> <leader>c ->
 # 一覧 2 行 -> <CR> ジャンプ -> 一覧へ戻り d 二重押し -> 行消滅 + 実ディスク JSON 1 件
@@ -406,6 +407,25 @@ grep -q 'E2E-TB1 status=open extmarks=0 winbar=restored' "$OUTTB" || {
 }
 grep -q 'レビュー tab を閉じました (セッションは保存済み' "$WORK/tabclose.log" || {
   echo 'e2e: TabClosed の INFO 文言がログに出ない' >&2
+  exit 1
+}
+
+# (tab 切替) review tab -> 無関係な user tab で global winbar 式を戻す (式が非空だと
+# 空評価でも窓に 1 行確保される)。主 fixture の main..feature / feature checkout を
+# 使い、データ dir は専有する。
+OUTSW=$(mktemp "$WORK/tabswitch.out.XXXXXX")
+mkdir -p "$WORK/d-tabswitch"
+: >"$WORK/tabswitch.log"
+if ! ( cd "$REPO" && env XDG_DATA_HOME="$WORK/d-tabswitch" REVIEW_E2E_LOG="$WORK/tabswitch.log" \
+    nvim --headless --noplugin -u "$REPO_ROOT/tests/e2e_init.lua" \
+    -c "luafile $REPO_ROOT/tests/e2e/tabswitch.lua" ) >"$OUTSW" 2>&1; then
+  cat "$OUTSW" >&2
+  echo "e2e: tab 切替シナリオ失敗" >&2
+  exit 1
+fi
+cat "$OUTSW" | tee -a "$WORK/e2e-report.txt"
+grep -q 'E2E-TSW1 away=cleared back=restored vars=kept' "$OUTSW" || {
+  echo 'e2e: review 外 tab で winbar 式が戻らない / 戻ると再適用されない' >&2
   exit 1
 }
 

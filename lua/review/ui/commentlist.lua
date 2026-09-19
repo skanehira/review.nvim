@@ -8,6 +8,7 @@
 -- 作る側の責務 (呼び出し側が { collapsed = {}, mode = 'tree' } を明示する)。
 -- 真実は常に session.comments: render はバッファを全面置換し、buffer 側に写像を
 -- 持たない (filepanel と同じ契約)。
+local chrome = require 'review.ui.chrome'
 local config = require 'review.config'
 
 local M = {}
@@ -36,6 +37,8 @@ vim.api.nvim_create_autocmd('BufWinLeave', {
         vim.w[win].review_winbar = nil
       end
     end
+    -- 表示文字列を消した窓が現在 tab の最後のバーだったなら式も戻す
+    chrome.sync_tab()
   end,
 })
 

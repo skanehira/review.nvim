@@ -118,7 +118,8 @@ setup は冪等にしたい
 
 PR セッションは head の worktree で動くため `@` パスは worktree 内の絶対パスになり、エージェントはその場で実ファイルを読める (レビュー中の diff と完全に同一の内容)。ブランチセッションは現在のチェックアウトが対象なので `@` パスはリポジトリ相対で、レビュー中の作業ツリー (保存済み内容) の実ファイルそのものを指す。outdated 認定されたコメント (差分の揺れで位置が特定できないもの) は既定で除外され、diff 上はスレッド id 接頭辞 (`[c1]`) が警告色で表示されることで判別できる (`⚠` グリフや本文のグレーアウトはしない)。本文は対象行の下に全文スレッドで表示され (GitHub の Files changed と同じ向き)、短いスレッドは 10 行で折りたたまれ、全文は markdown filetype の `i` 閲覧窓に出る。
 review 窓では既定で行番号を隠し、winbar に `base..head · path · +a -d · N comments` を
-表示する (GitHub Files changed 風。`setup` の `winbar` / `number` で戻せる)。
+表示する (GitHub Files changed 風。`setup` の `winbar` / `number` で戻せる)。表示は
+review バーの窓がある tab に限られ、他の tab では winbar の行は確保されない。
 
 ## ドキュメント
 

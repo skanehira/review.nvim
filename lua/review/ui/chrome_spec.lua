@@ -122,6 +122,88 @@ describe('ui/chrome winbar グローバル式', function()
   )
 end)
 
+-- winbar は式が空評価でも窓に 1 行を確保する (実 PTY 実測: w:review_winbar が
+-- 無い窓でも式が入っていると winheight が 1 減る)。review 外 tab に空ヘッダー行を
+-- 残さないため、global 式は「現在の tab に w:review_winbar を持つ窓がある間」だけ
+-- 入れる (TabEnter で判定。窓変数は保持し、戻ると再適用する)。
+describe('ui/chrome tab 追従 (review 外 tab の空ヘッダー行)', function()
+  local original_tab
+  local global_before
+
+  before_each(function()
+    config.reset()
+    global_before = vim.api.nvim_get_option_value('winbar', { scope = 'global' })
+    vim.api.nvim_set_option_value('winbar', '', { scope = 'global' })
+    original_tab = vim.api.nvim_get_current_tabpage()
+  end)
+  after_each(function()
+    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+      if tab ~= original_tab then
+        vim.api.nvim_set_current_tabpage(tab)
+        pcall(vim.cmd, 'tabclose!')
+      end
+    end
+    if vim.api.nvim_tabpage_is_valid(original_tab) then
+      vim.api.nvim_set_current_tabpage(original_tab)
+    end
+    vim.api.nvim_set_option_value('winbar', global_before, { scope = 'global' })
+    config.reset()
+  end)
+
+  it(
+    'バーの窓の無い tab へ移ると式を空へ戻し、窓変数は保持する (戻ると再適用)',
+    function()
+      local w = vim.api.nvim_get_current_win()
+      chrome.window(w)
+      chrome.winbar(w, 'main..feature · a.lua')
+      assert.equals(PLUGIN_WINBAR, vim.o.winbar)
+
+      vim.cmd 'tabnew'
+      assert.equals('', vim.api.nvim_get_option_value('winbar', { scope = 'global' }))
+      assert.equals('main..feature · a.lua', vim.w[w].review_winbar)
+
+      vim.cmd 'tabprevious'
+      assert.equals(PLUGIN_WINBAR, vim.o.winbar)
+    end
+  )
+
+  it(
+    'tab 内にバーの窓が 1 つでもあれば式を入れる (全窓がバーとは限らない)',
+    function()
+      local w = vim.api.nvim_get_current_win()
+      chrome.window(w)
+      chrome.winbar(w, 'main..feature · a.lua')
+      vim.cmd 'split'
+
+      vim.cmd 'tabnew'
+      assert.equals('', vim.api.nvim_get_option_value('winbar', { scope = 'global' }))
+      vim.cmd 'tabprevious'
+
+      assert.equals(PLUGIN_WINBAR, vim.o.winbar)
+    end
+  )
+
+  it('ユーザー定義 winbar は tab 切替でも触らない', function()
+    vim.api.nvim_set_option_value('winbar', '%f my own', { scope = 'global' })
+    vim.cmd 'tabnew'
+    assert.equals('%f my own', vim.o.winbar)
+    vim.cmd 'tabprevious'
+    assert.equals('%f my own', vim.o.winbar)
+  end)
+
+  it('config.winbar=false では式を入れない', function()
+    config.setup { winbar = false }
+    local w = vim.api.nvim_get_current_win()
+    chrome.window(w)
+    chrome.winbar(w, 'main..feature · a.lua')
+    assert.equals('', vim.o.winbar)
+    vim.cmd 'tabnew'
+    assert.equals('', vim.o.winbar)
+    vim.cmd 'tabprevious'
+    assert.equals('', vim.o.winbar)
+  end)
+end)
+
 describe('ui/chrome number', function()
   local tab
   before_each(function()

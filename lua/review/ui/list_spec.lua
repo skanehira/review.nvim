@@ -149,7 +149,9 @@ end)
 -- `:Review list` は review tab 外 (current tab の vsplit) に開くため、一覧窓の閉鎖は
 -- tab 消滅経路 (windows.close / TabClosed) に乗らない。バッファが閉じた時点で
 -- review セッションが無ければ global winbar 式と窓変数を戻す (diff-review
--- 「窓装飾 (chrome)」)。セッション開中は維持する (review tab の chrome が使う)。
+-- 「窓装飾 (chrome)」)。セッション開中でも現在の tab に w:review_winbar の窓が
+-- 無ければ式を戻す (式が空評価でも 1 行確保されるため。review tab へ戻ると
+-- TabEnter が再適用する)。
 describe('sessionlist の winbar 後片付け', function()
   local PLUGIN_WINBAR = '%{get(w:,"review_winbar","")}'
   local env = {}
@@ -201,13 +203,35 @@ describe('sessionlist の winbar 後片付け', function()
   )
 
   it(
-    'review セッションが開いている間は一覧窓を閉じても式を維持する',
+    'review セッションが開中でも現在 tab にバーの窓が無ければ一覧窓の閉鎖で式を戻す',
+    function()
+      -- review tab 外 (ユーザー tab) の一覧窓が閉じたあと、現在 tab (review tab) に
+      -- w:review_winbar の窓が無ければ式は不要 (戻ったとき TabEnter が再適用する)。
+      vim.cmd 'vsplit'
+      local w = vim.api.nvim_get_current_win()
+      chrome.window(w)
+      windows.open {}
+      assert.is_not_nil(windows.state())
+      local buf = list.render_sessionlist { session_stub {} }
+      vim.api.nvim_win_set_buf(w, buf)
+      chrome.winbar(w, list.sessionlist_winbar { session_stub {} })
+
+      vim.api.nvim_win_close(w, true)
+
+      assert.equals('', vim.api.nvim_get_option_value('winbar', { scope = 'global' }))
+    end
+  )
+
+  it(
+    'review セッション開中で現在 tab にバーの窓があれば一覧窓を閉じても式を維持する',
     function()
       vim.cmd 'vsplit'
       local w = vim.api.nvim_get_current_win()
       chrome.window(w)
       windows.open {}
       assert.is_not_nil(windows.state())
+      -- review tab 側の chrome 適用済み状態 (現在 tab にバーの窓がある)
+      chrome.winbar(windows.win 'head', 'main..feature · a.lua')
       local buf = list.render_sessionlist { session_stub {} }
       vim.api.nvim_win_set_buf(w, buf)
       chrome.winbar(w, list.sessionlist_winbar { session_stub {} })

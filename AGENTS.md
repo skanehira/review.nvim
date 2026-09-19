@@ -77,6 +77,11 @@ vsplit すると新窓が sidebar buf を継承して drift 誤検出 → **先�
   フラットは "expected Array, got String" になる — 実測の教訓)
 - コメント削除 `d`・破棄 `q` は arming 二重押し (同じ対象・同じ行・2 秒内)。
   `dd` で複数消えないことが契約
+- global winbar 式 (`ui/chrome.lua`) は**現在の tab に `w:review_winbar` の窓が
+  ある間だけ**入れる (TabEnter の `sync_tab`)。式が非空だと空評価でも全窓に 1 行
+  確保され、review 外 tab に空ヘッダー行が残る (実 PTY 実測: 式あり h=17 /
+  なし h=18)。式を入れる側 (`chrome.window` の現在 tab ガード) と一覧窓の閉鎖
+  (`list` / `commentlist` の BufWinLeave / BufUnload) の両方の判定が要る
 - headless テストでは `cmdheight` の関係で notify が hit-enter を起こし、後続キーが
   呑まれる。打鍵検証では `<CR>` を挟んで開放する
 
