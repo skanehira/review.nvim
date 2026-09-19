@@ -466,7 +466,8 @@ describe('filepanel キー割り当て', function()
       local found = false
       for _, l in ipairs(flines) do
         if
-          l == '- **<CR>** そのファイルを head/base 窓に開く (dir 行では折り畳み)'
+          l
+          == '- **<CR>** そのファイルを head/base 窓に開く (カーソルは file panel に残る。dir 行では折り畳み)'
         then
           found = true
         end

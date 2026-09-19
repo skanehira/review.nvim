@@ -90,7 +90,7 @@ describe('help.open', function()
     assert.is_true(
       has_line(
         lines,
-        '- **<CR>** そのファイルを head/base 窓に開く (dir 行では折り畳み)'
+        '- **<CR>** そのファイルを head/base 窓に開く (カーソルは file panel に残る。dir 行では折り畳み)'
       )
     )
     assert.is_true(has_line(lines, '- **o** <CR> と同じ (file panel の o = entry を開く)'))

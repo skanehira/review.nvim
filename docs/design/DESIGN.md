@@ -1,4 +1,5 @@
 <!-- product-mode: cli -->
+<!-- 変更履歴 [2026-09-18]: file panel <CR>/o/l の focus を panel 維持へ変更 (diff 窓へは移動系と標準の窓移動で移る) -->
 <!-- 変更履歴 [2026-09-17]: コメント一覧 (横断) 機能の追加 + focus_panel/toggle_panel の同期 mapping + 確認プロンプト vim.ui.input 復帰 + コメントアイコン nf-cod-comment -->
 <!-- 変更履歴 [2026-09-12]: 2 窓窓 diff + head 実ファイル + branch mode worktree 撤廃 + file panel ツリー + diffview 風キー + PoC 結果反映 -->
 # review.nvim 設計書
@@ -144,7 +145,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | head/base 窓 | `R` | 差分再取得 (`git diff` 引数形は head 解決に一致 — 通常 `<base>` / 縮退 `<base> <head>`) → 再パース → anchor 検証 → ±カウント・スレッド・panel 更新 → :diffupdate |
 | head/base 窓 | `q` | `:Review close` 相当 (コメントありなら確認プロンプト。tab を閉じる。実ファイルバッファとユーザー窓には触れない) |
 | head/base 窓 | `<F1>` / `g?` | help float (内容は markdown。`g?` は config を持たない固定の別名で `<F1>` と同一呼び出し) |
-| file panel | `<CR>` / `o` / `l` | カーソル entry を開く (ファイル = 実ファイル窓に張って focus、dir = fold トグル)。file panel 上の `o` は «開く» (旧 diff 窓の `o` = 実ファイル別 tab は 2026-09 削除 — head 窓が実ファイルそのもののため) |
+| file panel | `<CR>` / `o` / `l` | カーソル entry を開く (ファイル = 実ファイル窓に張るが focus とカーソルは file panel に維持、dir = fold トグル)。file panel 上の `o` は «開く» (旧 diff 窓の `o` = 実ファイル別 tab は 2026-09 削除 — head 窓が実ファイルそのもののため) |
 | file panel | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (開いて focus は diff 窓と同一動作) |
 | file panel | `i` | list 表示 (フルパス 1 行) と tree 表示の切替 (view state。session JSON に載せない) |
 | file panel | `x` | レビュー完了マーク `[✓]` 切替 (open では付かない) |
@@ -161,7 +162,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | sessionlist | `q` | 一覧バッファを閉じる (セッション状態は変えない) |
 
 - fold 操作 (`za` / `zo` / `zc` / `zR` / `zM`) と panel の `j`/`k` 移動はマップせず標準挙動に任せる
-- 移動系で「ファイルを開く」経路はすべて同一処理 `open_file(path)` (head 窓に実ファイル張付・base 窓に scratch 張付・panel 再描画 = 永続状態は変えない) を呼ぶ。コメント一覧の `<CR>` ジャンプは移動行を伴う `open_file(path, {line})` (comment-list「ジャンプ」)
+- 移動系で「ファイルを開く」経路はすべて同一処理 `open_file(path)` (head 窓に実ファイル張付・base 窓に scratch 張付・panel 再描画 = 永続状態は変えない) を呼ぶ。コメント一覧の `<CR>` ジャンプは移動行を伴う `open_file(path, {line})` (comment-list「ジャンプ」)。例外は file panel の `<CR>` / `o` / `l` で、`open_file` 後に panel へ focus を戻す (カーソルは開いたファイル行のまま)
 
 ## 横断規約
 

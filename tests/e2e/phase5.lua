@@ -93,6 +93,8 @@ local function run()
     local hb = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(head_win))
     return hb:sub(-#'b.lua') == 'b.lua'
   end, 'panel <CR> で b.lua head 窓')
+  -- panel <CR>/o/l は focus を panel に維持する (現行契約) — 打鍵は head 窓で行う。
+  vim.api.nvim_set_current_win(head_win)
 
   -- head 窓 2 行目 (second line) で c -> コメント作成 (INV-4: CRUD 直後保存)。
   -- 打鍵契約は phase1 と同一 (:normal のみ安定。本文 -> <Esc> -> Normal <CR> 確定)。

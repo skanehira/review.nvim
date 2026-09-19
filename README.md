@@ -78,7 +78,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 | レビュー窓          | `<leader>b`                       | file panel 表示トグル                |
 | レビュー窓          | `<leader>c`                       | コメント一覧 (横断) を開く           |
 | レビュー窓          | `i`                               | カーソル行のコメント全文を閲覧        |
-| file panel          | `<CR>` / `o` / `l`              | entry を開く (ファイル行 = head/base に開く、dir 行 = 折り畳み) |
+| file panel          | `<CR>` / `o` / `l`              | entry を開く (ファイル行 = head/base に開く・カーソルは file panel に残る、dir 行 = 折り畳み) |
 | file panel          | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (レビュー窓と同じ動作) |
 | file panel          | `R`                               | 差分を再取得 (レビュー窓と同じ)      |
 | file panel          | `i`                               | list (フルパス 1 行) ⇄ tree 表示切替 |
@@ -96,7 +96,7 @@ require('review').setup({ keymaps = { diff = { add_comment = 'gc' } } })
 
 head/base の 2 窓は Neovim 標準の窓 diff (`foldmethod=diff`) で、変更行は `DiffAdd` / `DiffDelete` 系の標準 highlight で色分けされます。hunk 間は `[c` / `]c` (標準)、fold は `za` / `zo` / `zR` (標準) で、レビュー側からのキーマップはありません。ファイル間は `<Tab>` / `<S-Tab>` (次 / 前) と `[F` / `]F` (最初 / 最後)、変更一覧への focus は `<leader>e`、一覧のトグルは `<leader>b`、差分の再取得は `R` です (diffview に近い導線)。
 
-file panel は既定でフォルダツリー表示です。単一 child の dir 連鎖は `a/b/c/` と連結され、dir 行の status は配下の集約 (全部同一記号ならそのまま、混在は `*`)。`<CR>` / `o` / `l` を dir 行で押すと折り畳み、ファイル行で押すと開きます。フラットなフルパス一覧が見たければ `i` で list 表示へ切替 (絞り込み・折り畳みと並ぶ view state で、セッションには保存されません)。ファイルを移動で開くと panel のカーソルがその行に追従し、選択行がハイライトされます (相互ハイライト)。nvim-web-devicons が入っていればファイルアイコンが自動で出ます (無くてもテキスト表示のまま。ランタイム依存にはなりません)。
+file panel は既定でフォルダツリー表示です。単一 child の dir 連鎖は `a/b/c/` と連結され、dir 行の status は配下の集約 (全部同一記号ならそのまま、混在は `*`)。`<CR>` / `o` / `l` を dir 行で押すと折り畳み、ファイル行で押すと head/base 窓に開きます。開いてもカーソルと focus は file panel に残るので、一覧を辿りながら diff を見比べられます (diff 窓へ移るのは `<Tab>` / `<S-Tab>` / `[F` / `]F` の移動キーと、標準の `<C-w>l` / `<C-w>w`)。フラットなフルパス一覧が見たければ `i` で list 表示へ切替 (絞り込み・折り畳みと並ぶ view state で、セッションには保存されません)。ファイルを移動で開くと panel のカーソルがその行に追従し、選択行がハイライトされます (相互ハイライト)。nvim-web-devicons が入っていればファイルアイコンが自動で出ます (無くてもテキスト表示のまま。ランタイム依存にはなりません)。
 
 `<leader>c` (または `:Review comments`) でセッションの全コメントをファイル横断の一覧として開きます。1 行 = 1 コメントで `path:line [id] 本文 1 行目` (60 文字を超える本文は `…`、outdated は末尾に `⚠ outdated`)。並びは file panel と同じツリー表示順で、折り畳み・list 表示は反映せず、絞り込み `/` は反映します。`<CR>` でそのコメント位置へジャンプ (実ファイルまたは縮退 head を開いて記録行へ移動。outdated は INFO、binary/削除の告知表示・現在の差分に無いファイルは WARN)、`q` で閉じます。既に開いていれば再分割せずその窓へ focus し、内容は最新に更新されます。
 

@@ -1595,9 +1595,11 @@ end
 -- panel 操作と移動系 (c/e/d/y/i/o/q/R の導線は ui/keygate 経由)
 -- ============================================================================
 
---- panel <CR>: 一覧のそのファイルを open_file (移動系と同一処理)。focus は
---- windows.bind が head 窓へ送る (sidebar に残ったままだと以降の c/e が
---- 一覧側に効かず無反応に見える — UX review F12)。
+--- panel <CR>/o/l: 一覧のそのファイルを open_file で diff 窓へ張る。focus と
+--- カーソルは file panel に維持する (Enter で一覧から動かない契約。bind は head 窓へ
+--- focus を送るため開通後に panel へ戻す)。diff 窓へ移るのは移動系 (<Tab> 等) と
+--- 標準の窓移動 (<C-w>l 等) の役割 — UX review F12 の «c/e が効く位置から開始» は
+--- セッション開始時 focus の契約として残る。
 function M.open_selected_file()
   if active == nil then
     notify_warn 'アクティブなセッションがありません'
@@ -1620,6 +1622,9 @@ function M.open_selected_file()
     return
   end
   M.open_file(entry.path)
+  -- open_file の bind が head 窓へ focus を送る。開通後に panel へ戻す (panel が
+  -- 閉じられていたら focus_sidebar が再建して focus する)。
+  M.focus_sidebar()
 end
 
 --- コメント CRUD 直後の再永続化 + 表示更新 (INV-4、diff-review「コメント表示」

@@ -46,7 +46,10 @@ local SECTIONS = {
     title = 'file panel (変更ファイル一覧)',
     keymap = 'sidebar',
     rows = {
-      { 'open_diff', 'そのファイルを head/base 窓に開く (dir 行では折り畳み)' },
+      {
+        'open_diff',
+        'そのファイルを head/base 窓に開く (カーソルは file panel に残る。dir 行では折り畳み)',
+      },
       { 'open_file', '<CR> と同じ (file panel の o = entry を開く)' },
       { 'open_entry', '<CR> と同じ (entry を開く)' },
       -- 移動系・refresh の文案は doc/review.txt sidebar 節と同文。diff 節と同一文に

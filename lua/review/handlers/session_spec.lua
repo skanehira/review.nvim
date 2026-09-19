@@ -1724,15 +1724,19 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
   )
 
   it(
-    '<CR> は focus を head 窓へ送る (panel に残らない。以降の c/e が効く)',
+    '<CR> は focus を panel に維持し、diff 窓と一覧カーソルを開いたファイル行へ揃える',
     function()
       start_done('main', 'feature')
       focus_panel_file 'b.lua'
-      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
 
       session_handler.open_selected_file()
 
-      assert.equals(ui_windows.win 'head', vim.api.nvim_get_current_win())
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+      assert.equals(state.repo .. '/b.lua', head_buf_name())
+      assert.equals(
+        panel_row_for('file', 'b.lua'),
+        vim.api.nvim_win_get_cursor(ui_windows.win 'panel')[1]
+      )
     end
   )
 

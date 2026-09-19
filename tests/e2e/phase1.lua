@@ -2,7 +2,7 @@
 -- :Review start main feature -> 専有 tab 3 窓 (panel│base│head) + tcd==repo +
 -- head 窓は実ファイル (a.lua 実パス・編集可) -> head 窓で c キー (keygate 実経路)
 -- -> 実ファイルへの extmark (件数 eol + 行下スレッド) と w:review_winbar ->
--- panel <CR> で b.lua へ (追加ファイル: base=null scratch, focus は head) ->
+-- panel <CR> で b.lua へ (追加ファイル: base=null scratch, focus は panel 維持) ->
 -- head 窓が実ファイル (編集可) -> <S-Tab>/]F/[F/i/<leader>e の
 -- 窓移動 (最終キー表 #18) -> panel l で entry 開く -> 視覚選択で range コメント ->
 -- y で "0 -> :Review prompt 全文一致 -> 正常終了 (status=open)。
@@ -256,14 +256,15 @@ local function run()
   end
   print 'E2E-T1 thread=eol+virtlines'
 
-  -- panel <CR> で 2 ファイル目 (b.lua) へ (open だけではマークは付かない + focus は head)
+  -- panel <CR> で 2 ファイル目 (b.lua) へ (open だけではマークは付かない + focus は panel 維持)
   vim.api.nvim_set_current_win(panel_win)
   vim.api.nvim_win_set_cursor(panel_win, { panel_row('file', 'b.lua'), 0 })
   local cr = vim.api.nvim_replace_termcodes('<CR>', true, false, true)
   vim.cmd('normal ' .. cr)
   wait_for(function()
-    return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'b.lua'))
-  end, 'b.lua head 実ファイル + focus head')
+    return win_buf_name(windows.win 'head') == realpath(vim.fs.joinpath(top, 'b.lua'))
+      and windows.role_of(vim.api.nvim_get_current_win()) == 'panel'
+  end, 'b.lua head 実ファイル + focus panel 維持')
   -- 変更ファイルの base 窓 = review://base scratch に git show main:b.lua。
   -- (追加 A の null scratch / 削除・binary 告知の張り分けは session_spec が unit pin)
   local b_base_buf = vim.api.nvim_win_get_buf(windows.win 'base')
@@ -284,8 +285,16 @@ local function run()
   -- 別 tab に実ファイルを開く o 導線は削除された (2026-09。導線の二重化を解消)。
   local b_real = realpath(vim.fs.joinpath(top, 'b.lua'))
   expect(
-    win_buf_name(vim.api.nvim_get_current_win()) == b_real,
-    '<CR> 後の focus が b.lua の head 窓でない'
+    win_buf_name(windows.win 'head') == b_real,
+    '<CR> 後の b.lua head 窓が実ファイルでない'
+  )
+  expect(
+    windows.role_of(vim.api.nvim_get_current_win()) == 'panel',
+    '<CR> 後の focus が panel から動いている'
+  )
+  expect(
+    vim.api.nvim_win_get_cursor(panel_win)[1] == panel_row('file', 'b.lua'),
+    '<CR> 後の panel カーソルが開いたファイル行でない'
   )
   local fbuf = vim.fn.bufnr(b_real)
   local b_lines = vim.api.nvim_buf_get_lines(fbuf, 0, -1, false)
@@ -371,13 +380,16 @@ local function run()
   -- 期待値は docs/design/features/ai-prompt.md の書式から手で書いた正本
   -- (生成 code を呼ばない = 循環検証回避)。b.lua 恒等行: 1 / 2 行とも new 側。
   -- panel の `l` (<CR>/o/l = entry を開く #18) で b.lua を開く経路を使う。
+  -- panel <CR>/o/l は focus を panel に維持するので、打鍵は head 窓へ移ってから行う。
   vim.api.nvim_set_current_win(windows.win 'panel')
   vim.api.nvim_win_set_cursor(windows.win 'panel', { panel_row('file', 'b.lua'), 0 })
   vim.cmd 'normal l'
   wait_for(function()
-    return win_buf_name(vim.api.nvim_get_current_win()) == b_real
-  end, 'b.lua head 実ファイル (range 用)')
-  local b_win = vim.api.nvim_get_current_win()
+    return win_buf_name(windows.win 'head') == b_real
+      and windows.role_of(vim.api.nvim_get_current_win()) == 'panel'
+  end, 'l で b.lua head 張替 + focus panel 維持 (range 用)')
+  local b_win = windows.win 'head'
+  vim.api.nvim_set_current_win(b_win)
   vim.api.nvim_win_set_cursor(b_win, { 1, 0 })
   vim.cmd 'normal Vj'
   vim.cmd 'normal c'

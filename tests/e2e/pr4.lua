@@ -49,6 +49,8 @@ vim.defer_fn(function()
     wait_for(function()
       return vim.fn.bufexists(fname) == 1
     end, 'worktree file open')
+    -- panel <CR>/o/l は focus を panel に維持する (現行契約) — 編集と保存は head 窓で打つ。
+    vim.api.nvim_set_current_win(require('review.ui.windows').win 'head')
     local wbuf = vim.fn.bufnr(fname)
     local lines = vim.api.nvim_buf_get_lines(wbuf, 0, -1, false)
     lines[#lines + 1] = 'user edit for ai input'
