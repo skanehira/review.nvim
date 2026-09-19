@@ -2,6 +2,8 @@
 -- list」。file panel は ui/filepanel / ui/treelist が持つ)。行フォーマットと
 -- row->データ 引き渡し、repo 消失の grey 表示を検証する。
 local list = require 'review.ui.list'
+local chrome = require 'review.ui.chrome'
+local windows = require 'review.ui.windows'
 
 local function session_stub(overrides)
   local s = {
@@ -142,4 +144,92 @@ describe('list.render_sessionlist', function()
       )
     end
   end)
+end)
+
+-- `:Review list` は review tab 外 (current tab の vsplit) に開くため、一覧窓の閉鎖は
+-- tab 消滅経路 (windows.close / TabClosed) に乗らない。バッファが閉じた時点で
+-- review セッションが無ければ global winbar 式と窓変数を戻す (diff-review
+-- 「窓装飾 (chrome)」)。セッション開中は維持する (review tab の chrome が使う)。
+describe('sessionlist の winbar 後片付け', function()
+  local PLUGIN_WINBAR = '%{get(w:,"review_winbar","")}'
+  local env = {}
+
+  before_each(function()
+    env.global = vim.api.nvim_get_option_value('winbar', { scope = 'global' })
+    vim.api.nvim_set_option_value('winbar', '', { scope = 'global' })
+    vim.cmd 'tabnew'
+    env.tab = vim.api.nvim_get_current_tabpage()
+  end)
+  after_each(function()
+    if windows.state() ~= nil then
+      windows.close()
+    end
+    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+      if vim.api.nvim_tabpage_is_valid(tab) and tab ~= env.tab then
+        vim.api.nvim_set_current_tabpage(tab)
+        pcall(vim.cmd, 'tabclose!')
+      end
+    end
+    if vim.api.nvim_tabpage_is_valid(env.tab) then
+      vim.api.nvim_set_current_tabpage(env.tab)
+      pcall(vim.cmd, 'tabclose!')
+    end
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
+    end
+    vim.api.nvim_set_option_value('winbar', env.global, { scope = 'global' })
+    windows.reset()
+  end)
+
+  it(
+    'review セッションが無いとき、一覧窓を閉じると global 式を空へ戻す',
+    function()
+      vim.cmd 'vsplit'
+      local w = vim.api.nvim_get_current_win()
+      chrome.window(w)
+      assert.equals(PLUGIN_WINBAR, vim.api.nvim_get_option_value('winbar', { scope = 'global' }))
+      local buf = list.render_sessionlist { session_stub {} }
+      vim.api.nvim_win_set_buf(w, buf)
+      chrome.winbar(w, list.sessionlist_winbar { session_stub {} })
+
+      vim.api.nvim_win_close(w, true)
+
+      assert.equals('', vim.api.nvim_get_option_value('winbar', { scope = 'global' }))
+    end
+  )
+
+  it(
+    'review セッションが開いている間は一覧窓を閉じても式を維持する',
+    function()
+      vim.cmd 'vsplit'
+      local w = vim.api.nvim_get_current_win()
+      chrome.window(w)
+      windows.open {}
+      assert.is_not_nil(windows.state())
+      local buf = list.render_sessionlist { session_stub {} }
+      vim.api.nvim_win_set_buf(w, buf)
+      chrome.winbar(w, list.sessionlist_winbar { session_stub {} })
+
+      vim.api.nvim_win_close(w, true)
+
+      assert.equals(PLUGIN_WINBAR, vim.api.nvim_get_option_value('winbar', { scope = 'global' }))
+    end
+  )
+
+  it(
+    '一覧 buffer を :buffer で差し替えると窓の review_winbar を残さない',
+    function()
+      local w = vim.api.nvim_get_current_win()
+      local buf = list.render_sessionlist { session_stub {} }
+      vim.api.nvim_win_set_buf(w, buf)
+      chrome.winbar(w, list.sessionlist_winbar { session_stub {} })
+      assert.equals('review.nvim · 1 session', vim.w[w].review_winbar)
+
+      vim.cmd 'enew'
+
+      assert.is_nil(vim.w[w].review_winbar)
+    end
+  )
 end)

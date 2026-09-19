@@ -3,6 +3,7 @@
 -- `review-list` を使う (DESIGN.md「横断規約」UI)。挙動の分岐は buffer に付けた
 -- review_meta で行う (FileType autocmd 分岐は使わない)。
 -- 行 -> データの引き渡しは行番号写像 (render ごとに再構築、バッファ側に値を持たない)。
+local chrome = require 'review.ui.chrome'
 local config = require 'review.config'
 
 local M = {}
@@ -12,9 +13,34 @@ local grey_ns = vim.api.nvim_create_namespace 'review_list_grey'
 -- bufnr -> { rows = { [row] = payload } }
 local rendered = {}
 
+-- `:Review list` は review tab 外 (current tab の vsplit) に開くため、一覧窓の閉鎖は
+-- tab 消滅経路 (windows.close / TabClosed) に乗らない。バッファが閉じた時点で
+-- review セッションが無ければ chrome の global winbar 式と窓変数を戻す
+-- (diff-review「窓装飾 (chrome)」)。
 vim.api.nvim_create_autocmd('BufUnload', {
   callback = function(ev)
     rendered[ev.buf] = nil
+    local meta = vim.b[ev.buf].review_meta or {}
+    if meta.kind == 'sessionlist' then
+      chrome.restore_global_if_unused()
+    end
+  end,
+})
+
+-- 一覧 buffer が窓から外れる (:buffer 差し替え) とき、その窓の表示文字列を残さない。
+-- 残すと review セッション開中に stale バーがそのまま見え、閉じた後に別セッションを
+-- 開くと stale バーが再表示される。
+vim.api.nvim_create_autocmd('BufWinLeave', {
+  callback = function(ev)
+    local meta = vim.b[ev.buf].review_meta or {}
+    if meta.kind ~= 'sessionlist' then
+      return
+    end
+    for _, win in ipairs(vim.fn.win_findbuf(ev.buf)) do
+      if vim.api.nvim_win_is_valid(win) then
+        vim.w[win].review_winbar = nil
+      end
+    end
   end,
 })
 

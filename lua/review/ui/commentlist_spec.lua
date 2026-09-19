@@ -5,6 +5,7 @@
 -- keymap) で検証する。折畳・絞り込みの file 集合解決は order を作る handlers の
 -- 責務なので、ここは order 入力に対する並びと除外規則だけを pin する。
 local config = require 'review.config'
+local chrome = require 'review.ui.chrome'
 local commentlist = require 'review.ui.commentlist'
 
 local SLUG = 'main--feature'
@@ -374,4 +375,26 @@ describe('commentlist の buffer-local キー', function()
     end
     assert.is_true(found)
   end)
+end)
+
+-- 一覧窓を :buffer で差し替えたときに窓変数 (winbar 表示文字列) を残さない。
+-- 残すと review セッション開中は stale バーがそのまま見え、閉じた後に別セッションを
+-- 開くと stale バーが再表示される (diff-review「窓装飾 (chrome)」)。
+describe('commentlist の winbar 後片付け', function()
+  use_env()
+
+  it(
+    '一覧 buffer を :buffer で差し替えると窓の review_winbar を残さない',
+    function()
+      local session = session_stub { comments = { comment {} } }
+      local buf = commentlist.render(session, { order = { 'a.lua' } })
+      vim.api.nvim_win_set_buf(state.win, buf)
+      chrome.winbar(state.win, 'main..feature · 1 comment')
+      assert.equals('main..feature · 1 comment', vim.w[state.win].review_winbar)
+
+      vim.cmd 'enew'
+
+      assert.is_nil(vim.w[state.win].review_winbar)
+    end
+  )
 end)

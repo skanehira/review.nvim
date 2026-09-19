@@ -6,9 +6,10 @@
 -- ユーザー窓・他 tab の winbar へ漏れるため使わない (窓単位が正 —
 -- docs/design/features/diff-review.md「窓装飾 (chrome)」)。
 -- ユーザーが自分で winbar を設定している場合は触らない。review セッションが
--- 閉じたとき (q close / review tab 消滅) は restore_global で空へ戻すので、
--- セッション表示中にユーザー窓が 2 窓以上のとき empty のヘッダー行が増える分
--- だけが残る (single window では winbar 自体が表示されない = nvim 仕様)。
+-- 閉じたとき (q close / review tab 消滅) と、review セッションが無い状態で
+-- `:Review list` の一覧窓 (review tab 外) が閉じたときは restore_global で空へ
+-- 戻し、残った窓変数も掃除する。戻さないとユーザー窓が 2 窓以上のレイアウトで
+-- 空のヘッダー行が残る (実測のユーザー報告)。
 local config = require 'review.config'
 
 local M = {}
@@ -33,10 +34,26 @@ end
 
 --- review セッションが閉じたとき (q close / review tab 消滅) に呼ぶ。自前式が
 --- 入っていれば global を空へ戻す。戻さないとユーザー窓が 2 窓以上のレイアウトで
---- 空のヘッダー行が残る (実測のユーザー報告)。冪等 / ユーザー定義は触らない。
+--- 空のヘッダー行が残る (実測のユーザー報告)。式を外した後に窓変数の表示文字列を
+--- 残す意味は無く、次の review で stale バーとして再表示されるため全窓から掃除
+--- する。冪等 / ユーザー定義は触らない。
 function M.restore_global()
   if vim.api.nvim_get_option_value('winbar', { scope = 'global' }) == PLUGIN_WINBAR then
     vim.api.nvim_set_option_value('winbar', '', { scope = 'global' })
+  end
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    vim.w[win].review_winbar = nil
+  end
+end
+
+--- review セッション (専有 tab) が開いていないときだけ restore_global。`:Review list`
+--- の一覧窓は review tab 外 (current tab の vsplit) に開くため tab 消滅経路
+--- (windows.close / TabClosed) に乗らず、バッファが閉じた時点でセッションが無ければ
+--- 式も窓変数も不要になる。windows は循環回避のため遅延 require する。
+function M.restore_global_if_unused()
+  local windows = require 'review.ui.windows'
+  if windows.state() == nil then
+    M.restore_global()
   end
 end
 

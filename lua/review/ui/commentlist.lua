@@ -23,6 +23,22 @@ vim.api.nvim_create_autocmd('BufUnload', {
   end,
 })
 
+-- 一覧 buffer が窓から外れる (:buffer 差し替え) とき、その窓の表示文字列を残さない。
+-- 残すと review セッション開中に stale バーがそのまま見える。
+vim.api.nvim_create_autocmd('BufWinLeave', {
+  callback = function(ev)
+    local meta = vim.b[ev.buf].review_meta or {}
+    if meta.kind ~= 'commentlist' then
+      return
+    end
+    for _, win in ipairs(vim.fn.win_findbuf(ev.buf)) do
+      if vim.api.nvim_win_is_valid(win) then
+        vim.w[win].review_winbar = nil
+      end
+    end
+  end,
+})
+
 local function buffer(name)
   local existing = vim.fn.bufnr(name)
   if existing ~= -1 and vim.api.nvim_buf_is_valid(existing) then

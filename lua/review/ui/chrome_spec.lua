@@ -58,6 +58,25 @@ describe('ui/chrome winbar グローバル式', function()
     assert.equals('', vim.o.winbar)
   end)
 
+  it('restore_global は残った窓の w:review_winbar も掃除する', function()
+    local w = vim.api.nvim_get_current_win()
+    chrome.window(w)
+    chrome.winbar(w, 'review.nvim · 2 sessions')
+    assert.equals('review.nvim · 2 sessions', vim.w[w].review_winbar)
+    chrome.restore_global()
+    assert.is_nil(vim.w[w].review_winbar)
+  end)
+
+  it(
+    'restore_global_if_unused は review セッションが無いとき式を空へ戻す',
+    function()
+      chrome.window(vim.api.nvim_get_current_win())
+      assert.equals(PLUGIN_WINBAR, vim.api.nvim_get_option_value('winbar', { scope = 'global' }))
+      chrome.restore_global_if_unused()
+      assert.equals('', vim.api.nvim_get_option_value('winbar', { scope = 'global' }))
+    end
+  )
+
   it(
     'ユーザー定義 winbar は restore でも触らない (自前でなければ元のまま)',
     function()

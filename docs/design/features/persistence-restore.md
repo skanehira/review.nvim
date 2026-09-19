@@ -31,7 +31,7 @@
 
 **anchor 検証 (復元・リフレッシュ時の位置整合)**: 差分は再取得されるため行番号は変わる。検証の正本テキスト源は直近の core/diff パーサ結果 (add/context 可視行の text_map) で、復元と BufWritePost リフレッシュで同一経路を使う。コメントごとに (a) 保存行番号の行テキスト == `anchor.line` → active 維持、(b) 同一ファイルの保存行番号 ±20 行以内に `anchor.line` と一致 → active にして保持行番号を補正、(c) 見つからない → `state=outdated`。outdated でも `line` / `end_line` の値は書き換えない (保存値のまま保持)。位置を解けず new 側に痕跡のない outdated は当該ファイル head バッファ 1 行目の virt_lines_above に集約表示する (diff-review「コメント表示」。head 窓が告知 scratch のファイル = deleted/binary 告知窓の outdated は集約先がないので panel winbar 末尾 `⚠N` と除外 INFO で可視化。今回の差分に現れないファイルの outdated も同じく集約先なし = `⚠N` に数え、files map / panel 一覧には入れない)。補正・outdated 化の結果は復元時に save して次回以降の検証を省く
 
-**`:Review list`**: 当該 repo の保存済みセッション全件を scratch split window (filetype `review-list`) に一覧表示 (slug / status / mode / base..head / コメント数 / 更新時刻 = **ローカル時刻 + %Z tz 表記**)。キーは DESIGN.md「デフォルトキーマップ」の sessionlist 行 (`<Enter>` で開く = 復元手順を実行、closed → open。`d` = `:Review delete` と同一の確認フローで削除)。repo path 消失のセッションは grey 表示で `<Enter>` 不可。
+**`:Review list`**: 当該 repo の保存済みセッション全件を scratch split window (filetype `review-list`) に一覧表示 (slug / status / mode / base..head / コメント数 / 更新時刻 = **ローカル時刻 + %Z tz 表記**)。キーは DESIGN.md「デフォルトキーマップ」の sessionlist 行 (`<Enter>` で開く = 復元手順を実行、closed → open。`d` = `:Review delete` と同一の確認フローで削除)。repo path 消失のセッションは grey 表示で `<Enter>` 不可。一覧窓の閉鎖 (window close / `:bw` / `:buffer` 差し替え) 時に review セッションが開いていなければ chrome の global winbar 式と窓変数を戻す (diff-review「窓装飾 (chrome)」)。
 
 ## 実装の配置
 
