@@ -71,8 +71,11 @@ vsplit すると新窓が sidebar buf を継承して drift 誤検出 → **先�
   本文あり=arming 2 回で破棄) / `<C-y>`=insert 確定エイリアス / `<Esc>`=Normal 復帰だけ。
   終端経路は必ず stopinsert してから閉じる
 - コメント本文の表示は行下スレッド (extmark の virt_lines = buffer 行を占有
-  しない = 行番号写像不変)。見出し eol と同一 anchors にmark を二つ作ると
-  取得順が不定になるので **1 extmark に virt_text と virt_lines を併合**する。
+  しない = 行番号写像不変)。スレッドは罫線の箱で囲み、**表示要素 (件数 eol
+  virt_text + virt_lines) は群につき 1 extmark** に併合、範囲コメントの下線は
+  別 mark に分ける (範囲群は 2 mark)。spec は index ではなく details
+  (`virt_text ~= nil` / `virt_lines_above` / `hl_group`) で mark を識別する
+  (単一行 mark と別群の下線 mark が同一位置に並ぶ tie は残るため)。
   virt_text/virt_lines の chunk は常に `{ {text, hl} }` のネスト構造 ({text,hl}
   フラットは "expected Array, got String" になる — 実測の教訓)
 - コメント削除 `d`・破棄 `q` は arming 二重押し (同じ対象・同じ行・2 秒内)。

@@ -609,6 +609,44 @@ end
 
 -- 3 窓の chrome 再適用 (render 直後の handlers 側再適用 — diff-review「窓装飾」。
 -- 窓 number は窓ローカル、winbar 文字列は w:review_winbar のみで持つ)。
+
+-- head 窓のテキスト幅 (窓幅 - textoff)。コメント箱幅の上限として commentmarks.apply
+-- へ渡す (commentmarks は窓を探さない = 単体 spec で幅を注入できる)。窓が無ければ
+-- nil (= 上限なし)。
+local function head_text_width()
+  local hw = ui_windows.win 'head'
+  if hw == nil or not vim.api.nvim_win_is_valid(hw) then
+    return nil
+  end
+  local info = vim.fn.getwininfo(hw)[1]
+  if info == nil then
+    return nil
+  end
+  return vim.api.nvim_win_get_width(hw) - info.textoff
+end
+
+-- コメント箱幅は apply 時点の head 窓幅で固定されるため、リサイズで同じ経路で
+-- 再 apply する (diff-review「コメント表示」)。多重発火は最後の 1 回で足りる
+-- (apply は全捨て再構成なので debounce 不要)。
+vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
+  callback = function()
+    if active == nil or active.current == nil then
+      return
+    end
+    local cur = active.current
+    if cur.kind ~= 'real' and cur.kind ~= 'degraded' and cur.kind ~= 'no-changes' then
+      return
+    end
+    if not vim.api.nvim_buf_is_valid(cur.head_buf) then
+      return
+    end
+    ui_commentmarks.clear_tracked()
+    ui_commentmarks.apply(active.session, cur.head_buf, cur.path, {
+      max_width = head_text_width(),
+    })
+  end,
+})
+
 local function apply_chrome()
   if active == nil then
     return
@@ -826,7 +864,7 @@ local function resolve_and_open(path, opts)
     active.current = cur
     -- 張り先が無い outdated (全ファイル消滅) は placeholder に集約する
     ui_commentmarks.clear_tracked()
-    ui_commentmarks.apply(session, buf, M.NO_CHANGES)
+    ui_commentmarks.apply(session, buf, M.NO_CHANGES, { max_width = head_text_width() })
     apply_chrome()
     return
   end
@@ -898,7 +936,7 @@ local function resolve_and_open(path, opts)
   -- (ui/commentmarks が張った全バッファを tracking し、close / 切替で clear)。
   ui_commentmarks.clear_tracked()
   if cur.kind == 'real' or cur.kind == 'degraded' or cur.kind == 'no-changes' then
-    ui_commentmarks.apply(active.session, cur.head_buf, path)
+    ui_commentmarks.apply(active.session, cur.head_buf, path, { max_width = head_text_width() })
   end
 
   -- panel カーソルを開いたファイル行へ逆追従 (<CR> 以外の移動系・初期開き含む)。
@@ -1655,7 +1693,9 @@ function M.commit_comment_change()
   if active.current ~= nil then
     ui_commentmarks.clear_tracked()
     if active.current.kind == 'real' or active.current.kind == 'degraded' then
-      ui_commentmarks.apply(active.session, active.current.head_buf, active.current.path)
+      ui_commentmarks.apply(active.session, active.current.head_buf, active.current.path, {
+        max_width = head_text_width(),
+      })
     end
   end
   -- panel のコメントアイコンを CRUD 直後に反映する (ユーザー報告: c で追加しても
@@ -1980,7 +2020,7 @@ local function apply_refresh(current, files)
   -- 告知窓 (deleted / binary) は張替先を持たないので掃除のみ。
   ui_commentmarks.clear_tracked()
   if cur ~= nil and (cur.kind == 'real' or cur.kind == 'degraded' or cur.kind == 'no-changes') then
-    ui_commentmarks.apply(session, cur.head_buf, cur.path)
+    ui_commentmarks.apply(session, cur.head_buf, cur.path, { max_width = head_text_width() })
   end
   refresh_panel()
   refresh_commentlist()

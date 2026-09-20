@@ -12,6 +12,10 @@ local DEFAULTS = {
   -- eol の件数表示の下に出すスレッド本文行 (行下 virt_lines)。colorscheme 追従。
   ReviewCommentBody = { link = 'Normal' },
   ReviewCommentOutdated = { link = 'DiagnosticWarn' },
+  -- 行下スレッドの罫線の箱 (┌─┐ │ └─┘)。既存 float の border="rounded" と揃える。
+  -- 本文行の右寄せ pad は Border 色にしない (背景色の付く FloatBorder で pad 部分
+  -- が塗られないため — pad は ReviewCommentBody のまま)。
+  ReviewCommentBorder = { link = 'FloatBorder' },
   ReviewDiffAdd = { link = 'DiffAdd' },
   ReviewDiffDelete = { link = 'DiffDelete' },
   ReviewDiffHunk = { link = 'diffLine' },

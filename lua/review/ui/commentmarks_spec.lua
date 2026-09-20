@@ -1,11 +1,15 @@
 -- ui/commentmarks: コメントの head バッファ extmark 表示 (docs/design/features/
 -- diff-review.md「コメント表示 (head バッファの extmark)」)。
 -- 契約の要点:
---   * 見出し (eol 件数) と行下スレッド (virt_lines) は 1 extmark に併合する
---     (同一位置に mark を二つ作ると取得順不定で spec 契約にできない — 実測教訓)
+--   * 表示要素 (件数 virt_text + 行下スレッド virt_lines) は群につき 1 extmark。
+--     単一行コメントは下線と併合した 1 mark、範囲コメントは下線 mark と
+--     分かれた 2 mark (spec は index でなく details で mark を識別する —
+--     同一位置 tie は残るため)
+--   * スレッドは罫線の箱で囲まれる (各行 = 先頭 '│ ' Border + 中身 + 右寄せ pad
+--     Body + ' │' Border)。spec の行完全一致は両端 chunk を除いた中身で見る
 --   * 真実は session.comments 側に置く (apply は常に捨てて再構成)
 --   * 位置を解けない outdated (= head バッファ行数を超える行) は 1 行目の
---     virt_lines_above に集約する
+--     virt_lines_above に見出しを箱 1 行目にした箱で集約する
 --   * close / 掃除では張った全バッファの namespace を明示 clear し、残骸 0 を
 --     pin する (DESIGN「UI」横断規約。ユーザー窓にもスレッドは見える仕様)
 local commentmarks = require 'review.ui.commentmarks'
@@ -19,6 +23,15 @@ local function line_text(chunks)
     out[#out + 1] = chunk[1]
   end
   return table.concat(out)
+end
+
+-- 箱行の両端 (左ボーダー chunk と右 pad + 右ボーダー chunk) を除いた中身
+local function inner_chunks(line)
+  local t = {}
+  for i = 2, #line - 2 do
+    t[#t + 1] = line[i]
+  end
+  return t
 end
 
 local function comment(over)
@@ -99,7 +112,7 @@ describe('commentmarks.apply: 併合 extmark', function()
       assert.equals('ReviewPanelComment', h[4].virt_text[1][2])
       local vl = h[4].virt_lines
       assert.is_true(#vl >= 1, '行下スレッド本文が無い')
-      local body = line_text(vl[1])
+      local body = line_text(vl[2])
       assert.is_true(body:find('first thought', 1, true) ~= nil)
       assert.is_true(body:find('[c1]', 1, true) ~= nil, 'id 接頭辞が無い: ' .. body)
     end
@@ -117,11 +130,14 @@ describe('commentmarks.apply: 併合 extmark', function()
       local line = nil
       for _, m in ipairs(marks(buf)) do
         if m[4].virt_text ~= nil then
-          line = (m[4].virt_lines or {})[1]
+          line = (m[4].virt_lines or {})[2]
         end
       end
       assert.is_not_nil(line, '行下スレッド本文が無い')
-      assert.same({ { '  [c1] **bold** and `code` 日本語', 'ReviewCommentBody' } }, line)
+      assert.same(
+        { { '  [c1] **bold** and `code` 日本語', 'ReviewCommentBody' } },
+        inner_chunks(line)
+      )
     end
   )
 
@@ -202,6 +218,372 @@ describe('commentmarks.apply: 併合 extmark', function()
   end)
 end)
 
+describe('commentmarks.apply: 範囲コメントの anchor (最終行の下)', function()
+  use_bufs()
+
+  local function virt_text_marks(buf)
+    local out = {}
+    for _, m in ipairs(marks(buf)) do
+      if m[4].virt_text ~= nil then
+        out[#out + 1] = m
+      end
+    end
+    return out
+  end
+
+  local function underline_marks(buf)
+    local out = {}
+    for _, m in ipairs(marks(buf)) do
+      if m[4].hl_group == 'ReviewCommentLine' and m[4].virt_text == nil then
+        out[#out + 1] = m
+      end
+    end
+    return out
+  end
+
+  it(
+    '範囲コメント (2..4) はスレッドを最終行の下に置き、下線 mark と分かれる',
+    function()
+      local buf = mk_buf({ 'l1', 'l2', 'l3', 'l4', 'l5' }, 'commentmarks-spec/r1.lua')
+      commentmarks.apply(session_of { comment { line = 2, end_line = 4 } }, buf, 'a.lua')
+      local heads = virt_text_marks(buf)
+      assert.equals(1, #heads, 'スレッド mark が 1 個でない')
+      assert.equals(3, heads[1][2], 'スレッドが最終行 (end_line-1) の下にない')
+      local underlines = underline_marks(buf)
+      assert.equals(1, #underlines, '下線 mark が 1 個でない')
+      assert.equals(1, underlines[1][2], '下線が開始行 (top-1) にない')
+      assert.equals(3, underlines[1][4].end_row, '下線が end_line-1 まで覆っていない')
+      assert.equals(2, #marks(buf), '範囲コメントは下線とスレッドの 2 mark')
+    end
+  )
+
+  it('単一行コメントは下線 + virt_text + virt_lines の 1 mark のまま', function()
+    local buf = mk_buf({ 'l1', 'l2', 'l3' }, 'commentmarks-spec/r2.lua')
+    commentmarks.apply(session_of { comment() }, buf, 'a.lua')
+    assert.equals(1, #marks(buf), '単一行コメントの mark 数が 1 でない')
+    local m = marks(buf)[1]
+    assert.equals(1, m[2], 'row が line-1 でない')
+    assert.equals('ReviewCommentLine', m[4].hl_group, '下線 hl が無い')
+    assert.is_true(m[4].virt_text ~= nil, '件数 eol 表示が無い')
+    assert.is_true(#(m[4].virt_lines or {}) >= 1, '行下スレッドが無い')
+  end)
+
+  it(
+    '同じ最終行・異なる開始行の 2 件は 1 箱 (├─┤ 区切り) にまとまり、下線は 1 本',
+    function()
+      local buf = mk_buf({ 'l1', 'l2', 'l3', 'l4', 'l5' }, 'commentmarks-spec/r3.lua')
+      commentmarks.apply(
+        session_of {
+          comment { line = 2, end_line = 4, body = 'first thought' },
+          comment { line = 4, end_line = 4, body = 'second' },
+        },
+        buf,
+        'a.lua'
+      )
+      local heads = virt_text_marks(buf)
+      assert.equals(1, #heads, '同じ最終行の群が 1 mark にまとまっていない')
+      assert.equals(3, heads[1][2], '群の行が最終行 (end_line-1) でない')
+      assert.is_true(
+        heads[1][4].virt_text[1][1]:find('\u{EA6B} 2', 1, true) ~= nil,
+        '件数が 2 でない: ' .. tostring(heads[1][4].virt_text[1][1])
+      )
+      local underlines = underline_marks(buf)
+      assert.equals(1, #underlines, '下線が群につき 1 本でない')
+      assert.equals(1, underlines[1][2], '下線の開始が min(line)-1 でない')
+      assert.equals(3, underlines[1][4].end_row, '下線の終端が end_line-1 でない')
+      -- 箱: 上罫線 + c1 + 区切り + c2 + 下罫線
+      local vl = heads[1][4].virt_lines or {}
+      local texts = {}
+      for _, line in ipairs(vl) do
+        texts[#texts + 1] = line_text(line)
+      end
+      assert.equals(
+        5,
+        #vl,
+        '2 件の箱が 上罫線+c1+区切り+c2+下罫線 でない: ' .. vim.inspect(texts)
+      )
+      assert.is_true(
+        texts[3]:find('├', 1, true) ~= nil,
+        'コメント間の区切り罫線が無い'
+      )
+      assert.is_true(texts[2]:find('first thought', 1, true) ~= nil)
+      assert.is_true(texts[4]:find('second', 1, true) ~= nil)
+    end
+  )
+
+  it(
+    'end_line がバッファ末尾を超える範囲は末尾行に clamp され outdated に落ちない',
+    function()
+      local buf = mk_buf({ 'l1', 'l2', 'l3' }, 'commentmarks-spec/r4.lua')
+      commentmarks.apply(session_of { comment { line = 2, end_line = 99 } }, buf, 'a.lua')
+      local heads = virt_text_marks(buf)
+      assert.equals(1, #heads, 'clamp された範囲のスレッド mark が無い')
+      assert.equals(2, heads[1][2], 'スレッドが末尾行 (line_count-1) にない')
+      local underlines = underline_marks(buf)
+      assert.equals(1, #underlines, 'clamp 後の下線 mark が無い')
+      assert.equals(2, underlines[1][4].end_row, '下線が末尾行まで覆っていない')
+      for _, m in ipairs(marks(buf)) do
+        assert.is_not_true(
+          m[4].virt_lines_above == true,
+          'clamp は outdated 集約に落ちてはいけない'
+        )
+      end
+    end
+  )
+end)
+
+describe('commentmarks.apply: 罫線の箱', function()
+  use_bufs()
+
+  local function row_width(chunks)
+    local w = 0
+    for _, chunk in ipairs(chunks) do
+      w = w + vim.fn.strdisplaywidth(chunk[1])
+    end
+    return w
+  end
+
+  local function head_virt_lines(buf)
+    for _, m in ipairs(marks(buf)) do
+      if m[4].virt_text ~= nil then
+        return m[4].virt_lines or {}
+      end
+    end
+    return {}
+  end
+
+  it(
+    '箱の各行は完全一致し、CJK を含む本文で右辺が揃う (pad 幅 = strdisplaywidth)',
+    function()
+      local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/box1.lua')
+      commentmarks.apply(session_of { comment { body = '日本語\nテスト' } }, buf, 'a.lua')
+      local vl = head_virt_lines(buf)
+      -- 自然幅 13 (= '  [c1] 日本語') + 罫線と padding は下限 20 に底上げされる
+      local border = '┌' .. string.rep('─', 18) .. '┐'
+      assert.same({ { border, 'ReviewCommentBorder' } }, vl[1])
+      assert.same({
+        { '│ ', 'ReviewCommentBorder' },
+        { '  [c1] 日本語', 'ReviewCommentBody' },
+        { '   ', 'ReviewCommentBody' },
+        { ' │', 'ReviewCommentBorder' },
+      }, vl[2])
+      assert.same({
+        { '│ ', 'ReviewCommentBorder' },
+        { '       テスト', 'ReviewCommentBody' },
+        { '   ', 'ReviewCommentBody' },
+        { ' │', 'ReviewCommentBorder' },
+      }, vl[3])
+      assert.same({ { '└' .. string.rep('─', 18) .. '┘', 'ReviewCommentBorder' } }, vl[4])
+      assert.equals(4, #vl)
+      for i, line in ipairs(vl) do
+        assert.equals(
+          20,
+          row_width(line),
+          ('箱の %d 行目の表示幅が右辺で揃っていない'):format(i)
+        )
+      end
+    end
+  )
+
+  it(
+    'opts.max_width を超える本文は内側幅で折り返され、折り返し行にも pad と両端 chunk が付く',
+    function()
+      local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/box2.lua')
+      commentmarks.apply(
+        session_of { comment { body = string.rep('a', 20) } },
+        buf,
+        'a.lua',
+        { max_width = 24 }
+      )
+      local vl = head_virt_lines(buf)
+      -- 内側幅 = 24 - strdisplaywidth('│ ') - strdisplaywidth(' │') = 20。
+      -- 1 行目 = 接頭辞 7 + 13 文字、折り返し行 = pad 7 + 残り 7 文字。
+      assert.equals(4, #vl, '上罫線 + 2 行 + 下罫線でない: ' .. tostring(#vl))
+      assert.same({ { '┌' .. string.rep('─', 22) .. '┐', 'ReviewCommentBorder' } }, vl[1])
+      assert.same({
+        { '│ ', 'ReviewCommentBorder' },
+        { '  [c1] ' .. string.rep('a', 13), 'ReviewCommentBody' },
+        { '', 'ReviewCommentBody' },
+        { ' │', 'ReviewCommentBorder' },
+      }, vl[2])
+      assert.same({
+        { '│ ', 'ReviewCommentBorder' },
+        { string.rep(' ', 7) .. string.rep('a', 7), 'ReviewCommentBody' },
+        { string.rep(' ', 6), 'ReviewCommentBody' },
+        { ' │', 'ReviewCommentBorder' },
+      }, vl[3])
+      for i, line in ipairs(vl) do
+        assert.equals(
+          24,
+          row_width(line),
+          ('箱の %d 行目が上限幅で揃っていない'):format(i)
+        )
+      end
+    end
+  )
+
+  it('折り返しを含めて 11 行目で … (i で全文) に打ち切る', function()
+    local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/box3.lua')
+    -- 14 字の本文 6 行 = 各 2 表示行 (13 + 1) = 12 表示行 -> 10 行で打ち切り
+    local body = {}
+    for _ = 1, 6 do
+      body[#body + 1] = string.rep('b', 14)
+    end
+    commentmarks.apply(
+      session_of { comment { body = table.concat(body, '\n') } },
+      buf,
+      'a.lua',
+      { max_width = 24 }
+    )
+    local vl = head_virt_lines(buf)
+    assert.equals(
+      13,
+      #vl,
+      '上罫線 + 10 行 + 打ち切り + 下罫線でない: ' .. tostring(#vl)
+    )
+    -- 10 表示行目 = 5 本文行目の折り返し残り (pad + 1 文字)
+    assert.same({ { string.rep(' ', 7) .. 'b', 'ReviewCommentBody' } }, inner_chunks(vl[11]))
+    assert.same(
+      { { string.rep(' ', 7) .. '… (i で全文)', 'ReviewCommentBody' } },
+      inner_chunks(vl[12])
+    )
+  end)
+
+  it(
+    'outdated は prefix と打ち切り文言だけ ReviewCommentOutdated、罫線 chunk は ReviewCommentBorder',
+    function()
+      local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/box4.lua')
+      local body = {}
+      for i = 1, 11 do
+        body[#body + 1] = 'line' .. i
+      end
+      commentmarks.apply(
+        session_of { comment { state = 'outdated', body = table.concat(body, '\n') } },
+        buf,
+        'a.lua'
+      )
+      local vl = head_virt_lines(buf)
+      assert.same({ { '┌' .. string.rep('─', 21) .. '┐', 'ReviewCommentBorder' } }, vl[1])
+      assert.same({
+        { '│ ', 'ReviewCommentBorder' },
+        { '  [c1] ', 'ReviewCommentOutdated' },
+        { 'line1', 'ReviewCommentBody' },
+        { string.rep(' ', 7), 'ReviewCommentBody' },
+        { ' │', 'ReviewCommentBorder' },
+      }, vl[2])
+      assert.same({
+        { '│ ', 'ReviewCommentBorder' },
+        { '       ', 'ReviewCommentBody' },
+        { '… (i で全文)', 'ReviewCommentOutdated' },
+        { '', 'ReviewCommentBody' },
+        { ' │', 'ReviewCommentBorder' },
+      }, vl[12])
+      assert.equals(
+        13,
+        #vl,
+        '上罫線 + 10 行 + 打ち切り + 下罫線でない: ' .. tostring(#vl)
+      )
+      assert.equals('ReviewCommentBorder', vl[13][1][2], '下罫線 chunk が Border 色でない')
+      for i, line in ipairs(vl) do
+        assert.equals(
+          'ReviewCommentBorder',
+          line[1][2],
+          ('%d 行目の先頭 chunk が Border 色でない'):format(i)
+        )
+        assert.equals(
+          'ReviewCommentBorder',
+          line[#line][2],
+          ('%d 行目の末尾 chunk が Border 色でない'):format(i)
+        )
+        assert.equals(23, row_width(line), ('%d 行目の表示幅が揃っていない'):format(i))
+      end
+    end
+  )
+
+  it(
+    '打ち切り導線行も内側幅で折り返され、箱の右辺からはみ出さない',
+    function()
+      local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/box6.lua')
+      local body = {}
+      for _ = 1, 11 do
+        body[#body + 1] = 'a'
+      end
+      commentmarks.apply(
+        session_of { comment { body = table.concat(body, '\n') } },
+        buf,
+        'a.lua',
+        { max_width = 20 }
+      )
+      local vl = head_virt_lines(buf)
+      -- 上限 20 で内側幅 16。打ち切り文言 (表示幅 12 + pad 7 = 19) も折り返される
+      assert.equals(
+        14,
+        #vl,
+        '上罫線 + 10 行 + 打ち切り 2 行 + 下罫線でない: ' .. tostring(#vl)
+      )
+      assert.equals('       … (i で全', line_text(inner_chunks(vl[12])))
+      assert.equals('       文)', line_text(inner_chunks(vl[13])))
+      for i, line in ipairs(vl) do
+        assert.equals(
+          20,
+          row_width(line),
+          ('箱の %d 行目が下限幅で揃っていない'):format(i)
+        )
+      end
+    end
+  )
+
+  it(
+    '解けない outdated の集約は箱で描かれ、箱 1 行目に見出しを持つ',
+    function()
+      local buf = mk_buf({ 'only' }, 'commentmarks-spec/box5.lua')
+      commentmarks.apply(
+        session_of {
+          comment { line = 9, end_line = 9, state = 'outdated', body = 'gone place' },
+          comment { line = 9, end_line = 9, state = 'outdated', id = 'c2', body = 'also gone' },
+        },
+        buf,
+        'a.lua'
+      )
+      local above = nil
+      for _, m in ipairs(marks(buf)) do
+        if m[4].virt_lines_above then
+          above = m
+        end
+      end
+      assert.is_not_nil(above, 'virt_lines_above の集約 mark が無い')
+      local vl = above[4].virt_lines or {}
+      -- 上罫線 + 見出し + c1 + 区切り + c2 + 下罫線
+      assert.equals(6, #vl, '集約の箱が期待の行数でない: ' .. vim.inspect(vl))
+      assert.equals('ReviewCommentBorder', vl[1][1][2], '集約の 1 行目が上罫線でない')
+      assert.same(
+        { { ' 2 outdated (prompt 除外中)', 'ReviewCommentOutdated' } },
+        inner_chunks(vl[2])
+      )
+      assert.same({
+        { '  [c1] ', 'ReviewCommentOutdated' },
+        { 'gone place', 'ReviewCommentBody' },
+      }, inner_chunks(vl[3]))
+      assert.is_true(
+        line_text(vl[4]):find('├', 1, true) ~= nil,
+        'コメント間の区切り罫線が無い'
+      )
+      assert.same({
+        { '  [c2] ', 'ReviewCommentOutdated' },
+        { 'also gone', 'ReviewCommentBody' },
+      }, inner_chunks(vl[5]))
+      assert.equals('ReviewCommentBorder', vl[6][1][2], '集約の末行が下罫線でない')
+      for i, line in ipairs(vl) do
+        assert.equals(
+          31,
+          row_width(line),
+          ('集約の箱の %d 行目が右辺で揃っていない'):format(i)
+        )
+      end
+    end
+  )
+end)
+
 describe('commentmarks.apply: outdated 集約', function()
   use_bufs()
 
@@ -224,14 +606,17 @@ describe('commentmarks.apply: outdated 集約', function()
         end
       end
       assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
-      -- 見出し行 + 本文一覧を virt_lines_above の先頭に並べる
-      -- (diff-review「コメント表示」の文言どおり eol にしない — 1 行目が実ファイルの
-      -- 先頭行なので編集でずれる)
-      local text = ''
-      for _, chunk in ipairs(above[4].virt_lines[1] or {}) do
-        text = text .. chunk[1]
-      end
-      assert.equals(' 2 outdated (prompt 除外中)', text)
+      -- 集約は箱で描かれ、見出しは箱 1 行目 (virt_lines[2] = 上罫線の次)。
+      -- eol virt_text にしない — 1 行目が実ファイルの先頭行なので編集でずれる
+      assert.equals(
+        'ReviewCommentBorder',
+        above[4].virt_lines[1][1][2],
+        '集約 1 行目が上罫線でない'
+      )
+      assert.same(
+        { { ' 2 outdated (prompt 除外中)', 'ReviewCommentOutdated' } },
+        inner_chunks(above[4].virt_lines[2])
+      )
     end
   )
 
@@ -253,13 +638,15 @@ describe('commentmarks.apply: outdated 集約', function()
     end
     assert.is_not_nil(above, 'virt_lines_above の集約 mark が無い')
     assert.equals(0, above[2], '集約は 1 行目 (row 0)')
-    -- 見出し行 = virt_lines[1]、本文 = その続く行 (1 extmark 併合のまま)
-    assert.equals(' 2 outdated (prompt 除外中)', (above[4].virt_lines[1] or { {} })[1][1])
+    -- 集約は箱: 上罫線 / 見出し (箱 1 行目) / 本文 (区切り罫線で分離) / 下罫線
+    local vl = above[4].virt_lines or {}
+    assert.equals('ReviewCommentBorder', vl[1][1][2], '集約の 1 行目が上罫線でない')
+    assert.equals(' 2 outdated (prompt 除外中)', inner_chunks(vl[2])[1][1])
     local joined = {}
-    for i = 2, #(above[4].virt_lines or {}) do
-      joined[#joined + 1] = above[4].virt_lines[i][1][1]
+    for i = 3, #vl - 1 do
+      joined[#joined + 1] = line_text(vl[i])
     end
-    -- 本文行 + 区切り (continuation) 行を group thread で積む (見出しを除く 3 行)
+    -- 本文行 + 区切り罫線行 (見出しと下罫線を除く 3 行)
     assert.equals(
       3,
       #joined,
@@ -299,10 +686,15 @@ describe(
         local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/trunc.lua')
         commentmarks.apply(session_of { comment { body = table.concat(long, '\n') } }, buf, 'a.lua')
         local vl = head_virt_lines(buf)
-        assert.equals(11, #vl, '10 行 + 導線 1 行で無い: ' .. tostring(#vl))
-        assert.equals('  [c1] line1', line_text(vl[1]))
-        assert.equals('       line10', line_text(vl[10]))
-        assert.equals('       … (i で全文)', line_text(vl[11]))
+        -- 箱: 上罫線 + 本文 10 行 + 導線 1 行 + 下罫線
+        assert.equals(
+          13,
+          #vl,
+          '上罫線 + 10 行 + 導線 1 行 + 下罫線で無い: ' .. tostring(#vl)
+        )
+        assert.equals('  [c1] line1', line_text(inner_chunks(vl[2])))
+        assert.equals('       line10', line_text(inner_chunks(vl[11])))
+        assert.equals('       … (i で全文)', line_text(inner_chunks(vl[12])))
       end
     )
 
@@ -312,7 +704,10 @@ describe(
         local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/cont.lua')
         commentmarks.apply(session_of { comment { body = 'first\nsecond' } }, buf, 'a.lua')
         local vl = head_virt_lines(buf)
-        assert.same({ '  [c1] first', '       second' }, { line_text(vl[1]), line_text(vl[2]) })
+        assert.same(
+          { '  [c1] first', '       second' },
+          { line_text(inner_chunks(vl[2])), line_text(inner_chunks(vl[3])) }
+        )
       end
     )
 
@@ -329,7 +724,7 @@ describe(
         assert.equals(' \u{EA6B} 1', vt)
         assert.same(
           { { '  [c1] ', 'ReviewCommentOutdated' }, { 'kept', 'ReviewCommentBody' } },
-          vl[1]
+          inner_chunks(vl[2])
         )
       end
     )
@@ -346,9 +741,9 @@ describe(
         local vl = head_virt_lines(buf)
         assert.same(
           { { '  [c1] ', 'ReviewCommentOutdated' }, { 'first', 'ReviewCommentBody' } },
-          vl[1]
+          inner_chunks(vl[2])
         )
-        assert.same({ { '       second', 'ReviewCommentBody' } }, vl[2])
+        assert.same({ { '       second', 'ReviewCommentBody' } }, inner_chunks(vl[3]))
       end
     )
 
@@ -368,7 +763,7 @@ describe(
         local vl = head_virt_lines(buf)
         assert.same(
           { { '       ', 'ReviewCommentBody' }, { '… (i で全文)', 'ReviewCommentOutdated' } },
-          vl[11]
+          inner_chunks(vl[12])
         )
       end
     )

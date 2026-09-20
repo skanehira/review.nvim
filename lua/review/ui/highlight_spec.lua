@@ -21,6 +21,11 @@ describe('highlight.setup', function()
       vim.api.nvim_get_hl(0, { name = 'ReviewDiffDelete', link = true }).link
     )
     assert.equals('diffLine', vim.api.nvim_get_hl(0, { name = 'ReviewDiffHunk', link = true }).link)
+    -- 行下スレッドの罫線の箱 (既存 float の border="rounded" と同系の枠色)
+    assert.equals(
+      'FloatBorder',
+      vim.api.nvim_get_hl(0, { name = 'ReviewCommentBorder', link = true }).link
+    )
     assert.equals(
       'DiagnosticWarn',
       vim.api.nvim_get_hl(0, { name = 'ReviewCommentOutdated', link = true }).link

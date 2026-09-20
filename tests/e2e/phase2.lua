@@ -82,9 +82,22 @@ local function run()
     fail('復元 extmark の件数表示が無い: ' .. virt)
   end
   local vlines = marks[1][4].virt_lines or {}
-  local first_line = line_text(vlines[1])
-  if not first_line:find('use a map here', 1, true) then
-    fail('復元 extmark virt_lines 本文不一致: ' .. first_line)
+  -- スレッドは罫線の箱で描かれる: 先頭行は上罫線、本文は箱の中身行
+  if not line_text(vlines[1] or {}):find('┌', 1, true) then
+    fail(
+      '復元 extmark virt_lines が箱の上罫線で始まっていない: '
+        .. line_text(vlines[1] or {})
+    )
+  end
+  local found_thread = false
+  for _, line in ipairs(vlines) do
+    if line_text(line):find('use a map here', 1, true) ~= nil then
+      found_thread = true
+      break
+    end
+  end
+  if not found_thread then
+    fail '復元 extmark virt_lines 本文不一致 (箱の中身に本文が無い)'
   end
   local found_body = false
   for _, line in ipairs(vlines) do
