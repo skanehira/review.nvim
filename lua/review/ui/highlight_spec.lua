@@ -50,6 +50,12 @@ describe('highlight.setup', function()
       vim.api.nvim_get_hl(0, { name = 'ReviewPanelRemove', link = true }).link
     )
     assert.equals('Comment', vim.api.nvim_get_hl(0, { name = 'ReviewPanelMeta', link = true }).link)
+    -- 選択行 hl (file panel のカーソル行 = CursorLine link。背景を持つ
+    -- ReviewPanelFile を選択行に張ると cursorline 背景が打ち消される)
+    assert.equals(
+      'CursorLine',
+      vim.api.nvim_get_hl(0, { name = 'ReviewPanelSelection', link = true }).link
+    )
     assert.is_nil(next(vim.api.nvim_get_hl(0, { name = 'ReviewSidebarFile' })))
   end)
 

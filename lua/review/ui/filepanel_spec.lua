@@ -184,7 +184,7 @@ describe('filepanel.render tree (既定)', function()
     end
   )
 
-  it('選択行 hl: カーソル行に ReviewPanelFile line hl + 窓 cursorline', function()
+  it('選択行 hl: カーソル行に ReviewPanelSelection line hl + 窓 cursorline', function()
     -- 本番フローと同じ順: 初回 render (窓なし) -> 表示 -> refresh 相当の再 render
     local session = session_stub()
     show(filepanel.render(session, files2(), TREE_OPTS))
@@ -193,9 +193,29 @@ describe('filepanel.render tree (既定)', function()
     vim.api.nvim_exec_autocmds('CursorMoved', { buffer = buf, modeline = false })
     local sel = filepanel.selection_mark(buf)
     assert.equals(4, sel.row)
-    assert.equals('ReviewPanelFile', sel.group)
+    -- 選択行は CursorLine link の専用 group (背景を持つ ReviewPanelFile は
+    -- cursorline 背景を打ち消すので選択行には張らない — issue #35)
+    assert.equals('ReviewPanelSelection', sel.group)
     assert.equals(true, vim.wo[state.win].cursorline)
   end)
+
+  it(
+    'panel 窓の cursorlineopt は line (number 派ユーザーでも行が着色される)',
+    function()
+      -- cursorlineopt=number の環境では cursorline だけでは行背景が出ないため、
+      -- panel 窓は明示で line に固定する契約 (issue #35)
+      vim.wo[state.win].cursorlineopt = 'number'
+      local session = session_stub()
+      show(filepanel.render(session, files2(), TREE_OPTS))
+      local buf = filepanel.render(session, files2(), TREE_OPTS)
+      assert.equals('line', vim.wo[state.win].cursorlineopt)
+      assert.equals(true, vim.wo[state.win].cursorline)
+      -- 着色の素が揃っていることの陽性対照: 選択行 extmark も生きている
+      vim.api.nvim_win_set_cursor(state.win, { 5, 0 })
+      vim.api.nvim_exec_autocmds('CursorMoved', { buffer = buf, modeline = false })
+      assert.equals(4, filepanel.selection_mark(buf).row)
+    end
+  )
 
   it(
     'panel 窓に未表示 (開通順: render -> 窓) でも error なく buffer ができる',
