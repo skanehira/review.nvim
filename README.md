@@ -37,7 +37,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 
 マネージャを使わず `rtp` に直接足す場合は、clone 先の `doc/` に対して `:helptags <repo>/doc` を 1 回実行すると `:h review` が引けるようになります。
 
-`setup()` は省略可能 (既定値で動作 — 起動時のセッション復元通知・worktree 残骸掃除も設定なしで動きます)。設定項目 (`git_bin` / `gh_bin` / `diff_context` / `auto_notify_resume` / `panel_width` / `keymaps` / `highlight` / `winbar` / `number`) は `:h review-setup` を参照。
+`setup()` は省略可能 (既定値で動作 — 起動時のセッション復元通知・worktree 残骸掃除も設定なしで動きます)。設定項目 (`git_bin` / `gh_bin` / `diff_context` / `auto_notify_resume` / `panel_width` / `comment_list_height` / `keymaps` / `highlight` / `winbar` / `number`) は `:h review-setup` を参照。
 
 ## 使い方
 
@@ -98,7 +98,7 @@ head/base の 2 窓は Neovim 標準の窓 diff (`foldmethod=diff`) で、変更
 
 file panel は既定でフォルダツリー表示です。単一 child の dir 連鎖は `a/b/c/` と連結され、dir 行の status は配下の集約 (全部同一記号ならそのまま、混在は `*`)。`<CR>` / `o` / `l` を dir 行で押すと折り畳み、ファイル行で押すと head/base 窓に開きます。開いてもカーソルと focus は file panel に残るので、一覧を辿りながら diff を見比べられます (panel から押した `<Tab>` / `<S-Tab>` / `[F` / `]F` も focus を file panel に残します。diff 窓へ移るのはレビュー窓起点の移動キーと、標準の `<C-w>l` / `<C-w>w`)。フラットなフルパス一覧が見たければ `i` で list 表示へ切替 (絞り込み・折り畳みと並ぶ view state で、セッションには保存されません)。ファイルを移動で開くと panel のカーソルがその行に追従し、選択行がハイライトされます (相互ハイライト)。nvim-web-devicons が入っていればファイルアイコンが自動で出ます (無くてもテキスト表示のまま。ランタイム依存にはなりません)。
 
-`<leader>c` (または `:Review comments`) でセッションの全コメントをファイル横断の一覧として開きます。1 行 = 1 コメントで `path:line [id] 本文 1 行目` (60 文字を超える本文は `…`、outdated は末尾に `⚠ outdated`)。並びは file panel と同じツリー表示順で、折り畳み・list 表示は反映せず、絞り込み `/` は反映します。`<CR>` でそのコメント位置へジャンプ (実ファイルまたは縮退 head を開いて記録行へ移動。outdated は INFO、binary/削除の告知表示・現在の差分に無いファイルは WARN)、`q` で閉じます。既に開いていれば再分割せずその窓へ focus し、内容は最新に更新されます。
+`<leader>c` (または `:Review comments`) でセッションの全コメントをファイル横断の一覧として開きます。一覧はレビュー tab の**最下部に全幅** (高さは既定 10 行、`comment_list_height` で変更可) で開かれ、どの窓・どの tab から押しても位置は変わりません。1 行 = 1 コメントで `path:line [id] 本文 1 行目` (60 文字を超える本文は `…`、outdated は末尾に `⚠ outdated`)。並びは file panel と同じツリー表示順で、折り畳み・list 表示は反映せず、絞り込み `/` は反映します。`<CR>` でそのコメント位置へジャンプ (実ファイルまたは縮退 head を開いて記録行へ移動。outdated は INFO、binary/削除の告知表示・現在の差分に無いファイルは WARN)、`q` で閉じます。既に開いていれば再分割せずその窓へ focus し、内容は最新に更新されます。
 
 `c` / `e` で開くコメント入力ウィンドウは、本文入力中 (insert) は **`<CR>` = 改行**、`q` などで Normal に戻ったあと **`<CR>` = 確定** して閉じる。本文があるときは `q` では閉じず (誤って入力を捨てないため)、続けて `q` を押したときだけ破棄して閉じる。`<C-y>` は insert 中の確定、`<Esc>` は Normal に戻るだけで窓は閉じない。操作はウィンドウのタイトルと `<F1>` の help にも表示される。
 

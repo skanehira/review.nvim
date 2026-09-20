@@ -332,6 +332,54 @@ describe('windows.bind / set_panel_buf: role 導出', function()
     end
   )
 
+  -- 一覧窓 (最下部全幅) がある状態での drift 復旧。ensure_pair の anchor に一覧窓を
+  -- 選ぶと base/head が一覧の行内に積まれ、レイアウト契約 (base/head は上段) が壊れる
+  -- (issue #37 の設計: fallback anchor は一覧窓を除外する)。
+  it(
+    'bind 再建は一覧窓の下に base/head を積まない (一覧は全幅のまま)',
+    function()
+      windows.bind(base_buf, head_buf)
+      local lw = windows.open_comment_list()
+
+      vim.api.nvim_win_close(windows.win 'head', true)
+      windows.bind(base_buf, head_buf)
+
+      assert.equals('head', windows.role_of(windows.win 'head'))
+      assert.is_true(
+        vim.fn.win_screenpos(windows.win 'head')[1] < vim.fn.win_screenpos(lw)[1],
+        '再建 head が一覧と同じ行に積まれた'
+      )
+      assert.equals(vim.o.columns, vim.api.nvim_win_get_width(lw), '一覧の全幅が壊れた')
+    end
+  )
+
+  -- 終端 (panel 閉 + base/head 消滅 + 一覧窓のみ): fallback ループが anchor を
+  -- 得られない状態。ここで ensure_pair が nil を返すと bind が nil 窓への窓変数
+  -- 書込で生の error で死に、base_win/head_win=nil が state に残留して以後の窓
+  -- 再建が恒久不能になる。旧実装は一覧窓を anchor に再建できていた (復旧契約)。
+  it(
+    '一覧窓しか残っていない終端でも bind は再建してレビュー続行できる',
+    function()
+      windows.bind(base_buf, head_buf)
+      local lw = windows.open_comment_list()
+      -- 実フロー (handlers/comments_list → render_into) と同じく一覧窓には
+      -- meta.kind='commentlist' の buf が乗る。windows 単体ではその形を模倣する
+      local cl_buf = scratch_buf 'review://comments/sx/terminal.lua'
+      vim.b[cl_buf].review_meta = { kind = 'commentlist' }
+      vim.api.nvim_win_set_buf(lw, cl_buf)
+      windows.hide_panel()
+      vim.api.nvim_win_close(windows.win 'head', true)
+      -- この時点で base と一覧が残る (2 窓)。bind → ensure_pair が stale base を
+      -- 閉じた後、tab 内に一覧窓しか残らない = 終端になる
+      assert.equals(2, #vim.api.nvim_tabpage_list_wins(windows.state().tab))
+
+      local ok, err = pcall(windows.bind, base_buf, head_buf)
+      assert.is_true(ok, '終端 (一覧窓のみ) で bind が死んだ: ' .. tostring(err))
+      assert.equals('base', windows.role_of(windows.win 'base'))
+      assert.equals('head', windows.role_of(windows.win 'head'))
+    end
+  )
+
   it(
     'bind は窓が消えていればペアを再建する (drift 復旧。open_file 再張付の前提)',
     function()
@@ -385,6 +433,129 @@ describe('windows panel toggle', function()
     assert.is_true(
       vim.fn.win_screenpos(windows.win 'panel')[2] < vim.fn.win_screenpos(windows.win 'base')[2]
     )
+  end)
+
+  -- 壊れ方の pin (issue #37): 一覧 (最下部全幅) がある状態で <leader>b を 2 回押すと、
+  -- 旧実装の vsplit + wincmd H は panel を画面の全高で最左へ寄せ、一覧が L 字に崩れた。
+  -- panel は上段の左 (leftabove vsplit) に再建され、一覧の全幅が保たれること。
+  it(
+    '一覧がある状態で panel を再建しても一覧は最下部・全幅のまま (L 字にならない)',
+    function()
+      local lw = windows.open_comment_list()
+
+      windows.hide_panel()
+      windows.show_panel(sb_buf)
+
+      local st = windows.state()
+      -- panel + base + head + 一覧
+      assert.equals(4, #vim.api.nvim_tabpage_list_wins(st.tab))
+      assert.equals('panel', windows.role_of(windows.win 'panel'))
+      assert.is_true(
+        vim.fn.win_screenpos(windows.win 'panel')[2] < vim.fn.win_screenpos(windows.win 'base')[2]
+      )
+      assert.is_true(
+        vim.fn.win_screenpos(lw)[1] > vim.fn.win_screenpos(windows.win 'head')[1],
+        '一覧が最下部でない'
+      )
+      assert.equals(
+        vim.o.columns,
+        vim.api.nvim_win_get_width(lw),
+        '一覧の全幅が壊れた (L 字)'
+      )
+    end
+  )
+
+  -- 同族の終端: show_panel も anchor (base/head) が両方 nil だと生の error で死ぬ
+  -- (<leader>e が不通になる)。ensure_pair と同じく tab に残る窓 (一覧窓) を
+  -- anchor に再建する。
+  it(
+    '一覧窓しか残っていない終端でも show_panel は panel を再建する (生の error で死なない)',
+    function()
+      local lw = windows.open_comment_list()
+      local cl_buf = scratch_buf 'review://comments/sx/terminal2.lua'
+      vim.b[cl_buf].review_meta = { kind = 'commentlist' }
+      vim.api.nvim_win_set_buf(lw, cl_buf)
+      windows.hide_panel()
+      vim.api.nvim_win_close(windows.win 'head', true)
+      vim.api.nvim_win_close(windows.win 'base', true)
+      assert.equals(1, #vim.api.nvim_tabpage_list_wins(windows.state().tab))
+
+      local ok, pw = pcall(windows.show_panel, sb_buf)
+      assert.is_true(ok, '終端 (一覧窓のみ) で show_panel が死んだ: ' .. tostring(pw))
+      assert.is_true(vim.api.nvim_win_is_valid(pw))
+      assert.equals('panel', windows.role_of(windows.win 'panel'))
+      assert.equals(2, #vim.api.nvim_tabpage_list_wins(windows.state().tab))
+    end
+  )
+end)
+
+describe('windows.open_comment_list: 一覧窓 (レビュー tab 最下部・全幅)', function()
+  use_env()
+
+  it('最下部に全幅で開き、分割元の窓 diff opts を退避する', function()
+    windows.open { dir = OTHER_DIR, on_tab_closed = function() end }
+    windows.bind(scratch_buf 'review://base/s/a.lua', scratch_buf 'review://head/s/a.lua')
+
+    local w = windows.open_comment_list()
+
+    local row = vim.fn.win_screenpos(w)[1]
+    assert.is_true(
+      row > vim.fn.win_screenpos(windows.win 'panel')[1],
+      '一覧が panel より下に無い'
+    )
+    assert.is_true(
+      row > vim.fn.win_screenpos(windows.win 'base')[1],
+      '一覧が base より下に無い'
+    )
+    assert.is_true(
+      row > vim.fn.win_screenpos(windows.win 'head')[1],
+      '一覧が head より下に無い'
+    )
+    -- 全幅: 左端から tab 全幅
+    assert.equals(1, vim.fn.win_screenpos(w)[2])
+    assert.equals(vim.o.columns, vim.api.nvim_win_get_width(w))
+    -- 分割元 (head 窓) の窓 diff opts を継承しない
+    assert.equals(false, vim.wo[w].diff)
+    assert.equals('manual', vim.wo[w].foldmethod)
+    -- 分割元の窓は退避しない (head は窓 diff のまま)
+    assert.equals(true, vim.wo[windows.win 'head'].diff)
+  end)
+
+  it('splitright がどちらでも最下部に開く', function()
+    windows.open { dir = OTHER_DIR, on_tab_closed = function() end }
+    local before = vim.o.splitright
+    vim.o.splitright = true
+
+    local w = windows.open_comment_list()
+
+    assert.is_true(
+      vim.fn.win_screenpos(w)[1] > vim.fn.win_screenpos(windows.win 'head')[1],
+      '一覧が最下部でない (splitright=true)'
+    )
+    assert.equals(vim.o.columns, vim.api.nvim_win_get_width(w))
+    vim.o.splitright = before
+  end)
+
+  it('高さは config.comment_list_height + winfixheight', function()
+    windows.open { dir = OTHER_DIR, on_tab_closed = function() end }
+    local config = require 'review.config'
+    config.setup { comment_list_height = 6 }
+
+    local w = windows.open_comment_list()
+
+    assert.equals(6, vim.api.nvim_win_get_height(w))
+    assert.equals(true, vim.wo[w].winfixheight)
+  end)
+
+  it('review tab 以外の窓から呼んでも review tab の窓として開く', function()
+    windows.open { dir = OTHER_DIR, on_tab_closed = function() end }
+    vim.cmd 'tabnew'
+    assert.is_not.equals(windows.state().tab, vim.api.nvim_get_current_tabpage())
+
+    local w = windows.open_comment_list()
+
+    assert.equals(windows.state().tab, vim.api.nvim_win_get_tabpage(w))
+    assert.equals(windows.state().tab, vim.api.nvim_get_current_tabpage())
   end)
 end)
 

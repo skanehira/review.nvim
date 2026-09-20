@@ -37,7 +37,7 @@ local SECTIONS = {
       },
       {
         'comments_list',
-        'コメント一覧 (横断) を開く (:Review comments と同じ。既に開いていればその窓へ focus)',
+        'コメント一覧 (横断) をレビュー tab の最下部に全幅で開く (:Review comments と同じ。既に開いていればその窓へ focus)',
       },
       { 'view_comments', 'カーソル行のコメントを閲覧 (read-only)' },
     },

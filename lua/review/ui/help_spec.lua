@@ -82,8 +82,8 @@ describe('help.open', function()
     assert.is_true(
       has_line(
         lines,
-        '- **<leader>c** コメント一覧 (横断) を開く (:Review comments と同じ。'
-          .. '既に開いていればその窓へ focus)'
+        '- **<leader>c** コメント一覧 (横断) をレビュー tab の最下部に全幅で開く'
+          .. ' (:Review comments と同じ。既に開いていればその窓へ focus)'
       )
     )
     assert.is_true(has_line(lines, '- **i** カーソル行のコメントを閲覧 (read-only)'))

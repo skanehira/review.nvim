@@ -186,8 +186,18 @@ function M.role_of(win)
   return nil
 end
 
+--- 一覧窓 (commentlist buffer を表示する窓) か。ensure_pair の anchor に選ばない:
+--- 最下部全幅の一覧から分割すると base/head が一覧の行内に積まれる (issue #37)。
+local function is_commentlist_win(w)
+  if not valid_win(w) then
+    return false
+  end
+  local meta = vim.b[vim.api.nvim_win_get_buf(w)].review_meta or {}
+  return meta.kind == 'commentlist'
+end
+
 --- base/head 窓のペアを確保する。どちらかの窓が消えていれば panel (または
---- 専有 tab 内の生き窓) を基準に右端から再建する。内容が差し替わっただけの
+--- 専有 tab 内の生き窓) を基準に再建する。内容が差し替わっただけの
 --- drift は窓そのものが生きているので set_buf の張り直しで復旧する (再建不要)。
 local function ensure_pair()
   local base_ok = valid_win(st.base_win) and vim.api.nvim_win_get_tabpage(st.base_win) == st.tab
@@ -207,17 +217,31 @@ local function ensure_pair()
       and st.panel_win
     or nil
   if anchor == nil then
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(st.tab)) do
+      if not is_commentlist_win(w) then
+        anchor = w
+        break
+      end
+    end
+  end
+  if anchor == nil then
+    -- 終端: tab 内に一覧窓しか残っていない (panel 閉 + base/head 消滅)。ここで
+    -- nil を返すと bind が nil 窓への窓変数書込で生の error で死に、base_win /
+    -- head_win = nil が state に残留して以後の窓再建が恒久不能になる。旧実装と
+    -- 同じく一覧窓を最終 fallback の anchor に再建する (レイアウトは崩れ得るが
+    -- 再建とレビュー続行は成立する — issue #37 review r1 finding 1)。
     anchor = vim.api.nvim_tabpage_list_wins(st.tab)[1]
   end
   if anchor == nil then
     return
   end
   vim.api.nvim_set_current_win(anchor)
-  vim.cmd 'vsplit'
-  vim.cmd 'wincmd L'
+  -- rightbelow vsplit の 2 回で上段に base -> head の順に積む。旧実装の
+  -- `wincmd L` は一覧 (最下部全幅) があると再建窓を画面の全高の右端列へ
+  -- 出し、一覧の全幅を崩すため使わない (issue #37)。
+  vim.cmd 'rightbelow vsplit'
   st.base_win = vim.api.nvim_get_current_win()
-  vim.cmd 'vsplit'
-  vim.cmd 'wincmd L'
+  vim.cmd 'rightbelow vsplit'
   st.head_win = vim.api.nvim_get_current_win()
   apply_pair_opts(st.base_win)
   apply_pair_opts(st.head_win)
@@ -309,7 +333,10 @@ function M.hide_panel()
   st.panel_win = nil
 end
 
---- panel 再建 (focus `<leader>e` / toggle)。左端へ wincmd H で寄せる。
+--- panel 再建 (focus `<leader>e` / toggle)。上段の左へ `leftabove vsplit` で寄せる。
+--- `wincmd H` は使わない: H は panel を画面の全高で最左へ寄せるため、一覧
+--- (最下部全幅) がある状態で再建すると一覧の全幅が L 字に崩れる (issue #37)。
+--- leftabove なら splitright の値によらず panel は上段の左に入る。
 function M.show_panel(buf)
   if st == nil then
     return
@@ -324,9 +351,17 @@ function M.show_panel(buf)
     return pw
   end
   local anchor = M.win 'base' or M.win 'head'
+  if anchor == nil then
+    -- 同族の終端 (panel 閉 + base/head 消滅、tab に一覧窓しか残っていない):
+    -- nil のまま nvim_set_current_win すると生の error で <leader>e が死ぬため、
+    -- tab に残る窓を anchor にする (ensure_pair の最終 fallback と同じ方針)。
+    anchor = vim.api.nvim_tabpage_list_wins(st.tab)[1]
+  end
+  if anchor == nil then
+    return nil
+  end
   vim.api.nvim_set_current_win(anchor)
-  vim.cmd 'vsplit'
-  vim.cmd 'wincmd H'
+  vim.cmd 'leftabove vsplit'
   st.panel_win = vim.api.nvim_get_current_win()
   pw = st.panel_win
   vim.api.nvim_win_set_config(pw, { width = config.get().panel_width })
@@ -335,6 +370,27 @@ function M.show_panel(buf)
     M.set_panel_buf(buf)
   end
   return pw
+end
+
+--- コメント一覧 (横断) の新規窓をレビュー tab の最下部に全幅で作る
+--- (`botright split` + 高さ `config.comment_list_height` + winfixheight)。
+--- 押した窓や splitright に位置が依存しない (comment-list「操作」/ issue #37)。
+--- 分割元の窓 diff opts を継承するため apply_diffoff で退避する (base/head から
+--- 分割しても一覧が diff group に入らない)。バッファの render は呼び出し側
+--- (handlers/comments_list) の責務。`:Review comments` は tab gate を持たないため、
+--- 呼び出し元の tab に依らず review tab へ切替えてから分割する。
+function M.open_comment_list()
+  if st == nil then
+    error('windows.open_comment_list: レビュー tab が開いていません', 2)
+  end
+  if vim.api.nvim_get_current_tabpage() ~= st.tab then
+    vim.api.nvim_set_current_tabpage(st.tab)
+  end
+  vim.cmd(('botright %dsplit'):format(config.get().comment_list_height))
+  local w = vim.api.nvim_get_current_win()
+  vim.wo[w].winfixheight = true
+  apply_diffoff(w)
+  return w
 end
 
 --- 専有 tab 内に作らなかったはずの空窓が残っていた場合の回収 (float 破片 /

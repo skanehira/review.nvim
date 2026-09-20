@@ -11,6 +11,9 @@ M.defaults = {
   auto_notify_resume = true,
   -- file panel (左窓) の幅 (DESIGN.md「API 一覧」config / diff-review「レイアウト」)
   panel_width = 35,
+  -- コメント一覧 (横断) 窓の高さ (行数)。レビュー tab の最下部に全幅で開く
+  -- (comment-list「操作」/ DESIGN.md「API 一覧」config)
+  comment_list_height = 10,
   keymaps = {
     -- 既定値の正本は docs/design/DESIGN.md「デフォルトキーマップ」表。
     -- 移動系は diffview 風の <Tab>/<S-Tab>/[F/]F。S / ]d / [d は廃止済みで
