@@ -343,9 +343,12 @@ outdated 認定 (差分の揺れで対象行を特定できないコメント) �
 		filetype / LSP が効く。base との比較は Neovim 標準の窓 diff
 		(DiffAdd / DiffChange / DiffDelete / DiffText) で、fold・`[c` /
 		`]c` hunk 移動・scrollbind は標準のまま (マップしていない)。
+		追加・削除ファイルは窓 diff を無効化して素の色で開き、種別は
+		winbar のマーク (` · new file` / ` · deleted`) で判別する。
 	base 窓		`git show <base>:<path>` の読み取り専用 scratch。
 		追加ファイルは 0 行 scratch、削除 / binary ファイルは告知
-		scratch に置き換わり窓 diff から退避する (diffoff)。
+		scratch に置き換わり、これらのペアは両窓で窓 diff から退避
+		する (diffoff)。
 	head/base の縮退 (scratch 縮退) は両窓 git show の読み取り専用になる
 		(INFO 通知済み)。
 
