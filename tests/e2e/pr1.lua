@@ -83,6 +83,19 @@ local run = function()
   wait_for(function()
     return vim.uv.fs_stat(wt_root) == nil
   end, 'close 後の worktree dir 消滅')
+  -- fs watcher (E211) は dir 消滅直後の非同期イベントなので少し待ってから見る。
+  -- バッファは remove spawn より先に同期破棄される契約なので、dir 消滅後に
+  -- E211 が出たら破棄漏れ (= issue #40 の回帰)。
+  vim.wait(500, function()
+    return false
+  end)
+  if vim.fn.bufexists(fname) == 1 then
+    fail 'close 後も worktree 内の実ファイルバッファが残っている (E211 の源)'
+  end
+  if vim.fn.execute('messages'):find('E211', 1, true) ~= nil then
+    fail 'close 中に E211 (File no longer available) が出た'
+  end
+  print 'E2E-PR1 bufs-wiped=1 no-e211=1'
   print 'E2E-PR1 closed=1'
   vim.cmd 'qa'
 end

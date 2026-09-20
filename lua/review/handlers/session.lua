@@ -179,11 +179,84 @@ local function owned_worktree(session)
 end
 
 -- close / delete / 開始時の掃除で使う単一の --force 確認文。
-local function force_prompt(path)
+-- n_modified > 0 のときバッファ上の未保存編集を明示する (git status はディスク
+-- しか見ないため、告知しないまま force wipe すると未保存編集を黙って捨てる)。
+local function force_prompt(path, n_modified)
+  if n_modified ~= nil and n_modified > 0 then
+    return (
+      'review.nvim: worktree %s に未コミットの変更または未保存の編集 (バッファ %d 個) があります。'
+      .. '削除して閉じますか？ (git worktree remove --force — ディスクとバッファの編集は破棄されます) [y/N]: '
+    ):format(path, n_modified)
+  end
   return (
     'review.nvim: worktree %s に未コミットの変更があります。削除して閉じますか？ '
     .. '(git worktree remove --force — ディスクの編集は破棄されます) [y/N]: '
   ):format(path)
+end
+
+-- dir 配下の path か (両側を fs_realpath に通して比較する — bufadd は symlink
+-- 解決後の名前を buffer 名に持ち、記録された worktree path は未正規化
+-- (DESIGN「既知の制約」。macOS /var -> /private/var で一致しなくなる)。
+-- 実在しないファイルの buffer は realpath が nil に落ちるため、素の名前同士の
+-- 比較も併用する (raw vs raw / real vs real の 4 組合せで一致を見る)。
+local function is_under_dir(dir, name)
+  local function strip(p)
+    return (p:gsub('/+$', ''))
+  end
+  local dirs = { strip(dir) }
+  local dreal = vim.uv.fs_realpath(dir)
+  if dreal ~= nil then
+    dirs[#dirs + 1] = strip(dreal)
+  end
+  local names = { strip(name) }
+  local nreal = vim.uv.fs_realpath(name)
+  if nreal ~= nil then
+    names[#names + 1] = strip(nreal)
+  end
+  for _, d in ipairs(dirs) do
+    for _, n in ipairs(names) do
+      if n:sub(1, #d + 1) == d .. '/' then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- worktree 配下を指す実ファイルバッファを単体で破棄する (E211 対策)。
+-- Neovim 0.13 は 'autoread' (既定 on) のもとで loaded な全バッファに fs watcher
+-- を張るため (:help timestamp)、dir を消したあとに loaded バッファが残ると
+-- E211: File "..." no longer available が飛ぶ。dir を消す全経路は remove より
+-- 先に同期でこれを呼ぶ責務を持つ。
+-- 選択は nvim_list_bufs() の名前走査 (active.owned_bufs は open_head_real を
+-- 通った分しか載らず、ユーザーが :edit / LSP ジャンプで開いた分を取りこぼす)。
+-- close_buffer は流用しない — あれは win_findbuf の全窓を先に閉じるため、別 tab
+-- で同じファイルを開いていたユーザー窓まで消える。バッファだけ消せばその窓は
+-- 代替バッファへ張り替わり、レイアウトは壊れない。
+local function destroy_worktree_buffers(path)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buf) then
+      local name = vim.api.nvim_buf_get_name(buf)
+      if name ~= '' and name:match '^review://' == nil and is_under_dir(path, name) then
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
+      end
+    end
+  end
+end
+
+-- worktree 配下の modified (未保存) バッファ数 (close の --force 確認に乗せる
+-- 分。git status はディスクのみを見るため、バッファ上の未保存編集はここで数える)。
+local function count_modified_under(path)
+  local n = 0
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buf) and vim.bo[buf].modified then
+      local name = vim.api.nvim_buf_get_name(buf)
+      if name ~= '' and is_under_dir(path, name) then
+        n = n + 1
+      end
+    end
+  end
+  return n
 end
 
 -- ============================================================================
@@ -218,6 +291,7 @@ local function add_with_recovery(args, path, record, cb)
           return
         end
         if record ~= nil and record.created_by_us == true then
+          destroy_worktree_buffers(path)
           git_worktree.remove_dir(path)
           add(function(res3)
             if res3.ok then
@@ -252,6 +326,7 @@ local function cleanup_skipped_record(record, cb)
       return
     end
     local function finish(force)
+      destroy_worktree_buffers(record.path)
       git_worktree.remove({ repo = record.repo, path = record.path, force = force }, function(rres)
         if not rres.ok then
           notify_warn(
@@ -363,8 +438,11 @@ local function close_buffer(bufnr)
 end
 
 -- レビューが所有するバッファを掃除して active を外す (save しない。close/delete
--- 経路用)。head の実ファイルバッファはユーザーの所有物 — 開いたままのもの
--- (modified を含む) は消さない (diff-review「review tab の消滅経路」)。review://*
+-- 経路用)。repo 本体の実ファイルバッファはユーザーの所有物 — 開いたままのもの
+-- (modified を含む) は消さない (diff-review「review tab の消滅経路」)。
+-- created_by_us=true の worktree 配下の実ファイルバッファは例外的に、dir を消す
+-- 終了手順 3 (finish_close / sweep_or_abort 等) が remove の前に破棄する
+-- (E211 対策。ここでは触らない)。review://*
 -- (panel / base / head 縮退 scratch / null / 告知) はここで消す。
 -- extmark / キーマップはこの時点で張った全バッファから除く (残骸 0 契約)。
 local function detach()
@@ -397,6 +475,7 @@ end
 -- closed + created_by_us の記録を残すので、起動 scan が回収できる)。delete の
 -- active 同一 id / closed 残骸の両経路で共有する (pr-worktree.md「セッションの削除」)。
 local function sweep_or_abort(repo, path, finalize)
+  destroy_worktree_buffers(path)
   git_worktree.prune({ repo = repo }, function()
     if git_worktree.remove_dir(path) then
       finalize()
@@ -442,6 +521,10 @@ local function finish_close(current, force, skip_remove, cb, after_remove)
     finish_after_remove()
     return -- INV-3: created_by_us=true の自前作成分のみ削除対象
   end
+  -- git worktree remove は非同期 (vim.system) のため、spawn より先に同期で
+  -- worktree 配下の実ファイルバッファを破棄する (dir 消滅が先だと fs watcher が
+  -- E211 を出す — Neovim 0.13 / 'autoread' 既定 on。detach 済みでレビュー窓は無い)。
+  destroy_worktree_buffers(wt.path)
   wt_with_lock(wt.path, function()
     git_worktree.remove({
       repo = current.session.repo,
@@ -467,6 +550,9 @@ local function finish_close(current, force, skip_remove, cb, after_remove)
 end
 
 -- 終了手順 1: 自前 worktree の未コミット変更を検知し、必要なら確認する。
+-- dirty 判定はディスク (git status) に加えて worktree 配下の modified バッファ
+-- も見る (バッファ上の未保存編集はディスクに無いため git status は clean を返す。
+-- 無告知の force wipe は未保存編集を黙って捨てる = E211 より悪い)。
 -- キャンセルは close を最初から中止 (状態変更を一切走らせない)。
 local function close_with_worktree(cb, after_remove)
   local current = active
@@ -477,9 +563,10 @@ local function close_with_worktree(cb, after_remove)
     finish_close(current, false, false, cb, after_remove)
     return
   end
+  local wt_dir = current.session.worktree.path
   git_worktree.status({
     repo = current.session.repo,
-    path = current.session.worktree.path,
+    path = wt_dir,
   }, function(res)
     if not res.ok then
       -- 検知不能 (dir 消失 etc) を clean と混同しない: 掃除は走らせず WARN。
@@ -487,8 +574,9 @@ local function close_with_worktree(cb, after_remove)
       finish_close(current, false, true, cb, after_remove)
       return
     end
-    if res.data.dirty then
-      confirm(force_prompt(current.session.worktree.path), function(yes)
+    local n_modified = count_modified_under(wt_dir)
+    if res.data.dirty or n_modified > 0 then
+      confirm(force_prompt(wt_dir, n_modified), function(yes)
         if yes then
           finish_close(current, true, false, cb, after_remove)
         end
@@ -1391,8 +1479,10 @@ function M.close()
   return result.ok()
 end
 
---- head/base/panel 窓の q キー。:Review close と同一 (tab を閉じる。ユーザー窓・
---- 開いたままの実ファイルバッファ (modified を含む) は消さない)。
+--- head/base/panel 窓の q キー。:Review close と同一 (tab を閉じる。ユーザー窓と
+--- repo 本体の実ファイルバッファ (modified を含む) は消さない。created_by_us=true
+--- の worktree 配下の実ファイルバッファのみ remove 前に破棄する — pr-worktree
+--- 「セッションとレビューの終了」)。
 function M.close_by_key()
   local res = M.close()
   if not res.ok then
@@ -1478,6 +1568,7 @@ function M.delete(id)
         git_worktree.status({ repo = repo, path = wt.path }, function(sres)
           local dirty = sres.ok and sres.data.dirty
           local function with_remove(force)
+            destroy_worktree_buffers(wt.path)
             wt_with_lock(wt.path, function()
               git_worktree.remove({ repo = repo, path = wt.path, force = force }, function(rres)
                 if rres.ok then

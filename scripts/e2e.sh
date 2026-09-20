@@ -562,6 +562,20 @@ git -C "$REPO_PR" worktree add --detach "$WT5" review-nvim/pr-7 >/dev/null 2>&1 
   echo 'e2e: delete fixture の残骸 worktree が作れない' >&2
   exit 1
 }
+# pr6 は delete の残骸掃除経路 (dir 実在チェック -> バッファ破棄 -> remove) を pin
+# する。ただし JSON が closed のままだと pr6 起動時の worktree scan が残骸と分類
+# して先に dir を消す (health「closed + dir 残骸」) ため、delete の dir 実在分岐に
+# 到達できない。delete は status を読まないので、scan を沈めるためだけに status を
+# open に書き換える (delete の dir/ref/JSON 掃除契約は不変)。
+python3 - "$(JSON_OF "$D_PR5")" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    data = json.load(f)
+data['status'] = 'open'
+with open(path, 'w') as f:
+    json.dump(data, f)
+PYEOF
 OUTP6=$(mktemp "$WORK/pr6.out.XXXXXX")
 run_pr "$REPO_ROOT/tests/e2e/pr6.lua" "$D_PR5" >"$OUTP6" 2>&1 || pr_fail "$OUTP6" "pr phase6(delete 掃除)"
 grep -q 'E2E-PR6 swept=1' "$OUTP6" || pr_fail "$OUTP6" 'pr phase6(delete 掃除)'

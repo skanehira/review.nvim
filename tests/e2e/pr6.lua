@@ -26,6 +26,15 @@ end
 
 vim.defer_fn(function()
   local ok, err = pcall(function()
+    -- 残骸 dir 内のファイルを指す loaded バッファを作る (旧セッションの残留
+    -- バッファ模擬)。delete の掃除がこれを消すことを観測する (消えないと dir
+    -- 消滅後に fs watcher が E211 を出す — issue #40)。
+    local fname = vim.uv.fs_realpath(vim.fs.joinpath(wt_root, 'a.lua'))
+    local probe = vim.fn.bufadd(fname)
+    vim.fn.bufload(probe)
+    if vim.fn.bufexists(probe) ~= 1 then
+      fail '前提: 残骸 dir のファイルバッファが作れていない'
+    end
     vim.cmd 'Review delete pr-7'
     if
       not vim.wait(10000, function()
@@ -34,7 +43,16 @@ vim.defer_fn(function()
     then
       fail 'delete 掃除 (dir/ref/JSON) timeout'
     end
-    print 'E2E-PR6 swept=1'
+    vim.wait(500, function()
+      return false
+    end)
+    if vim.fn.bufexists(probe) == 1 then
+      fail 'delete 後も worktree 内の実ファイルバッファが残っている (E211 の源)'
+    end
+    if vim.fn.execute('messages'):find('E211', 1, true) ~= nil then
+      fail 'delete 中に E211 (File no longer available) が出た'
+    end
+    print 'E2E-PR6 swept=1 bufs-wiped=1'
     vim.cmd 'qa'
   end)
   if not ok then
