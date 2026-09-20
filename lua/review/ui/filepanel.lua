@@ -73,7 +73,10 @@ local function set_selection(buf, row)
     return
   end
   sel_mark[buf] = vim.api.nvim_buf_set_extmark(buf, sel_ns, row - 1, 0, {
-    line_hl_group = 'ReviewPanelFile',
+    -- 選択行は CursorLine link の専用 group。背景を持つ group (ReviewPanelFile)
+    -- を line_hl_group に張ると行末〜窓右端が Normal 背景で cursorline を
+    -- 打ち消す (issue #35)。
+    line_hl_group = 'ReviewPanelSelection',
   })
 end
 
@@ -230,6 +233,8 @@ function M.render(session, files, opts)
     end
     vim.api.nvim_win_set_cursor(win, { target, 0 })
     vim.wo[win].cursorline = true
+    -- cursorlineopt=number のユーザー環境でも行背景が出るように明示 (issue #35)
+    vim.wo[win].cursorlineopt = 'line'
     set_selection(buf, target)
   end
   return buf

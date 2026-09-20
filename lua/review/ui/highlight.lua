@@ -20,14 +20,16 @@ local DEFAULTS = {
   ReviewDiffDelete = { link = 'DiffDelete' },
   ReviewDiffHunk = { link = 'diffLine' },
   -- file panel (DESIGN「命名」basename / dir 行 / git status 記号 / コメント有無 /
-  -- 増減数)。basename は既定無着色 = Normal link。選択行 hl も ReviewPanelFile
-  -- (diff-review「file panel」相互ハイライト)。±は + 緑 / - 赤、コメントアイコンは Comment grey。
+  -- 増減数)。basename は既定無着色 = Normal link。±は + 緑 / - 赤、コメントアイコンは
+  -- Comment grey。選択行 hl は専用 group (CursorLine link) — 背景を持つ group を
+  -- line_hl_group に張ると cursorline 背景が打ち消されるため分離 (issue #35)。
   ReviewPanelFile = { link = 'Normal' },
   ReviewPanelDir = { link = 'Directory' },
   ReviewPanelStatus = { link = 'Comment' },
   ReviewPanelComment = { link = 'Comment' },
   ReviewPanelAdd = { link = 'Added' },
   ReviewPanelRemove = { link = 'Removed' },
+  ReviewPanelSelection = { link = 'CursorLine' },
   -- session 一覧 (:Review list) の grey 行 (repo path 消失で <Enter> 不可)。
   -- file panel 側では未使用 (2026-09 改訂で親パスサフィックスを撤去)。
   ReviewPanelMeta = { link = 'Comment' },

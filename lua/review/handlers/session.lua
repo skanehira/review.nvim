@@ -658,6 +658,8 @@ local function apply_chrome()
   if pw ~= nil then
     -- 相互ハイライト: 選択行 hl (filepanel) + 窓 cursorline (diff-review「file panel」)
     vim.wo[pw].cursorline = true
+    -- cursorlineopt=number のユーザー環境でも行背景が出るように明示 (issue #35)
+    vim.wo[pw].cursorlineopt = 'line'
   end
   ui_chrome.window(bw)
   ui_chrome.window(hw)
