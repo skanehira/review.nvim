@@ -48,6 +48,16 @@ local function refresh_commentlist()
   require('review.handlers.comments_list').refresh()
 end
 
+-- セッション一覧 (:Review list) の追随 (persistence-restore「:Review list」)。
+-- 状態変化は persist (全 save 経路の唯一の出口) と delete finalize の 2 箇所から
+-- 発火し、表示中の一覧だけ再読込する (セッション一覧は「どの状態変更でも常に全
+-- 再読込でよい」— file panel / コメント一覧の経路別分岐とは意図が違う)。
+-- sessions_list は restore -> session を top-level require するチェーン上にある
+-- ため、comments_list と同じく発火時の遅延解決にする (DESIGN「既知の制約」)。
+local function refresh_sessionlist(repo)
+  require('review.handlers.sessions_list').refresh(repo)
+end
+
 -- 差分がまるごと消えた開通の情報プレースホルダ path (diff-review「セッション開始時の
 -- 初期開き」: open_file の代わりに「変更なし」scratch を base/head 窓へ張り、
 -- outdated 集約もそこへ出す)。
@@ -426,6 +436,12 @@ local function persist()
     -- INV-4 の留保: メモリ上の状態は保ち WARN。次の save 時に再挑戦する。
     notify_warn(res.error)
   end
+  -- 表示中のセッション一覧 (:Review list) へ追随する (status / comments 数 /
+  -- 更新時刻の列が古いままにならない。persist は begin_session / commit_comment_change /
+  -- toggle_viewed_current / apply_refresh / close 経路という全 save 経路の唯一の
+  -- 出口なのでここ 1 箇所でよい。表示中ガードは refresh 側 = 一覧を開いていない
+  -- 通常の操作にコストはほぼ乗らない)。
+  refresh_sessionlist(active.session.repo)
 end
 
 local function close_buffer(bufnr)
@@ -503,11 +519,12 @@ end
 -- 読めない — pr-worktree.md「セッションの削除」手順 1〜3)。
 local function finish_close(current, force, skip_remove, cb, after_remove)
   current.session.status = 'closed'
-  local res = store.save(current.session)
+  -- persist (全 save 経路の唯一の出口) を通る: current == active (detach 前で
+  -- INV-1 のため他セッションに化けない)。失敗 WARN は persist 側。q close による
+  -- status 列変化をセッション一覧 (:Review list) へ追随させる
+  -- (persistence-restore「:Review list の再 render (アクション後の追随)」)。
+  persist()
   detach()
-  if not res.ok then
-    notify_warn(res.error)
-  end
   if cb ~= nil then
     cb()
   end
@@ -711,6 +728,19 @@ local function head_text_width()
     return nil
   end
   return vim.api.nvim_win_get_width(hw) - info.textoff
+end
+
+-- extmark 再適用の共通経路 (呼び出し元 = resolve_and_open / commit_comment_change /
+-- apply_refresh で同一判定が散っていたのを 1 つにする)。対象 = 実ファイル /
+-- 縮退 head scratch / no-changes プレースホルダ (outdated 集約の再適用先。
+-- commit_comment_change で no-changes を抜かすと placeholder 窓での CRUD で集約
+-- mark が消えたまま復活しない)。告知窓 (deleted / binary) は張替先を持たないので
+-- 掃除のみ。再描画は常に session から捨てて再構成 (バッファ側に真実を置かない)。
+local function reapply_marks(session, cur)
+  ui_commentmarks.clear_tracked()
+  if cur ~= nil and (cur.kind == 'real' or cur.kind == 'degraded' or cur.kind == 'no-changes') then
+    ui_commentmarks.apply(session, cur.head_buf, cur.path, { max_width = head_text_width() })
+  end
 end
 
 -- コメント箱幅は apply 時点の head 窓幅で固定されるため、リサイズで同じ経路で
@@ -953,8 +983,7 @@ local function resolve_and_open(path, opts)
     ui_windows.bind(buf, buf, { diffoff = 'both' })
     active.current = cur
     -- 張り先が無い outdated (全ファイル消滅) は placeholder に集約する
-    ui_commentmarks.clear_tracked()
-    ui_commentmarks.apply(session, buf, M.NO_CHANGES, { max_width = head_text_width() })
+    reapply_marks(session, cur)
     apply_chrome()
     return
   end
@@ -1024,10 +1053,7 @@ local function resolve_and_open(path, opts)
   -- extmark 再適用: 常に session から捨てて再構成。「同一バッファの全窓に
   -- スレッドが見える」仕様なので掃除済み残骸の再適用のみここで行う
   -- (ui/commentmarks が張った全バッファを tracking し、close / 切替で clear)。
-  ui_commentmarks.clear_tracked()
-  if cur.kind == 'real' or cur.kind == 'degraded' or cur.kind == 'no-changes' then
-    ui_commentmarks.apply(active.session, cur.head_buf, path, { max_width = head_text_width() })
-  end
+  reapply_marks(active.session, cur)
 
   -- panel カーソルを開いたファイル行へ逆追従 (<CR> 以外の移動系・初期開き含む)。
   -- open はレビュー完了マーク (files[path].viewed = 行頭 [✓]) を変えない:
@@ -1527,6 +1553,9 @@ function M.delete(id)
             notify_warn(res.error)
             return
           end
+          -- JSON 削除完了直後にセッション一覧 (:Review list) へ追随する
+          -- (persistence-restore「:Review list」。行が消え、winbar の件数も減る)。
+          refresh_sessionlist(repo)
           -- このセッション用に作った自前 ref (review-nvim/pr-<n>) も消す
           -- (close では残し、delete だけで消す — DESIGN.md「既知の制約」ref 方針)。
           local pr = sess.pr
@@ -1785,12 +1814,7 @@ function M.commit_comment_change()
   end
   persist()
   if active.current ~= nil then
-    ui_commentmarks.clear_tracked()
-    if active.current.kind == 'real' or active.current.kind == 'degraded' then
-      ui_commentmarks.apply(active.session, active.current.head_buf, active.current.path, {
-        max_width = head_text_width(),
-      })
-    end
+    reapply_marks(active.session, active.current)
   end
   -- panel のコメントアイコンを CRUD 直後に反映する (ユーザー報告: c で追加しても
   -- ツリーに出ない)。表示中のときだけ render し直す — filepanel.render は表示中
@@ -2124,10 +2148,7 @@ local function apply_refresh(current, files)
   end
   -- extmark 再適用: 常に session から捨てて再構成 (resolve_and_open と同一契約)。
   -- 告知窓 (deleted / binary) は張替先を持たないので掃除のみ。
-  ui_commentmarks.clear_tracked()
-  if cur ~= nil and (cur.kind == 'real' or cur.kind == 'degraded' or cur.kind == 'no-changes') then
-    ui_commentmarks.apply(session, cur.head_buf, cur.path, { max_width = head_text_width() })
-  end
+  reapply_marks(session, cur)
   refresh_panel()
   refresh_commentlist()
   for _, win in ipairs(vim.api.nvim_list_wins()) do

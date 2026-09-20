@@ -2194,6 +2194,72 @@ describe('commit_comment_change (INV-4 + extmark 再適用)', function()
       assert.equals(1, #load_saved().comments)
     end
   )
+
+  it(
+    'placeholder 窓 (no-changes) でコメントを削除しても残り outdated の集約 extmark が復活する',
+    function()
+      -- 差分まるごと消滅の既存セッション (outdated 2 件) を復元 -> placeholder に集約
+      local existing = existing_stub {
+        status = 'open',
+        comments = {
+          {
+            id = 'c1',
+            file = 'a.lua',
+            line = 2,
+            end_line = 2,
+            body = 'ghost one',
+            anchor = { before = vim.NIL, line = 'gone one', after = vim.NIL },
+            state = 'outdated',
+            created_at = 1,
+          },
+          {
+            id = 'c2',
+            file = 'a.lua',
+            line = 3,
+            end_line = 3,
+            body = 'ghost two',
+            anchor = { before = vim.NIL, line = 'gone two', after = vim.NIL },
+            state = 'outdated',
+            created_at = 2,
+          },
+        },
+      }
+      install_git { top_ok }
+      session_handler.resume_into(existing, {}, vim.NIL, false)
+
+      local head_buf = vim.fn.bufnr('review://base/' .. SLUG .. '/(no-changes)')
+      local ns = vim.api.nvim_get_namespaces().review_comment
+      local function mark_texts()
+        local out = {}
+        local marks = vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, { details = true })
+        for _, m in ipairs(marks) do
+          if m[4].virt_lines ~= nil then
+            for _, vl in ipairs(m[4].virt_lines) do
+              for _, chunk in ipairs(vl) do
+                out[#out + 1] = type(chunk[1]) == 'table' and chunk[1][1] or chunk[1]
+              end
+            end
+          end
+        end
+        return table.concat(out, '\n')
+      end
+      local function mark_count()
+        return #vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, {})
+      end
+      assert.equals(1, mark_count(), '前提: 集約 mark が 1 件 (placeholder 開通直後)')
+      assert.is_truthy(mark_texts():find('c1', 1, true), mark_texts())
+
+      -- placeholder 窓での削除 (commit_comment_change 経路): clear_tracked 後も
+      -- no-changes への再適用で集約が復活する (real / degraded と同一条件)。
+      table.remove(session_handler.active().comments, 1)
+      session_handler.commit_comment_change()
+
+      assert.equals(1, mark_count(), '削除後に集約 mark が消えたまま復活しない')
+      local texts = mark_texts()
+      assert.is_truthy(texts:find('c2', 1, true), texts)
+      assert.is_falsy(texts:find('c1', 1, true), texts)
+    end
+  )
 end)
 
 -- ---------------------------------------------------------------------------
@@ -3791,6 +3857,88 @@ describe(
     )
   end
 )
+
+-- ---------------------------------------------------------------------------
+-- セッション一覧の追随 (persist 1 箇所フック / :Review list)
+-- ---------------------------------------------------------------------------
+describe('セッション一覧の追随 (persist 経路 / :Review list)', function()
+  use_env()
+
+  local list_buf
+
+  -- :Review list の窓を模す: review tab 外 (隔離 tab) の vsplit に一覧を表示。
+  -- render は ui/list 直接 (M.open は別の git 応答キューを消費するため)。
+  local function open_sessionlist()
+    vim.api.nvim_set_current_tabpage(state.tab)
+    list_buf = require('review.ui.list').render_sessionlist(store.list(state.repo).data, {
+      repo = state.repo,
+    })
+    vim.cmd 'vsplit'
+    vim.api.nvim_win_set_buf(0, list_buf)
+  end
+
+  local function session_row()
+    for _, line in ipairs(vim.api.nvim_buf_get_lines(list_buf, 0, -1, false)) do
+      if line:find(SLUG, 1, true) ~= nil then
+        return line
+      end
+    end
+    return nil
+  end
+
+  it(
+    'x / コメント CRUD / R のあと、開いている一覧の comments 列と更新時刻が追随する',
+    function()
+      start_done('main', 'feature')
+      open_sessionlist()
+      local before = assert(session_row(), '一覧にセッション行が無い')
+      assert.is_truthy(before:find(' 0 comments', 1, true), before)
+
+      -- コメント CRUD (commit_comment_change -> persist): comments 列が追随する
+      inject_comment 'list follow thread'
+      assert.is_truthy(session_row():find(' 1 comments', 1, true), session_row())
+
+      -- x (toggle_viewed_current -> persist): 更新時刻列が現在時刻へ追随する
+      store._set_now(function()
+        return 5000
+      end)
+      focus_panel_file 'a.lua'
+      session_handler.toggle_viewed_current()
+      local after_x = assert(session_row())
+      assert.is_truthy(after_x:find(' 1 comments', 1, true), after_x)
+      assert.is_truthy(after_x:find(os.date('%Y-%m-%d %H:%M', 5000), 1, true), after_x)
+
+      -- R (差分再取得 -> apply_refresh -> persist): 件数を維持したまま時刻が追随する
+      store._set_now(function()
+        return 6000
+      end)
+      local abuf = session_file_buf 'a.lua'
+      install_git {
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+      }
+      fire_buf_write_post(abuf)
+      local after_r = assert(session_row())
+      assert.is_truthy(after_r:find(' 1 comments', 1, true), after_r)
+      assert.is_truthy(after_r:find(os.date('%Y-%m-%d %H:%M', 6000), 1, true), after_r)
+    end
+  )
+
+  it('q close のあと、開いている一覧の status 列が closed へ追随する', function()
+    start_done('main', 'feature')
+    open_sessionlist()
+    assert.is_truthy(session_row():find(' open ', 1, true), '前提: 一覧は open 行')
+
+    session_handler.close() -- コメント 0 件 = 確認なし
+
+    assert.is_truthy(session_row():find(' closed ', 1, true), session_row())
+    -- ディスクも closed (INV 判定はメモリでなくディスク)
+    assert.equals('closed', load_saved().status)
+  end)
+end)
 
 -- ---------------------------------------------------------------------------
 -- file panel ツリー表示 / view state (issue-17 の handlers 側契約)。
