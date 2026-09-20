@@ -1870,6 +1870,50 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
   )
 
   it(
+    'panel 起点の移動系 (<Tab>/<S-Tab>/[F/]F) も focus を panel に維持する (<CR> と同じ)',
+    function()
+      start_done('main', 'feature')
+
+      -- <Tab>: 現対象 a.lua の次 = b.lua
+      focus_panel_file 'a.lua'
+      session_handler.next_file()
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+      assert.equals(state.repo .. '/b.lua', head_buf_name())
+      assert.equals(
+        panel_row_for('file', 'b.lua'),
+        vim.api.nvim_win_get_cursor(ui_windows.win 'panel')[1]
+      )
+
+      -- [F]: b.lua -> a.lua
+      session_handler.first_file()
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+      assert.equals(state.repo .. '/a.lua', head_buf_name())
+      assert.equals(
+        panel_row_for('file', 'a.lua'),
+        vim.api.nvim_win_get_cursor(ui_windows.win 'panel')[1]
+      )
+
+      -- ]F: a.lua -> b.lua
+      session_handler.last_file()
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+      assert.equals(state.repo .. '/b.lua', head_buf_name())
+      assert.equals(
+        panel_row_for('file', 'b.lua'),
+        vim.api.nvim_win_get_cursor(ui_windows.win 'panel')[1]
+      )
+
+      -- <S-Tab>: b.lua -> a.lua
+      session_handler.prev_file()
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+      assert.equals(state.repo .. '/a.lua', head_buf_name())
+      assert.equals(
+        panel_row_for('file', 'a.lua'),
+        vim.api.nvim_win_get_cursor(ui_windows.win 'panel')[1]
+      )
+    end
+  )
+
+  it(
     '<CR> は窓役割の drift を復旧する (head 窓を閉じていても再建して張る)',
     function()
       start_done('main', 'feature')
