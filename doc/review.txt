@@ -238,7 +238,8 @@ KEYMAPS						*review-keymaps*
 	o		<CR> と同じ «entry を開く» (2026-09 まで存在した «実ファ
 			イルを別 tab で開く» は削除。head 窓が実ファイルそのもの)
 	l		<CR> と同じ «entry を開く» (ツリー UI の慣習のエイリアス)
-	<Tab>		次のファイル (一覧順 = <CR> と同一処理。端は無動作)
+	<Tab>		次のファイル (一覧順 = <CR> と同一処理。focus も
+			panel に残る。端は無動作)
 	<S-Tab>		前のファイル (同上)
 	[F		最初のファイル (上記と同じ規則)
 	]F		最後のファイル (上記と同じ規則)
@@ -259,7 +260,8 @@ KEYMAPS						*review-keymaps*
 
 	panel のカーソル移動だけでは diff を切り替えない。逆にファイルを open_file
 	すると panel のカーソルがその行へ追従する (相互ハイライト: 選択行 +
-	cursorline)。
+	cursorline)。panel から押した移動キー (<Tab>/<S-Tab>/[F/]F) も focus を
+	panel に残す (レビュー窓から押したときは head 窓に残る)。
 
  コメント一覧 (横断)			*review-keymaps-commentlist*
 
