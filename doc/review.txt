@@ -52,10 +52,10 @@ USAGE						*review-usage*
 					モードのみ。掃除は |review-sessions|)
 	:Review list				保存済みセッション一覧 |review-list|
 	:Review comments			現セッションのコメント (絞り込み
-					適用後) を横断一覧で開く
-					(<leader>c と同じ)。開いていれば
-					その窓へ focus。active が無ければ
-					WARN。操作は
+					適用後) を横断一覧でレビュー tab の
+					最下部に全幅で開く (<leader>c と
+					同じ)。開いていればその窓へ focus。
+					active が無ければ WARN。操作は
 					|review-keymaps-commentlist|
 	:Review close				現セッションを保存して閉じる |review-sessions|
 	:Review delete {id}			保存済みセッションを削除
@@ -100,6 +100,7 @@ SETUP						*review-setup*
 		diff_context = nil,        -- diff context 行数 (nil = git 既定 3)
 		auto_notify_resume = true, -- 起動時に open セッションを通知
 		panel_width = 35,          -- file panel (左窓) の幅
+		comment_list_height = 10,  -- コメント一覧窓 (最下部全幅) の高さ
 		keymaps = {},              -- buffer-local キーマップ override
 		highlight = {},            -- グループ別 highlight override
 		winbar = true,           -- review 窓に winbar 情報 (review 外 tab は行を確保しない)
@@ -211,8 +212,9 @@ KEYMAPS						*review-keymaps*
 	<leader>e	file panel (変更ファイル一覧) へ移動 (窓が閉じて
 			いれば左に再建してから移動)
 	<leader>b	file panel の表示トグル (閉じても tab とレビュー窓は残る)
-	<leader>c	コメント一覧 (横断) を開く (:Review comments と同じ。
-			既に開いていればその窓へ focus)
+	<leader>c	コメント一覧 (横断) をレビュー tab の最下部に全幅で
+			開く (:Review comments と同じ。既に開いていれば
+			その窓へ focus)
 	i		カーソル行のコメント全文を read-only 窓 (markdown) で閲覧
 			(編集は e)。q / <Esc> で閉じる
 
@@ -266,7 +268,9 @@ KEYMAPS						*review-keymaps*
  コメント一覧 (横断)			*review-keymaps-commentlist*
 
 	セッションの全コメントをファイル横断の一覧
-	(`review://comments/<session-id>`) で見る。1 行 = 1 コメントで
+	(`review://comments/<session-id>`) で見る。一覧はレビュー tab の最下部に
+	全幅 (高さは既定 10 行・`comment_list_height` で変更可) で開かれ、どの
+	窓から押しても位置は変わらない。1 行 = 1 コメントで
 	«<path>:<line>[-<end>]  [<id>]  <body 1 行目>» (60 文字を超える分は …。
 	outdated は末尾に « ⚠ outdated»)。並びは file panel と同一の tree 表示順
 	(折畳・list 表示は反映しない) → 同一ファイル内 line 昇順。絞り込み (/)
@@ -351,6 +355,9 @@ outdated 認定 (差分の揺れで対象行を特定できないコメント) �
 		追加ファイルは 0 行 scratch、削除 / binary ファイルは告知
 		scratch に置き換わり、これらのペアは両窓で窓 diff から退避
 		する (diffoff)。
+	コメント一覧窓	`<leader>c` / `:Review comments` で開く横断一覧。
+		tab の最下部に全幅 (高さは既定 10 行) で開き、窓 diff には
+		参加しない (詳細は |review-keymaps-commentlist|)。
 	head/base の縮退 (scratch 縮退) は両窓 git show の読み取り専用になる
 		(INFO 通知済み)。
 

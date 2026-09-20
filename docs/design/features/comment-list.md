@@ -7,7 +7,9 @@
 
 セッションの全コメントをファイル横断の一覧で閲覧し、任意のコメント位置へ移動できる
 (MUST 6)。`<leader>c` (head/base 窓・file panel) または `:Review comments` で
-専用 vsplit バッファ `review://comments/<session-id>` を開く。一覧はコメント CRUD・
+専用バッファ `review://comments/<session-id>` をレビュー tab の最下部に全幅
+(高さ既定 10 行・`config.comment_list_height` で変更可) の水平分割で開く。どの
+窓・どの tab から押しても位置は変わらない。一覧はコメント CRUD・
 差分再取得 (drift 再検証)・close に追随して再 render される。行操作で削除/編集/
 prompt yank までできる (diff 窓の同名キーと同一動作)。
 
@@ -47,7 +49,7 @@ prompt yank までできる (diff 窓の同名キーと同一動作)。
 
 | 操作 | 起きること |
 | --- | --- |
-| `<leader>c` / `:Review comments` | 一覧を開く (current tab に vsplit — `:Review list` と同型)。既に開いていればその窓へ focus (別 tab でも tab を切替えて focus。再 vsplit しない。内容は常に最新)。active 0 件はコマンド層が WARN «アクティブなセッションがありません»、handler は `E_NOT_ACTIVE` を返す |
+| `<leader>c` / `:Review comments` | 一覧を開く (レビュー tab の最下部に全幅の水平分割 — どの窓・どの tab から押しても位置は変わらない。tab gate を持たないため、別 tab から押すと review tab へ切替えてから開く)。既に開いていればその窓へ focus (別 tab でも tab を切替えて focus。再分割しない。内容は常に最新)。active 0 件はコマンド層が WARN «アクティブなセッションがありません»、handler は `E_NOT_ACTIVE` を返す |
 | `<CR>` | カーソル行コメントの位置へジャンプ (下記) |
 | `d` | 行コメントを削除 (一覧専用の arming 二重押し = 同じ comment id・2 秒内。diff 窓の arming とは共有しない。arming は編集確定・削除確定で解除する (diff 窓と同じ規則)。通知文言は diff と同じ «コメント %s を削除しました») |
 | `e` | 行コメントを編集 (diff `e` と同じ float。確定で session 永続化 + 追随) |
@@ -82,8 +84,8 @@ prompt yank までできる (diff 窓の同名キーと同一動作)。
 - session close (`q` / `:Review close`) では再 render せず、一覧窓を閉じるだけに
   する (バッファは bufhidden=wipe。閉じる直前の render は行わない)
 - ユーザーが `:close` / TabClosed で一覧窓を手で閉じた場合: bufhidden=wipe で
-  バッファも消え、`BufUnload` で一覧 state を掃除する。次回 `<leader>c` は新規の
-  vsplit を作る
+  バッファも消え、`BufUnload` で一覧 state を掃除する。次回 `<leader>c` は最下部に
+  新規の一覧窓を作る
 
 ## 実装の配置
 
