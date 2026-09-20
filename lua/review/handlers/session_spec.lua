@@ -769,7 +769,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
   )
 
   it(
-    '削除ファイル: head 窓は告知 scratch + diffoff (base は窓 diff 継続)、base 窓は git show',
+    '削除ファイル: head 窓は告知 scratch + 両窓 diffoff、base 窓は git show',
     function()
       install_git {
         top_ok,
@@ -791,9 +791,10 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       local lines = vim.api.nvim_buf_get_lines(head_buf, 0, -1, false)
       assert.equals(1, #lines)
       assert.is_true(lines[1]:find('deleted', 1, true) ~= nil)
-      -- diffoff=head: 告知窓だけ窓 diff から抜け、base 窓は窓 diff を継続
+      -- 削除は告知ペア (head 告知 1 行 / base 旧内容) なので両窓で窓 diff を抜ける
+      -- (相手のいない diff ペアを作らない — issue #38)
       assert.equals(false, vim.wo[ui_windows.win 'head'].diff)
-      assert.equals(true, vim.wo[ui_windows.win 'base'].diff)
+      assert.equals(false, vim.wo[ui_windows.win 'base'].diff)
       -- git show 充填は base 窓のみ (head 実ファイル編集事故を作らない)
       assert.is_true(has_call 'git show main:c.lua')
       assert.is_false(has_call 'git show feature:c.lua')
@@ -843,6 +844,60 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
       assert.equals(state.repo .. '/b.lua', head_buf_name())
       assert.is_false(has_call 'git show main:b.lua')
+    end
+  )
+
+  it(
+    '追加ファイル (A): base が 0 行 null scratch なので両窓で窓 diff を無効にし、head winbar に new file マークを出す',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+      session_handler.start { base = 'main', head = 'feature' }
+      session_handler.next_file() -- b.lua (A)
+
+      assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
+      assert.equals(state.repo .. '/b.lua', head_buf_name())
+      -- 追加 (A) は base = 0 行 null scratch とのペアなので窓 diff を張らない
+      -- (全行 DiffAdd の塗りつぶしを作らない。M ファイルの窓 diff 有効は別 test が陰性対照)
+      assert.equals(false, vim.wo[ui_windows.win 'head'].diff)
+      assert.equals(false, vim.wo[ui_windows.win 'base'].diff)
+      -- head winbar は既定要素 (+a -d / N comments) を保ったまま末尾に種別マーク
+      -- (base winbar の (new file) と同文言)
+      assert.equals(
+        'main..feature · b.lua · +1 -0 · 0 comments · new file',
+        vim.w[ui_windows.win 'head'].review_winbar
+      )
+    end
+  )
+
+  it(
+    'scratch 縮退 + 追加ファイル (A): base は null scratch のまま両窓 diffoff',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MISMATCH[1],
+        RP_HEAD_MISMATCH[2],
+        showref_ok,
+        status_clean,
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+      state.input_answer = 'n'
+      session_handler.start { base = 'main', head = 'feature' }
+      session_handler.next_file() -- b.lua (A)
+
+      assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
+      assert.equals('review://head/' .. SLUG .. '/b.lua', head_buf_name())
+      -- 縮退経路でも追加 (A) は 0 行 null scratch とのペアなので窓 diff を張らない
+      assert.equals(false, vim.wo[ui_windows.win 'head'].diff)
+      assert.equals(false, vim.wo[ui_windows.win 'base'].diff)
     end
   )
 
@@ -3277,7 +3332,8 @@ describe(
       function()
         start_done('main', 'feature') -- 初期開き a.lua
         session_handler.open_file 'b.lua' -- b.lua を実ファイル窓へ張り替え
-        assert.equals('main..feature · b.lua · +1 -0 · 0 comments', head_winbar())
+        -- b.lua は追加 (A) = head winbar の末尾に種別マークが付く (issue #38)
+        assert.equals('main..feature · b.lua · +1 -0 · 0 comments · new file', head_winbar())
 
         install_git {
           function()
@@ -3292,7 +3348,9 @@ describe(
         -- ゼロ差分として zero clear、一覧と files map からは合成行を作らず除去
         -- (outdated 化はコメントのあるファイル側のテストで pin)。
         assert.equals(state.repo .. '/b.lua', head_buf_name())
-        assert.equals('main..feature · b.lua · +0 -0 · 0 comments', head_winbar())
+        -- リフレッシュは bind しないので窓 diffoff と base (new file) ラベルが維持
+        -- され、head 側の種別マークも維持する (窓状態と winbar の一貫)
+        assert.equals('main..feature · b.lua · +0 -0 · 0 comments · new file', head_winbar())
         assert.same({
           'Changes (2)',
           'Showing changes for: main..作業ツリー',

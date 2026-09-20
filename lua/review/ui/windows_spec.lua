@@ -255,11 +255,13 @@ describe('windows.bind / set_panel_buf: role 導出', function()
   )
 
   it(
-    'deleted: diffoff=head は head 窓だけ窓 diff から抜ける (base 窓は窓 diff を継続)',
+    'deleted: base 旧内容 / head 告知の別 buf ペアでも diffoff=both で両窓が窓 diff から抜ける',
     function()
-      windows.bind(base_buf, head_buf, { diffoff = 'head' })
+      -- 追加・削除は相手のいない窓 diff ペアを作らない (issue #38)。base/head が
+      -- 別 buf の通常ペア形状で両窓退避を pin する
+      windows.bind(base_buf, head_buf, { diffoff = 'both' })
       assert.equals(false, vim.wo[windows.win 'head'].diff)
-      assert.equals(true, vim.wo[windows.win 'base'].diff)
+      assert.equals(false, vim.wo[windows.win 'base'].diff)
       -- gate 役割は抜いても張られたまま (base/head 張り分けの契約は不変)
       assert.equals('base', windows.role_of(windows.win 'base'))
       assert.equals('head', windows.role_of(windows.win 'head'))

@@ -94,7 +94,7 @@ Neovim 内で GitHub の Files changed のようにブランチ (git ref) 間の
 require('review').setup({ keymaps = { diff = { add_comment = 'gc' } } })
 ```
 
-head/base の 2 窓は Neovim 標準の窓 diff (`foldmethod=diff`) で、変更行は `DiffAdd` / `DiffDelete` 系の標準 highlight で色分けされます。hunk 間は `[c` / `]c` (標準)、fold は `za` / `zo` / `zR` (標準) で、レビュー側からのキーマップはありません。ファイル間は `<Tab>` / `<S-Tab>` (次 / 前) と `[F` / `]F` (最初 / 最後)、変更一覧への focus は `<leader>e`、一覧のトグルは `<leader>b`、差分の再取得は `R` です (diffview に近い導線)。
+head/base の 2 窓は Neovim 標準の窓 diff (`foldmethod=diff`) で、変更行は `DiffAdd` / `DiffDelete` 系の標準 highlight で色分けされます。追加・削除ファイルは窓 diff ペアを作らないため**両窓とも窓 diff を無効化**し (head/base とも素の色)、種別は head 窓 winbar のマークで判別できます。hunk 間は `[c` / `]c` (標準)、fold は `za` / `zo` / `zR` (標準) で、レビュー側からのキーマップはありません。ファイル間は `<Tab>` / `<S-Tab>` (次 / 前) と `[F` / `]F` (最初 / 最後)、変更一覧への focus は `<leader>e`、一覧のトグルは `<leader>b`、差分の再取得は `R` です (diffview に近い導線)。
 
 file panel は既定でフォルダツリー表示です。単一 child の dir 連鎖は `a/b/c/` と連結され、dir 行の status は配下の集約 (全部同一記号ならそのまま、混在は `*`)。`<CR>` / `o` / `l` を dir 行で押すと折り畳み、ファイル行で押すと head/base 窓に開きます。開いてもカーソルと focus は file panel に残るので、一覧を辿りながら diff を見比べられます (diff 窓へ移るのは `<Tab>` / `<S-Tab>` / `[F` / `]F` の移動キーと、標準の `<C-w>l` / `<C-w>w`)。フラットなフルパス一覧が見たければ `i` で list 表示へ切替 (絞り込み・折り畳みと並ぶ view state で、セッションには保存されません)。ファイルを移動で開くと panel のカーソルがその行に追従し、選択行がハイライトされます (相互ハイライト)。nvim-web-devicons が入っていればファイルアイコンが自動で出ます (無くてもテキスト表示のまま。ランタイム依存にはなりません)。
 
@@ -118,7 +118,8 @@ setup は冪等にしたい
 
 PR セッションは head の worktree で動くため `@` パスは worktree 内の絶対パスになり、エージェントはその場で実ファイルを読める (レビュー中の diff と完全に同一の内容)。ブランチセッションは現在のチェックアウトが対象なので `@` パスはリポジトリ相対で、レビュー中の作業ツリー (保存済み内容) の実ファイルそのものを指す。outdated 認定されたコメント (差分の揺れで位置が特定できないもの) は既定で除外され、diff 上はスレッド id 接頭辞 (`[c1]`) が警告色で表示されることで判別できる (`⚠` グリフや本文のグレーアウトはしない)。本文は対象行の下に全文スレッドで表示され (GitHub の Files changed と同じ向き)、短いスレッドは 10 行で折りたたまれ、全文は markdown filetype の `i` 閲覧窓に出る。
 review 窓では既定で行番号を隠し、winbar に `base..head · path · +a -d · N comments` を
-表示する (GitHub Files changed 風。`setup` の `winbar` / `number` で戻せる)。表示は
+表示する (GitHub Files changed 風。追加ファイルは末尾に ` · new file`、削除は
+`· deleted` を表示。`setup` の `winbar` / `number` で戻せる)。表示は
 review バーの窓がある tab に限られ、他の tab では winbar の行は確保されない。
 
 ## ドキュメント

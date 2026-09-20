@@ -545,7 +545,8 @@ local function comments_for(session, path)
 end
 
 -- head 窓 winbar (diff-review「窓装飾 (chrome)」)。告知窓 (binary/deleted) は
--- +a -d / 件数を持たないので告知語に差し替える。
+-- +a -d / 件数を持たないので告知語に差し替える。追加 (A) は既定要素の末尾に
+-- 種別マーク ` · new file` を足す (base winbar の `(new file)` と同文言)。
 local function head_winbar_text(session, cur)
   local refs = ('%s..%s'):format(session.base or '', session.head or '')
   if cur.kind == 'no-changes' then
@@ -557,13 +558,17 @@ local function head_winbar_text(session, cur)
   if cur.kind == 'deleted' then
     return ('%s · %s · deleted'):format(refs, cur.path)
   end
-  return ('%s · %s · +%d -%d · %s'):format(
+  local bar = ('%s · %s · +%d -%d · %s'):format(
     refs,
     cur.path,
     cur.file and cur.file.added or 0,
     cur.file and cur.file.deleted or 0,
     plural(comments_for(session, cur.path), 'comment')
   )
+  if cur.kind_base_null == true then
+    bar = bar .. ' · new file'
+  end
+  return bar
 end
 
 local function base_winbar_text(cur)
@@ -836,14 +841,15 @@ local function resolve_and_open(path, opts)
     cur.head_buf = buf
     ui_windows.bind(buf, buf, { diffoff = 'both' })
   elseif file ~= nil and file.status == 'D' then
-    -- 削除: head 窓に告知 scratch + diffoff (:edit 不可 — DESIGN「既知の制約」)。
+    -- 削除: head 窓に告知 scratch (:edit 不可 — DESIGN「既知の制約」)。base = git show
+    -- の旧内容とで告知ペアになり、相手のいない窓 diff を作らないため両窓 diffoff。
     cur.kind = 'deleted'
     local hb = ui_scratchwin.buffer { kind = 'deleted', session_id = session.id, path = path }
     ui_scratchwin.set_content(hb, ui_scratchwin.NOTIFY.deleted)
     track_scratch(hb)
     cur.head_buf = hb
     open_base_scratch(cur, file, token)
-    ui_windows.bind(cur.base_buf, hb, { diffoff = 'head' })
+    ui_windows.bind(cur.base_buf, hb, { diffoff = 'both' })
   else
     open_base_scratch(cur, file, token)
     if active.degraded then
@@ -854,7 +860,12 @@ local function resolve_and_open(path, opts)
       track_scratch(hb)
       cur.head_buf = hb
       fill_show(hb, session.head, path, token, move_line)
-      ui_windows.bind(cur.base_buf, hb)
+      if file ~= nil and file.status == 'A' then
+        -- 縮退でも追加 (A) の base は 0 行 null scratch なので窓 diff を張らない
+        ui_windows.bind(cur.base_buf, hb, { diffoff = 'both' })
+      else
+        ui_windows.bind(cur.base_buf, hb)
+      end
     else
       local full = vim.fs.joinpath(review_dir(), path)
       if vim.uv.fs_stat(full) == nil then
@@ -865,11 +876,17 @@ local function resolve_and_open(path, opts)
         ui_scratchwin.set_content(hb, ui_scratchwin.NOTIFY.deleted)
         track_scratch(hb)
         cur.head_buf = hb
-        ui_windows.bind(cur.base_buf, hb, { diffoff = 'head' })
+        ui_windows.bind(cur.base_buf, hb, { diffoff = 'both' })
       else
         cur.kind = 'real'
         cur.head_buf = open_head_real(full)
-        ui_windows.bind(cur.base_buf, cur.head_buf, { head_kind = 'real' })
+        local bind_opts = { head_kind = 'real' }
+        if file ~= nil and file.status == 'A' then
+          -- 追加 (A): base = 0 行 null scratch とのペアだと全行が DiffAdd になるため
+          -- 両窓 diffoff で素の色で読めるようにする (winbar の種別マークは head 側)
+          bind_opts.diffoff = 'both'
+        end
+        ui_windows.bind(cur.base_buf, cur.head_buf, bind_opts)
       end
     end
   end
