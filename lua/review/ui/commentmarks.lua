@@ -9,8 +9,8 @@
 -- (row, 0) に並ぶ tie は残る — そのため spec は index ではなく details
 -- (virt_text ~= nil / virt_lines_above / hl_group == 'ReviewCommentLine') で
 -- mark を識別する。
--- スレッドは罫線の箱で囲む (箱幅は apply 時点の opts.max_width で固定される。
--- リサイズの再 apply は handlers/session 側の WinResized / VimResized)。
+-- スレッドは罫線の箱で囲む (箱の外幅は apply 時点の opts.width = head 窓テキスト
+-- 幅そのもの。リサイズの再 apply は handlers/session 側の WinResized / VimResized)。
 -- 張ったバッファは tracked に集約し、セッション close / delete で全バッファの
 -- namespace を明示 clear する (残骸 0。同バッファの全窓に見える仕様と対)。
 local highlight = require 'review.ui.highlight'
@@ -107,6 +107,18 @@ local function wrap_body(text, budget1, budget2)
   return pieces
 end
 
+-- 補助行 (打ち切り導線・集約見出し): pad を本文色、文言を hl 色の chunk で、
+-- budget で折り返す。全 piece に pad を付ける = 打ち切り文言行と同一流儀
+-- (本文の id 接頭辞列に揃えたインデント。pad と文言の色が同じときだけ 1 chunk
+-- に併合する)。
+local function side_lines(text, pad, budget, hl)
+  local out = {}
+  for _, piece in ipairs(wrap_body(text, budget, budget)) do
+    out[#out + 1] = merge_chunks { { pad, BODY_HL }, { piece, hl } }
+  end
+  return out
+end
+
 -- 1 コメントの箱の中身行 (chunk 配列の配列。罫線は含まない)。inner = 箱の
 -- 内側幅 (nil = 折り返さない)。1 表示行目は id 接頭辞 / 折り返し後と 2 行目以降
 -- の本文行は continuation pad を付ける (pad 幅は id 接頭辞と同じ)。
@@ -152,21 +164,24 @@ local function comment_lines(c, inner)
   if truncated then
     -- 打ち切り導線: pad は本文色、文言のみ警告色 (id 接頭辞と同じ扱い)。
     -- 文言も箱の中身行なので内側幅で折り返す (右辺からはみ出さない)
-    for _, piece in ipairs(wrap_body('… (i で全文)', budget2, budget2)) do
-      if prefix_hl == BODY_HL then
-        out[#out + 1] = merge_chunks { { pad, BODY_HL }, { piece, BODY_HL } }
-      else
-        out[#out + 1] = { { pad, BODY_HL }, { piece, prefix_hl } }
-      end
+    for _, line in ipairs(side_lines('… (i で全文)', pad, budget2, prefix_hl)) do
+      out[#out + 1] = line
     end
   end
   return out
 end
 
--- 箱の外幅 = 群内の行の最大表示幅 + 罫線と padding。上限 opts.max_width
--- (nil = 上限なし)、下限 20。戻り値は外幅と内側幅 (罫線 2 本と両側 padding 分を
--- 引いた幅 = 本文の pad 詰め先)。
-local function box_width(sections, max_width)
+-- 箱の外幅。width (セル数) 指定時は外幅そのもの (下限 20 を適用しない = 箱幅 ≡
+-- 窓テキスト幅。窓が狭ければ箱も狭い)。nil は自然幅フォールバック = 群内の行の
+-- 最大表示幅 + 罫線と padding 分、下限 20 (unit spec 専用経路。sections はその
+-- ときだけ渡す)。戻り値は外幅と内側幅 (罫線 2 本と両側 padding 分を引いた幅 =
+-- 本文の pad 詰め先)。
+local function box_width(sections, width)
+  local left = vim.fn.strdisplaywidth '│ '
+  local right = vim.fn.strdisplaywidth ' │'
+  if width ~= nil then
+    return width, width - left - right
+  end
   local natural = 0
   for _, lines in ipairs(sections) do
     for _, line in ipairs(lines) do
@@ -176,9 +191,7 @@ local function box_width(sections, max_width)
       end
     end
   end
-  local left = vim.fn.strdisplaywidth '│ '
-  local right = vim.fn.strdisplaywidth ' │'
-  local outer = math.max(20, math.min(natural + left + right, max_width or math.huge))
+  local outer = math.max(20, natural + left + right)
   return outer, outer - left - right
 end
 
@@ -208,9 +221,9 @@ local function boxed(sections, outer, inner)
 end
 
 --- コメントの head バッファ extmark を再構成する。
---- opts.max_width (セル数、nil = 上限なし) は箱の外幅の上限で、呼び出し側
---- (handlers/session) が head 窓のテキスト幅から算出する (commentmarks は窓を
---- 探さない = 単体 spec で幅を注入できる)。
+--- opts.width (セル数) は箱の外幅そのもので、呼び出し側 (handlers/session) が
+--- head 窓のテキスト幅を渡す (commentmarks は窓を探さない = 単体 spec で幅を
+--- 注入できる)。nil は自然幅フォールバック (下限 20)。
 function M.apply(session, bufnr, path, opts)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
@@ -229,7 +242,7 @@ function M.apply(session, bufnr, path, opts)
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
   local line_count = line_count_count
-  local max_width = opts ~= nil and opts.max_width or nil
+  local width = opts ~= nil and opts.width or nil
   -- 群キー = 範囲の最終行 (end_line をバッファ末尾に clamp。end_line < line の
   -- 不正値は開始行に倒す — 下線 mark の end_row < row を作らない)。
   -- in-scope 判定は開始行のまま (開始行が解けるコメントは outdated に落とさない)。
@@ -270,12 +283,16 @@ function M.apply(session, bufnr, path, opts)
     end
     local bottom = key
     -- 打ち切り行数は折り返し行を含むため、自然幅の測定 (折り返しなし) と
-    -- 実際の生成 (内側幅で折り返し) の 2 回生成する
-    local natural = {}
-    for _, c in ipairs(cs) do
-      natural[#natural + 1] = comment_lines(c, nil)
+    -- 実際の生成 (内側幅で折り返し) の 2 回生成する。width 指定時は外幅が
+    -- width で固定されるため自然幅を測らない
+    local natural = nil
+    if width == nil then
+      natural = {}
+      for _, c in ipairs(cs) do
+        natural[#natural + 1] = comment_lines(c, nil)
+      end
     end
-    local outer, inner = box_width(natural, max_width)
+    local outer, inner = box_width(natural, width)
     local sections = {}
     for _, c in ipairs(cs) do
       sections[#sections + 1] = comment_lines(c, inner)
@@ -320,21 +337,32 @@ function M.apply(session, bufnr, path, opts)
   -- 先頭に別行が足されると見出しがずれる。virt_lines_above はバッファ行に占有
   -- されず行写像も不変 (AGENTS 実測の教訓)。
   if #outdated_hidden > 0 then
-    -- 見出しは箱 1 行目で、先頭 comment とは区切り罫線を挟まず隣接させる
+    -- 見出しは箱 1 行目で、先頭 comment とは区切り罫線を挟まず隣接させる。
+    -- 見出しも箱の中身行: 打ち切り文言行と同一流儀 (side_lines) で内側幅に
+    -- 折り返す (狭い width でも右辺からはみ出さない)。pad 幅は先頭 comment の
+    -- id 接頭辞と同じ (本文の continuation とインデントを揃える)
     local function hidden_sections(inner)
+      local head_text = OUTDATED_HEAD_FMT:format(#outdated_hidden)
       local sections = {}
       for i, c in ipairs(outdated_hidden) do
-        local lines = comment_lines(c, inner)
+        local lines = {}
         if i == 1 then
-          table.insert(lines, 1, {
-            { OUTDATED_HEAD_FMT:format(#outdated_hidden), OUTDATED_HEAD_HL },
-          })
+          local prefix = ('  [%s] '):format(c.id)
+          local pad = string.rep(' ', vim.fn.strchars(prefix))
+          local budget = inner ~= nil and inner - vim.fn.strdisplaywidth(pad) or nil
+          for _, line in ipairs(side_lines(head_text, pad, budget, OUTDATED_HEAD_HL)) do
+            lines[#lines + 1] = line
+          end
+        end
+        for _, line in ipairs(comment_lines(c, inner)) do
+          lines[#lines + 1] = line
         end
         sections[#sections + 1] = lines
       end
       return sections
     end
-    local outer, inner = box_width(hidden_sections(nil), max_width)
+    local natural = width == nil and hidden_sections(nil) or nil
+    local outer, inner = box_width(natural, width)
     -- virt_lines の 1 行 = chunk 配列、chunk = { text, hl } のネスト構造
     -- ({text,hl} フラットは "expected Array, got String" — AGENTS 実測の教訓)。
     vim.api.nvim_buf_set_extmark(bufnr, ns, 0, 0, {

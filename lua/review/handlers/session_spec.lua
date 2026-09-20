@@ -1047,12 +1047,36 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
         end
       end
       assert.is_not_nil(above, 'placeholder の outdated 集約 mark が無い')
-      -- 集約は箱で描かれ、見出しは箱 1 行目の内容 chunk (virt_lines[2][2] =
-      -- 先頭ボーダー chunk の次)。見出し chunk の抽出は chunk[1] が table の
-      -- 形も吸収する
-      local chunk = (above[4].virt_lines[2] or {})[2] or {}
-      local text = type(chunk[1]) == 'table' and chunk[1][1] or chunk[1]
-      assert.equals(' 1 outdated (prompt 除外中)', text)
+      -- 集約は箱で描かれ、見出しは箱 1 行目の内容行。見出しは内側幅で折り返し
+      -- されうる (placeholder 窓が狭いと 2 行以上) ので、罫線行と本文行を飛ばし
+      -- て警告色 chunk (見出し文言の piece) を連結して完全一致を見る。
+      -- chunk[1] が table の形も吸収する
+      local function chunk_text(chunk)
+        return type(chunk[1]) == 'table' and chunk[1][1] or chunk[1]
+      end
+      local head_pieces = {}
+      for _, line in ipairs(above[4].virt_lines or {}) do
+        local row = {}
+        for _, chunk in ipairs(line) do
+          row[#row + 1] = chunk_text(chunk)
+        end
+        row = table.concat(row)
+        if
+          row:find('┌', 1, true) == nil
+          and row:find('├', 1, true) == nil
+          and row:find('└', 1, true) == nil
+        then
+          if row:find('ghost', 1, true) ~= nil then
+            break -- 見出し行はここまで (以降は本文)
+          end
+          for _, chunk in ipairs(line) do
+            if chunk[2] == 'ReviewCommentOutdated' then
+              head_pieces[#head_pieces + 1] = chunk_text(chunk)
+            end
+          end
+        end
+      end
+      assert.equals(' 1 outdated (prompt 除外中)', table.concat(head_pieces))
     end
   )
 

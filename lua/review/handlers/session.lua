@@ -715,9 +715,9 @@ end
 -- 3 窓の chrome 再適用 (render 直後の handlers 側再適用 — diff-review「窓装飾」。
 -- 窓 number は窓ローカル、winbar 文字列は w:review_winbar のみで持つ)。
 
--- head 窓のテキスト幅 (窓幅 - textoff)。コメント箱幅の上限として commentmarks.apply
--- へ渡す (commentmarks は窓を探さない = 単体 spec で幅を注入できる)。窓が無ければ
--- nil (= 上限なし)。
+-- head 窓のテキスト幅 (窓幅 - textoff)。コメント箱の外幅そのものとして
+-- commentmarks.apply へ渡す (commentmarks は窓を探さない = 単体 spec で幅を注入
+-- できる)。窓が無ければ nil (= 自然幅フォールバック)。
 local function head_text_width()
   local hw = ui_windows.win 'head'
   if hw == nil or not vim.api.nvim_win_is_valid(hw) then
@@ -739,7 +739,7 @@ end
 local function reapply_marks(session, cur)
   ui_commentmarks.clear_tracked()
   if cur ~= nil and (cur.kind == 'real' or cur.kind == 'degraded' or cur.kind == 'no-changes') then
-    ui_commentmarks.apply(session, cur.head_buf, cur.path, { max_width = head_text_width() })
+    ui_commentmarks.apply(session, cur.head_buf, cur.path, { width = head_text_width() })
   end
 end
 
@@ -760,7 +760,7 @@ vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
     end
     ui_commentmarks.clear_tracked()
     ui_commentmarks.apply(active.session, cur.head_buf, cur.path, {
-      max_width = head_text_width(),
+      width = head_text_width(),
     })
   end,
 })
