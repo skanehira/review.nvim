@@ -130,7 +130,9 @@ function M.render_sessionlist(sessions, opts)
     end
   end
   local k = config.get().keymaps.sessionlist
-  local drawn = paint(buf, lines, { kind = 'sessionlist' }, rows, {
+  -- meta.repo は追随 (sessions_list.refresh) が「開いたときの repo の一覧か」を
+  -- 判定するために使う (別 repo の一覧を開いたまま状態変化しても壊さない)。
+  local drawn = paint(buf, lines, { kind = 'sessionlist', repo = opts.repo }, rows, {
     { k.open, "require('review.handlers.sessions_list').open_current()" },
     { k.close, "require('review.ui.list').close_current()" },
     { k.delete, "require('review.handlers.sessions_list').delete_current()" },

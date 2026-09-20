@@ -123,7 +123,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | `:Review` | open セッションの復元 (複数あれば選択) | persistence-restore |
 | `:Review start <base> [head]` | ブランチレビュー開始。`<base>` / `[head]` は cmdline `<Tab>` で branches → tags 順に補完。**head 省略 = `rev-parse --abbrev-ref HEAD` を自動採用・保存** (「データスキーマ」)。head 指定時は現在の HEAD と違えば switch 提案、不可なら scratch 縮退 (決定表) | diff-review |
 | `:Review pr <number\|url>` | PR レビュー開始 (gh 連携 + worktree + `tcd`)。`<number>` は cmdline `<Tab>` で gh の open PR 番号を補完 | pr-worktree |
-| `:Review list` | 保存済みセッションの一覧表示 | persistence-restore |
+| `:Review list` | 保存済みセッションの一覧表示 (既に開いていればその窓へ focus。再分割しない) | persistence-restore |
 | `:Review comments` | active セッションのコメント (絞り込み適用後) を横断一覧 (`<leader>c` と同一。active 0 件は WARN、handler は `E_NOT_ACTIVE`) | comment-list |
 | `:Review close` | 現セッションの save + worktree クリーンアップ (pr のみ) (実ファイル窓と張った extmark の掃除もここ) | pr-worktree (セッションとレビューの終了) |
 | `:Review delete <id>` | 保存済みセッションの削除 (comments も失う。active なら先に close 相当の掃除をしてから削除、確認付き)。`<id>` は cmdline `<Tab>` で保存済み id を補完 | pr-worktree (セッションの削除) |
@@ -162,6 +162,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | sessionlist | `d` | 選択セッションを削除 (`:Review delete` と同一の確認フロー) |
 | sessionlist | `q` | 一覧バッファを閉じる (セッション状態は変えない) |
 
+- セッション一覧 (`:Review list`) は状態変化に追随して再 render する: 全 save 経路の唯一の出口 `persist()` (q close 経路 = `finish_close` も persist を通る) と delete 完了 (`finalize()` の `store.delete` 成功直後) から表示中の一覧をディスクから全再読込し、行と winbar 件数 (`win_findbuf` の全窓) を当て直す。窓が無いときは bufhidden=wipe で一覧バッファは既に消えているので何もしない (孤児バッファを作らない)。file panel / コメント一覧と違い「どの状態変更でも常に全再読込でよい」ため呼び出しはこの 2 箇所に寄せる (経路別の分岐は作らない)。`<Enter>` は開始前にディスクの存在を再確認し、削除済み行の再開で JSON を復活させない。発火は sessions_list を遅延 require で行う (「既知の制約」循環 require)
 - fold 操作 (`za` / `zo` / `zc` / `zR` / `zM`) と panel の `j`/`k` 移動はマップせず標準挙動に任せる
 - 移動系で「ファイルを開く」経路はすべて同一処理 `open_file(path)` (head 窓に実ファイル張付・base 窓に scratch 張付・panel 再描画 = 永続状態は変えない) を呼ぶ。コメント一覧の `<CR>` ジャンプは移動行を伴う `open_file(path, {line})` (comment-list「ジャンプ」)。例外は file panel の `<CR>` / `o` / `l` と panel 起点の移動系 (`<Tab>` / `<S-Tab>` / `[F` / `]F`) で、`open_file` 後に panel へ focus を戻す (カーソルは開いたファイル行のまま)。head/base 窓起点の移動系は focus を head 窓に残す (origin 依存 — 押した窓に残る)
 
@@ -227,7 +228,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - `bufadd` / `:edit` は buffer 名を symlink 解決後の正規パスで持つ (macOS の mktemp は `/var` -> `/private/var`。0.10 実測)。head 実ファイル窓の buf 名を assert する spec / e2e は期待値を `fs_realpath` 経由で比較する。git に渡す cwd は記録された path のままなので正規化されない (2 つを混同しない)
 - 手動 tmux 実測の `nvim --server ... --remote-expr` は editor.lua の関数 shim 経由で評価され、**list index が 0 base** (`tabpagebuflist(2)[2]` = 3 番窓 / 3 窓の tab で `[3]` は E684。関数呼び出しは shim 経由で動き `mode()` 等は使える)。同一状態で `getbufline('<bufname>')` は `[]` を返し `luaeval` + `nvim_buf_get_lines` では内容が読める (0.13 実測・issue #18) — 窓 buffer 特定は index、buffer 内容の実測は luaeval 経由で行うこと (無音の false PASS を防ぐ)
 - **TabClosed 発火時点の tab handle 失効がバージョン差**: TabClosed autocmd 発火時、閉じた tabpage handle の失効状態が 0.10.0 と stable で違う (実測: 0.10.0 は `nvim_tabpage_is_valid` が **true** を返す=未失効、stable は false。`nvim_list_tabpages()` の現存有無は両版一致で false)。帰属判定 (「閉じられたのが自前 tab か」) を is_valid に頼ると 0.10.0 で「別の tab が閉じた」と誤判定しフックが永久に発火しない。`ui/windows.lua` は `nvim_list_tabpages()` への現存有無で判定する (`ev.data` は両版 nil で使えない)。両版共通の振る舞い (tab 消滅 → 掃除 1 回・state 解任・status=open 保存) は session_spec / windows_spec の互換 pin test で固定 (issue #26)
-- **Lua の require 循環は実行時 error**: 2 module が相互に top-level require すると、後から読まれた側で `loop or previous error loading module '<name>'` を投げて module state が未完成のまま残る (実測: 相互 require の最小 fixture)。`handlers/comments_list` は `handlers/session` を top-level require しているため、`session` 側から一覧を追随させる 3 経路 (`commit_comment_change` / `apply_refresh` / `filter_sidebar`) は top-level require を置けず、呼び出し時に `require('review.handlers.comments_list').refresh()` を遅延解決する (top-level に置くと `:Review` 系の操作が module load で落ちる)
+- **Lua の require 循環は実行時 error**: 2 module が相互に top-level require すると、後から読まれた側で `loop or previous error loading module '<name>'` を投げて module state が未完成のまま残る (実測: 相互 require の最小 fixture)。`handlers/comments_list` は `handlers/session` を top-level require しているため、`session` 側から一覧を追随させる 3 経路 (`commit_comment_change` / `apply_refresh` / `filter_sidebar`) は top-level require を置けず、呼び出し時に `require('review.handlers.comments_list').refresh()` を遅延解決する (top-level に置くと `:Review` 系の操作が module load で落ちる)。同様に `handlers/sessions_list` も restore → session を top-level require するチェーン上にあるため、`persist()` / delete `finalize()` からのセッション一覧追随 (`refresh_sessionlist(repo)`) も発火時の遅延解決にする
 
 ## 未解決の論点
 
