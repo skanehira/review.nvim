@@ -1,8 +1,9 @@
 -- handlers/comments_list: 横断コメント一覧 (`review://comments/<session-id>`) の
 -- 開閉・ジャンプ・行操作 (d / e / y) と追随 (docs/design/features/comment-list.md
 -- 「操作」「ジャンプ」「追随」/ docs/design/DESIGN.md「API 一覧」:Review comments)。
--- sessions_list.lua と同型: current tab に vsplit で開き、既に開いていればその窓へ
--- focus (別 tab でも切替。再 vsplit しない)。render / 行写像 / キーは ui/commentlist。
+-- sessions_list.lua と同型: レビュー tab の最下部に全幅で開き (窓生成は
+-- ui/windows.open_comment_list)、既に開いていればその窓へ focus (別 tab でも切替。
+-- 再分割しない)。render / 行写像 / キーは ui/commentlist。
 -- d / e / y は diff 窓の同名キーと同一動作 (d の arming だけは一覧専用の状態を
 -- 持ち、diff 窓の arming とは共有しない — comment-list「操作」)。追随の再 render は
 -- コメント CRUD / 差分再取得 / 絞り込み適用の 3 経路から M.refresh が呼ばれる。
@@ -44,8 +45,9 @@ local function render_into(session, win)
   return buf
 end
 
---- `<leader>c` / `:Review comments`: 一覧を current tab の vsplit に開く。
---- 既に開いていればその窓へ focus (別 tab でも tab を切替えて focus。再 vsplit
+--- `<leader>c` / `:Review comments`: 一覧をレビュー tab の最下部に全幅で開く
+--- (高さ config.comment_list_height。どの窓・どの tab から押しても位置は変わらない)。
+--- 既に開いていればその窓へ focus (別 tab でも tab を切替えて focus。再分割
 --- しない。内容は常に最新へ再 render)。active 不在は E_NOT_ACTIVE を返す
 --- (WARN «アクティブなセッションがありません» はコマンド層が行う)。
 function M.open()
@@ -66,8 +68,8 @@ function M.open()
     vim.api.nvim_set_current_win(existing)
     return result.ok()
   end
-  vim.cmd 'vsplit'
-  render_into(session, vim.api.nvim_get_current_win())
+  local win = ui_windows.open_comment_list()
+  render_into(session, win)
   return result.ok()
 end
 

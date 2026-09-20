@@ -419,6 +419,102 @@ describe('comments_list.open', function()
   )
 end)
 
+-- 位置契約 (issue #37): 一覧はレビュー tab の最下部に全幅で開く。押した窓や
+-- splitright に位置が依存しないこと (旧実装の素の vsplit は押した窓と
+-- splitright で位置が変わった) と、分割元から窓 diff opts を継承しないことを
+-- win_screenpos / 窓 opts で pin する。
+describe('comments_list.open の位置契約 (レビュー tab 最下部・全幅)', function()
+  use_env()
+
+  local function row_of(win)
+    return vim.fn.win_screenpos(win)[1]
+  end
+
+  local function col_of(win)
+    return vim.fn.win_screenpos(win)[2]
+  end
+
+  it(
+    'head 窓から開いても一覧は最下部に全幅で開く (窓 diff opts を退避・winfixheight)',
+    function()
+      start_done()
+      add_comment { body = 'use map' }
+      local pw, bw, hw = ui_windows.win 'panel', ui_windows.win 'base', ui_windows.win 'head'
+      vim.api.nvim_set_current_win(hw)
+
+      local res = comments_list.open()
+
+      assert.equals(true, res.ok)
+      local w = list_win()
+      assert.is_not_nil(w)
+      -- 最下部: panel / base / head のどれよりも下の行に置かれる
+      assert.is_true(row_of(w) > row_of(pw), '一覧が panel より下に無い')
+      assert.is_true(row_of(w) > row_of(bw), '一覧が base より下に無い')
+      assert.is_true(row_of(w) > row_of(hw), '一覧が head より下に無い')
+      -- 全幅: 左端から tab 全幅
+      assert.equals(1, col_of(w))
+      assert.equals(vim.o.columns, vim.api.nvim_win_get_width(w))
+      -- 分割元 (head 窓) の窓 diff opts を継承しない
+      assert.equals(false, vim.wo[w].diff)
+      assert.equals('manual', vim.wo[w].foldmethod)
+      assert.equals(true, vim.wo[w].winfixheight)
+      -- 分割元の窓は退避しない (head は窓 diff のまま)
+      assert.equals(true, vim.wo[hw].diff)
+    end
+  )
+
+  it('file panel から開いても位置は変わらない (最下部・全幅)', function()
+    start_done()
+    add_comment { body = 'use map' }
+    vim.api.nvim_set_current_win(ui_windows.win 'panel')
+
+    comments_list.open()
+
+    local w = list_win()
+    assert.is_not_nil(w)
+    assert.is_true(row_of(w) > row_of(ui_windows.win 'head'), '一覧が最下部でない')
+    assert.equals(1, col_of(w))
+    assert.equals(vim.o.columns, vim.api.nvim_win_get_width(w))
+  end)
+
+  it(
+    '別 tab から開いてもレビュー tab の最下部に開く (:Review comments は tab gate を持たない)',
+    function()
+      start_done()
+      add_comment { body = 'use map' }
+      vim.cmd 'tabnew'
+      local user_tab = vim.api.nvim_get_current_tabpage()
+      assert.is_not.equals(review_tab(), user_tab)
+
+      comments_list.open()
+
+      -- レビュー tab へ切替えてそこに開く (ユーザー tab には出さない)
+      assert.equals(review_tab(), vim.api.nvim_get_current_tabpage())
+      local w = list_win()
+      assert.is_not_nil(w)
+      assert.equals(review_tab(), vim.api.nvim_win_get_tabpage(w))
+      assert.is_true(row_of(w) > row_of(ui_windows.win 'head'), '一覧が最下部でない')
+      assert.equals(vim.o.columns, vim.api.nvim_win_get_width(w))
+      vim.api.nvim_set_current_tabpage(user_tab)
+      assert.equals(
+        1,
+        #vim.api.nvim_tabpage_list_wins(user_tab),
+        'ユーザー tab に一覧を出した'
+      )
+    end
+  )
+
+  it('高さは config.comment_list_height で決まる', function()
+    config.setup { comment_list_height = 6 }
+    start_done()
+    add_comment { body = 'use map' }
+
+    comments_list.open()
+
+    assert.equals(6, vim.api.nvim_win_get_height(list_win()))
+  end)
+end)
+
 describe('comments_list.jump_current', function()
   use_env()
 

@@ -130,6 +130,27 @@ local function run()
       and vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
         == 'review://comments/main--feature'
   end, '<leader>c で一覧が開き focus が移る')
+  -- 位置契約 (issue #37): 一覧はレビュー tab の最下部に全幅で開く
+  -- (押した窓が head でも panel でも位置は変わらない)。
+  local lw = vim.fn.bufwinid(list_buf())
+  local lrow = vim.fn.win_screenpos(lw)[1]
+  local hrow = vim.fn.win_screenpos(windows.win 'head')[1]
+  if lrow <= hrow then
+    fail('一覧が最下部に無い (list row=' .. lrow .. ' head row=' .. hrow .. ')')
+  end
+  if vim.api.nvim_win_get_width(lw) ~= vim.o.columns then
+    fail(
+      '一覧が全幅でない (width='
+        .. vim.api.nvim_win_get_width(lw)
+        .. ' columns='
+        .. vim.o.columns
+        .. ')'
+    )
+  end
+  if vim.api.nvim_win_get_height(lw) ~= 10 then
+    fail('一覧の高さが既定 10 でない: ' .. vim.api.nvim_win_get_height(lw))
+  end
+  print(('E2E-CL0 list row=%d width=%d'):format(lrow, vim.api.nvim_win_get_width(lw)))
   local lines = list_lines()
   if #lines ~= 2 then
     fail('一覧の行数が ' .. #lines .. ' (期待 2): ' .. vim.inspect(lines))

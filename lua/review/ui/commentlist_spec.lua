@@ -397,4 +397,38 @@ describe('commentlist の winbar 後片付け', function()
       assert.is_nil(vim.w[state.win].review_winbar)
     end
   )
+
+  -- ui/list.lua (sessionlist) の BufUnload との対称 (issue #37): review セッションが
+  -- 無い状態で一覧 buf が unload したとき、global winbar 式と tab をまたいだ残骸の
+  -- 窓変数を掃除する (BufWinLeave は buffer を表示していた窓しか見ない)。
+  it(
+    'review セッションが無いとき、一覧 buf の unload で global 式と別 tab の stale 変数を掃除する',
+    function()
+      local saved_global = vim.api.nvim_get_option_value('winbar', { scope = 'global' })
+      vim.api.nvim_set_option_value('winbar', '', { scope = 'global' })
+      -- 別 tab の窓に stale なバー変数 (セッション終了経路を通らなかった残骸を模す)
+      vim.cmd 'tabnew'
+      local stale_win = vim.api.nvim_get_current_win()
+      vim.w[stale_win].review_winbar = 'main..feature · a.lua'
+      vim.api.nvim_set_current_tabpage(state.tab)
+
+      local session = session_stub { comments = { comment {} } }
+      local buf = commentlist.render(session, { order = { 'a.lua' } })
+      vim.api.nvim_win_set_buf(state.win, buf)
+      chrome.window(state.win)
+      assert.equals(
+        '%{get(w:,"review_winbar","")}',
+        vim.api.nvim_get_option_value('winbar', { scope = 'global' })
+      )
+
+      vim.api.nvim_buf_delete(buf, { force = true })
+
+      assert.is_nil(
+        vim.w[stale_win].review_winbar,
+        '別 tab の stale バー変数が残っている'
+      )
+      assert.equals('', vim.api.nvim_get_option_value('winbar', { scope = 'global' }))
+      vim.api.nvim_set_option_value('winbar', saved_global, { scope = 'global' })
+    end
+  )
 end)

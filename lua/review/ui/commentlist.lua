@@ -18,9 +18,19 @@ local hl_ns = vim.api.nvim_create_namespace 'review_commentlist_hl'
 -- bufnr -> { rows = { [row] = comment }, shown = comment[] }
 local rendered = {}
 
+-- ui/list.lua (sessionlist) と対称: review セッションが無ければ global winbar 式と
+-- 窓変数を戻す (後片付け漏れの予防)。BufWinLeave は buffer を表示していた窓しか
+-- 見ないため、tab をまたいだ残骸の窓変数は BufUnload 経路で掃除する。
 vim.api.nvim_create_autocmd('BufUnload', {
   callback = function(ev)
     rendered[ev.buf] = nil
+    local meta = vim.b[ev.buf].review_meta or {}
+    if meta.kind == 'commentlist' then
+      chrome.restore_global_if_unused()
+      -- セッション開中でも、現在 tab にバーの窓が無くなれば式を戻す (式が非空だと
+      -- 空評価でも 1 行確保される。review tab へ戻れば TabEnter が再適用する)。
+      chrome.sync_tab()
+    end
   end,
 })
 

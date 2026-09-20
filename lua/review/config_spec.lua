@@ -15,6 +15,7 @@ describe('config.get', function()
       gh_bin = 'gh',
       auto_notify_resume = true,
       panel_width = 35,
+      comment_list_height = 10,
       keymaps = {
         diff = {
           add_comment = 'c',
@@ -78,6 +79,7 @@ describe('config.get', function()
       gh_bin = 'gh',
       auto_notify_resume = true,
       panel_width = 35,
+      comment_list_height = 10,
       keymaps = {
         diff = {
           add_comment = 'c',
