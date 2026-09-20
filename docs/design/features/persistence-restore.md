@@ -31,7 +31,9 @@
 
 **anchor 検証 (復元・リフレッシュ時の位置整合)**: 差分は再取得されるため行番号は変わる。検証の正本テキスト源は直近の core/diff パーサ結果 (add/context 可視行の text_map) で、復元と BufWritePost リフレッシュで同一経路を使う。コメントごとに (a) 保存行番号の行テキスト == `anchor.line` → active 維持、(b) 同一ファイルの保存行番号 ±20 行以内に `anchor.line` と一致 → active にして保持行番号を補正、(c) 見つからない → `state=outdated`。outdated でも `line` / `end_line` の値は書き換えない (保存値のまま保持)。位置を解けず new 側に痕跡のない outdated は当該ファイル head バッファ 1 行目の virt_lines_above に集約表示する (diff-review「コメント表示」。head 窓が告知 scratch のファイル = deleted/binary 告知窓の outdated は集約先がないので panel winbar 末尾 `⚠N` と除外 INFO で可視化。今回の差分に現れないファイルの outdated も同じく集約先なし = `⚠N` に数え、files map / panel 一覧には入れない)。補正・outdated 化の結果は復元時に save して次回以降の検証を省く
 
-**`:Review list`**: 当該 repo の保存済みセッション全件を scratch split window (filetype `review-list`) に一覧表示 (slug / status / mode / base..head / コメント数 / 更新時刻 = **ローカル時刻 + %Z tz 表記**)。キーは DESIGN.md「デフォルトキーマップ」の sessionlist 行 (`<Enter>` で開く = 復元手順を実行、closed → open。`d` = `:Review delete` と同一の確認フローで削除)。repo path 消失のセッションは grey 表示で `<Enter>` 不可。一覧窓の閉鎖 (window close / `:bw` / `:buffer` 差し替え) 時に review セッションが開いていなければ chrome の global winbar 式と窓変数を戻す (diff-review「窓装飾 (chrome)」)。
+**`:Review list`**: 当該 repo の保存済みセッション全件を scratch split window (filetype `review-list`) に一覧表示 (slug / status / mode / base..head / コメント数 / 更新時刻 = **ローカル時刻 + %Z tz 表記**)。キーは DESIGN.md「デフォルトキーマップ」の sessionlist 行 (`<Enter>` で開く = 復元手順を実行、closed → open。`d` = `:Review delete` と同一の確認フローで削除)。repo path 消失のセッションは grey 表示で `<Enter>` 不可。一覧窓の閉鎖 (window close / `:bw` / `:buffer` 差し替え) 時に review セッションが開いていなければ chrome の global winbar 式と窓変数を戻す (diff-review「窓装飾 (chrome)」)。既に一覧が開いているときは再分割せずその窓へ focus する (窓が増殖しない。内容は常に最新へ再 render)。
+
+**`:Review list` の再 render (アクション後の追随)**: 一覧は状態変化のあと、実際の状態に追随して再 render される。呼び出しは 2 箇所に寄せる — 全 save 経路の唯一の出口 `persist()` (handlers/session。q close 経路 = `finish_close` も persist を通る。status / comments 数 / 更新時刻の列の追随) と、delete 完了 (`finalize()` の `store.delete` 成功直後。行の消去と winbar 件数の減少)。どちらも handler の `M.refresh(repo)` を**遅延 require で**発火する (sessions_list は restore → session を top-level require するチェーン上にある — DESIGN.md「既知の制約」循環 require)。`refresh` は表示中ガードを持つ: 窓が無いときは一覧バッファ (`bufhidden=wipe`) 自体が既に消えているので何もしない (無条件 render は孤児バッファを作る)。行の再 render は名前で再利用されるバッファへの書き込みなので全窓に伝播するが、winbar は窓ローカルなので `win_findbuf` の全窓に当て直す。repo は状態変化側から渡し、表示中の一覧と repo が違う (別 repo の一覧を開いたまま状態変化) 場合は追随しない。file panel / コメント一覧と違い「どの状態変更でも常に全再読込でよい」のがセッション一覧の契約 (経路別の分岐は作らない)。`d` の削除は非同期 (`vim.system`) なので、削除した行の消去を呼び出し側で同期的に行わない (削除前の状態を描く)。行データは render 時点の写しのため、`<Enter>` は開始前に `store.load` で存在を再確認する (削除済み行の再開で削除済み JSON を persist で復活させない二重ガード)。
 
 ## 実装の配置
 
@@ -42,7 +44,7 @@
 | open セッション scan (notify と worktree掃除兼用) | store | `lua/review/store/scan.lua` (+ `_spec`) |
 | anchor 検証の純粋ロジック (行補正 / outdated 判定。handlers 間の循環 require を避けるため core に置く。検証は restore_spec) | core | `lua/review/core/anchor.lua` |
 | 復元フロー (diff 再取得と anchor 検証の調停) | handlers | `lua/review/handlers/restore.lua` |
-| `:Review list` / `:Review delete` のフロー (delete は close 掃除の再利用) | handlers | `lua/review/handlers/sessions_list.lua`, `lua/review/handlers/session.lua` (delete 拡張) |
+| `:Review list` / `:Review delete` のフロー (delete は close 掃除の再利用) と一覧の追随 (`M.refresh(repo)`: persist / finalize から遅延 require で発火) | handlers | `lua/review/handlers/sessions_list.lua`, `lua/review/handlers/session.lua` (delete 拡張 + persist フック) |
 | 起動 VimEnter scan 登録 | entry | `plugin/review.lua` (setup 省略でも走る。「継続通知」の可否は scan 実行時に config を読む) |
 
 ## エッジケースの決定

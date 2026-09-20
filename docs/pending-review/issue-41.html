@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>dev-impl 保留レビュー項目 — issue #41</title>
+<style>
+  body { font-family: -apple-system, "Hiragino Sans", sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+  h1 { font-size: 1.2rem; } h2 { font-size: 1rem; margin-top: 2rem; }
+  .item { border: 1px solid #ccc; border-radius: 6px; padding: 0.75rem 1rem; margin: 0.75rem 0; }
+  .item.high { border-color: #d33; }
+  .meta { color: #555; font-size: 0.85rem; }
+  code, pre { background: #f5f5f5; border-radius: 4px; }
+  code { padding: 0 0.3em; } pre { padding: 0.6rem; overflow-x: auto; font-size: 0.85rem; }
+  .sev-high { color: #d33; font-weight: bold; } .sev-medium { color: #c80; font-weight: bold; }
+  label { cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>保留レビュー項目 — issue #41 (一覧系アクション後の再 render 漏れ)</h1>
+<p class="meta">dev-impl が merge 時に修正対象外とした項目。ユーザーの事後確認用 (確認済みならこのファイルを削除 or 新 issue 化)。</p>
+
+<h2>medium (1 件)</h2>
+<div class="item" data-severity="medium" data-category="code-quality">
+  <label><input type="checkbox"> <span class="sev-medium">medium</span> / <span class="meta">code-quality / <code>lua/review/handlers/session.lua:526</code></span></label>
+  <p><strong>finish_close の保存を persist() 経由に変えたことで保存対象が捕捉済み current.session から実行時 active.session になり、TabClosed との非同期交互実行で close/delete フローが error 中断しうる退行</strong></p>
+  <p class="meta">evidence: 旧実装 (base 58ba4ea) の finish_close は store.save(current.session) で捕捉済み current を保存し、active が先に nil 化しても閉じ処理を完遂できた。新実装は persist() → store.save(active.session) で、on_review_tab_closed (finish_close を通らない唯一の active=nil 経路) が close_with_worktree の非同期窓 (git_worktree.status spawn / dirty 時 force 確認 confirm / worktree remove) の間に発火すると persist() が nil index で error を投げ、以降の detach / cb / worktree remove / delete の finalize がすべて中止される (delete 経路では JSON 残置 + 孤児 worktree)。persist() の呼び出し元 5 箇所のうち他 4 箇所 (begin_session / commit_comment_change / toggle_viewed_current / apply_refresh) は active 存在下の同期文脈で呼ばれるため非同期窓を跨いで active が nil 化し得るのは finish_close のみ</p>
+  <p class="meta">fix_hint: persist を persist(sess) 形に引数化 (既定 active.session) し、finish_close は current.session を渡す。「全 save 経路の唯一の出口」という設計の意図を保ったまま捕捉済みオブジェクトを保存できる</p>
+</div>
+</body>
+</html>
