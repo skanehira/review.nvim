@@ -53,7 +53,7 @@
 - write 失敗後の UI: コメント作成はメモリ上で成功扱い。WARN を 1 回出し、次の成功 save まで失敗状態を維持 (INV-4 の留保と同じ Exception)
 - 破損データは `.corrupt` サフィックスで正常経路から隔離し、自動削除はしない (片付けは手動)
 - 複数 nvim インスタンスが同一セッションを open すると最後が勝つ (last-write-wins)。ロックは持たない (v1 の明確な決定として記録)
-- extmark はバッファ状態ではなく runtime 装飾なので保存しない。プロセス異常終了時の実ファイルへの張痕残骸は 0 (バッファがプロセス死滅で消える) し、復元 open 時に状態から再装飾する。明示 clear は close 経路 (pr-worktree 終了手順 2) とレビュー tab 直接消滅 (TabClosed — 契約の正本: diff-review「レビュー tab の消滅経路」) の両方で走る
+- extmark はバッファ状態ではなく runtime 装飾なので保存しない。プロセス異常終了時の実ファイルへの張痕残骸は 0 (バッファがプロセス死滅で消える) し、復元 open 時に状態から再装飾する。明示 clear は close 経路 (pr-worktree 終了手順 2。worktree セッションでは終了手順 3 の remove に先立って worktree 配下の実ファイルバッファも破棄する — E211 対策) とレビュー tab 直接消滅 (TabClosed — 契約の正本: diff-review「レビュー tab の消滅経路」) の両方で走る
 
 ## テスト方針
 

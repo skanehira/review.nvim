@@ -86,6 +86,17 @@ vim.defer_fn(function()
     wait_for(function()
       return vim.uv.fs_stat(wt_root) == nil
     end, '承認後の worktree dir 消滅')
+    -- E211 は dir 消滅直後の非同期イベントなので少し待ってから見る (issue #40)。
+    vim.wait(500, function()
+      return false
+    end)
+    if vim.fn.bufexists(fname) == 1 then
+      fail '--force 承認後も worktree 内の実ファイルバッファが残っている (E211 の源)'
+    end
+    if vim.fn.execute('messages'):find('E211', 1, true) ~= nil then
+      fail 'close 中に E211 (File no longer available) が出た'
+    end
+    print 'E2E-PR4 bufs-wiped=1'
     print 'E2E-PR4 forced-closed=1'
     vim.cmd 'qa'
   end)

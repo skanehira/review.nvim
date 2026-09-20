@@ -37,8 +37,8 @@
 **セッションとレビューの終了 (`:Review close` / `q`)** — 順序の原則: ユーザーデータを失いうる操作の判定と確認を、状態変更より前に行う (`q` と `:Review close` は同一経路):
 
 0. comments > 0 なら «コメント N 件あります。レビューを終了しますか?» [y/N] (キャンセル = 終了を最初から中止)。0 件なら確認しない
-1. worktree 作成済みなら `git -C <worktree-path> status --porcelain` で未コミット変更を検知。変更ありなら `--force` で削除してよいか確認 (キャンセル = **close を最初から中止**。セッション・UI・保存状態は何も変わらない)。変更なしなら確認不要で続行
-2. 現セッションを save して status=closed、active を解除、**レビュー専有 tab を閉じる**。閉じる前に、このセッションが張った全バッファ (head 実ファイル・scratch) の extmark namespace を明示 clear (残骸 0)。ユーザーが編集途中 (modified) で残した実ファイルバッファも消さずに窓だけ閉じる
+1. worktree 作成済みなら `git -C <worktree-path> status --porcelain` で未コミット変更を検知し、worktree 配下に modified (未保存) なバッファがあることも併せて dirty 判定する (バッファ上の未保存編集はディスクに無い)。dirty なら `--force` で削除してよいか確認 (キャンセル = **close を最初から中止**。セッション・UI・保存状態は何も変わらない)。clean なら確認不要で続行
+2. 現セッションを save して status=closed、active を解除、**レビュー専有 tab を閉じる**。閉じる前に、このセッションが張った全バッファ (head 実ファイル・scratch) の extmark namespace を明示 clear (残骸 0)。repo 本体の実ファイルバッファはユーザーの所有物なので編集途中 (modified) を含め消さずに窓だけ閉じる。`created_by_us=true` の worktree を持つセッションでは、worktree 配下の実ファイルバッファ (`nvim_list_bufs()` を worktree path で走査・両側 `fs_realpath` 比較) を `nvim_buf_delete(force)` で**手順 3 の remove より先に破棄する** (Neovim 0.13 は loaded 全バッファに fs watcher を張るため、dir 消滅が先だと E211 が出る)
 3. worktree を `git worktree remove <path>` (1 で force 承認済みなら `--force`) で削除。**自前 ref (`review-nvim/pr-<n>`) は close では消さない** (再開時に fetch を省略して再利用するため)
 4. 掃除失敗 (`remove` の失敗等) は WARN を出し、**二段目として `git worktree prune` + 自前 dir の再帰削除で自己修復する** (登録と dir の対応が崩れた形 = `does not point back` は prune が正すのが git の手順)。dir 削除まで失敗した場合のみ追加 WARN し、close (save・タブクローズ) 自体は完了させる。残骸は起動 scan が closed + dir 残骸として回収する
 
@@ -68,7 +68,7 @@
 - gh が未 auth / 非ログイン: `E_GH` 通知。「`gh auth login` を実行してください」。PR 番号だけで repo 内実行時に remote 自動判定失敗時は URL 入力を促す
 - 既に同名 worktree がユーザーによって作られている: 触らず衝突エラー (`E_WORKTREE`)。自前作成分以外は削除対象外 (INV-3)
 - PR が closed/merged でもレビュー可能 (gh view は成功するため)。開始時に INFO で状態を添えるだけ
-- diff 取得後の close 時に worktree 内をユーザーが編集していた: 「セッションは閉じるが編集は残る」ため、実ファイル側は保持 (削除しない) --force 確認で初めて消える。v1 ではこの確認の 1 段階のみ。編集の取り込み (PR への push) は対象外
+- diff 取得後の close 時に worktree 内をユーザーが編集していた: dirty 判定はディスク (`git status`) に加えて worktree 配下の modified バッファも見る (バッファ上の未保存編集はディスクに無いため git status は clean を返す)。どちらかがあれば `--force` 確認を 1 回出し、承認したときだけ消える (ディスクの未コミット変更もバッファ上の未保存編集も破棄)。キャンセルは close 全体の中止。close が完走すると worktree ごと消えるため、編集が残るのは repo 本体 (branch モード) の実ファイルバッファのみ。v1 ではこの確認の 1 段階のみ。編集の取り込み (PR への push) は対象外
 - 複数 fork remote: refs/pull/N/head を持つ remote を 1 つ選んで fetch (選択不能時にエラー)。head 内容解決は refs/pull ベースなので fork 名に依存しない
 - Windows プラットフォーム: worktree 対応とパス区切りは `vim.fs.joinpath` で吸収するが実機検証外 (v1 の検証済みは macOS/Linux のみ。DESIGN.md「既知の制約」参照)
 

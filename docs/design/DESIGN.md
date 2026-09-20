@@ -144,7 +144,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | head/base 窓 | `<leader>e` / `<leader>b` | file panel へ focus / file panel 表示トグル (panel を閉じても tab とレビュー窓は残る。再建は上段の左 `leftabove vsplit` — 一覧が最下部に開いていてもその全幅を保つ) |
 | head/base 窓 | `<leader>c` | コメント一覧 (横断) をレビュー tab の最下部に全幅で開く (`:Review comments` と同一。既に開いていればその窓へ focus)。非 expr の同期 mapping (「既知の制約」キー) |
 | head/base 窓 | `R` | 差分再取得 (`git diff` 引数形は head 解決に一致 — 通常 `<base>` / 縮退 `<base> <head>`) → 再パース → anchor 検証 → ±カウント・スレッド・panel 更新 → :diffupdate |
-| head/base 窓 | `q` | `:Review close` 相当 (コメントありなら確認プロンプト。tab を閉じる。実ファイルバッファとユーザー窓には触れない) |
+| head/base 窓 | `q` | `:Review close` 相当 (コメントありなら確認プロンプト。tab を閉じる。repo 本体の実ファイルバッファとユーザー窓には触れない。`created_by_us=true` の worktree 配下の実ファイルバッファのみ remove 前に破棄する) |
 | head/base 窓 | `<F1>` / `g?` | help float (内容は markdown。`g?` は config を持たない固定の別名で `<F1>` と同一呼び出し) |
 | file panel | `<CR>` / `o` / `l` | カーソル entry を開く (ファイル = 実ファイル窓に張るが focus とカーソルは file panel に維持、dir = fold トグル)。file panel 上の `o` は «開く» (旧 diff 窓の `o` = 実ファイル別 tab は 2026-09 削除 — head 窓が実ファイルそのもののため) |
 | file panel | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (panel 起点では開いたあとも focus とカーソルを panel に維持 — `<CR>` と同一。head/base 窓起点では focus は head 窓に残る) |
@@ -205,7 +205,8 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - **extmark と syntax**: 同範囲の syntax 装飾と extmark は競合しうる。コメントの下線・スレッドは独立 namespace と自前 highlight で表現する (窓 diff の Diff* は Neovim 内部適用なので競合対象にしない)
 - `git show-ref --verify` は短縮名を解決しない (e2e 実測)。存在確認は `rev-parse --verify -q`、ローカルブランチ判定 (switch 提案の可否) は `refs/heads/<name>` をフルパスで組んで `show-ref --verify --quiet` に渡す (git/ref.lua `is_local_branch` の形)。短縮名をそのまま show-ref へ渡すと実在ブランチでも非ヒットになり switch 提案が黙って縮退に化ける
 - worktree・fetch のパス・権限挙動の実機検証は macOS / Linux に限られる (Windows は検証範囲外。パス連結は `vim.fs.joinpath` で吸収)
-- worktree 内に未コミット変更があると `git worktree remove` は失敗する (ユーザーの変更を黙って捨てられない)。close 時に検知して `--force` の可否をユーザーへ確認する (決定表の正本: pr-worktree「セッションとレビューの終了」)
+- worktree 内に未コミット変更があると `git worktree remove` は失敗する (ユーザーの変更を黙って捨てられない)。close 時に検知して `--force` の可否をユーザーへ確認する (決定表の正本: pr-worktree「セッションとレビューの終了」)。dirty 判定は `git status` に加えて worktree 配下の modified バッファも見る (バッファ上の未保存編集はディスクに無い)
+- **fs watcher と E211**: Neovim 0.13 は `'autoread'` (既定 on) のもとで **loaded な全バッファに fs watcher を張る** (`:help timestamp`。バッファ削除で停止)。worktree dir 等の実体を消すより先に `nvim_buf_delete(force)` でバッファを破棄しないと、dir 消滅の瞬間に `E211: File ... no longer available` が出る (`FocusGained` / `:checktime` を待たず発火)。`buftype` が空でないバッファは対象外 — `review://` 系 scratch (`nofile`) は無関係で、実ファイルバッファだけが対象
 - kill 等で異常終了した経路では VimLeave の掃除が走らない。起動時に「記録上 open のセッションの worktree の実在」をスキャンし、残骸は通知の上で `git worktree prune` + ディレクトリを掃除する (MUST 4 の異常終了側の担保。正本: persistence-restore / pr-worktree)
 - PR 用の一時 ref を消し忘れると repo に残骸が積む。方針: worktree 作成は `git worktree add --detach` とし、fork PR の fetch でのみ `review-nvim/pr-<n>` ref を作る。close では worktree dir のみ削除 (ref は再開時の fetch 省略のために残す)、`:Review delete` とセッション不要時のみ ref も消す。fetch の宛先を短縮名にすると refs/heads/ 底下に保存され、`git update-ref -d` は短縮名を "bad name" で拒否する (git 2.x 実測)。削除は保存フルネームで行い、存在確認は `rev-parse --verify -q`
 - `git diff` のファイルパス抽出は `--- ` / `+++ ` 行だけに依存できない (空ファイルの新規・削除・モード変更では 2 行自体が出ず、空ファイル新規では `@@` も無い。git 2.55 実測)。抽出順は `rename to` → `+++` 新パス → `---` 旧パス → `diff --git` 行の新側でパーサ内のみ。hunk 行数 1 のときヘッダは `,1` を省略 (`@@ -1 +1,5 @@`)、0 は明示 (`+1,0`)。1 省略を 0 と誤読すると行番号がずれる

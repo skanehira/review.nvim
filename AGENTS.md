@@ -92,6 +92,12 @@ vsplit すると新窓が sidebar buf を継承して drift 誤検出 → **先�
 
 - worktree dir = `stdpath(data)/review.nvim/worktrees/<repo-hash>/<slug>`。
   削除対象は `created_by_us=true` の自前分のみ (INV-3)
+- **dir を消す全経路 (close / delete / 開始時掃除) は、remove の spawn より先に
+  `nvim_buf_delete(force)` で worktree 配下の実ファイルバッファを同期破棄する**
+  (Neovim 0.13 は loaded 全バッファに fs watcher を張るため、dir 消滅が先だと
+  E211。選択は `nvim_list_bufs()` の worktree path 走査 — `owned_bufs` は
+  open_head_real 経由分しか載らない)。dirty 判定は git status に加えて
+  worktree 配下の modified バッファも見る (未保存編集を黙って捨てない)
 - **同一 dir path の worktree 登録変更 (add / remove / prune) は
   `session.lua` の `wt_with_lock` / `wt_unlock` で直列化する**。ロック保持側は
   全終了経路 (成功・失敗・skip) で unlock を呼ぶ責務。呼ばないと待機側が死ぬ。

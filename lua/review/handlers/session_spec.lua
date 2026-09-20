@@ -453,6 +453,20 @@ local function started_with_worktree()
   }
 end
 
+-- worktree dir を実 dir として用意する (stub の add は dir を作らない — 上の注記)。
+-- head 実ファイル窓が worktree 配下の bufadd / bufload 経路を通るよう、開始前に
+-- dir とファイルを自前で書き出す (E211 系の検証は実ファイル + loaded バッファ前提)。
+local function make_real_worktree()
+  local wt = wt_path()
+  vim.fn.mkdir(wt, 'p')
+  for _, n in ipairs { 'a.lua', 'b.lua' } do
+    local f = io.open(vim.fs.joinpath(wt, n), 'w')
+    f:write 'line1\nline2\n'
+    f:close()
+  end
+  return wt
+end
+
 describe('session.start 開始フロー (専有 tab 3 窓)', function()
   use_env()
 
@@ -2598,6 +2612,109 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
     end
   )
 
+  it(
+    'close は remove spawn 前に worktree 配下の実ファイルバッファを破棄する (E211 防止)',
+    function()
+      local wt = make_real_worktree()
+      started_with_worktree()
+      -- UI 開通で head 実ファイル (a.lua) が bufadd / bufload 済み。加えて
+      -- ユーザーが別ファイル (b.lua) を :edit / LSP ジャンプした体で loaded
+      -- バッファを足す (open_head_real 経由外も走査対象であることの前提)。
+      local user_buf = vim.fn.bufadd(vim.fs.joinpath(wt, 'b.lua'))
+      vim.fn.bufload(user_buf)
+      local fname = vim.uv.fs_realpath(vim.fs.joinpath(wt, 'a.lua'))
+      assert.equals(
+        1,
+        vim.fn.bufexists(fname),
+        '前提: close 前に head 実ファイルバッファがある'
+      )
+      assert.equals(
+        1,
+        vim.fn.bufexists(user_buf),
+        '前提: ユーザー開きの worktree 内バッファがある'
+      )
+
+      -- remove は deferred (未完了) のままでもバッファは既に消えていること:
+      -- git worktree remove は非同期 (vim.system) なので spawn より前の同期破棄が契約。
+      install_git_deferred_remove {
+        git_ok, -- status clean
+        git_ok, -- remove (deferred)
+      }
+      session_handler.close()
+
+      assert.equals('closed', load_saved().status)
+      assert.is_nil(session_handler.active())
+      assert.equals(
+        0,
+        vim.fn.bufexists(fname),
+        'worktree 配下のバッファが残ったまま (E211 の源)'
+      )
+      assert.equals(
+        0,
+        vim.fn.bufexists(user_buf),
+        'open_head_real 経由外の worktree 内バッファも走査対象'
+      )
+      state.deferred { code = 0, stdout = '', stderr = '' } -- remove 完了 (後始末)
+    end
+  )
+
+  it(
+    'worktree 配下に modified なバッファがあると close 前に確認プロンプト (キャンセル = close 中止)',
+    function()
+      make_real_worktree()
+      started_with_worktree()
+      local head_buf = vim.api.nvim_win_get_buf(ui_windows.win 'head')
+      vim.api.nvim_buf_set_lines(head_buf, 1, 2, false, { 'USER EDIT' }) -- 未保存 (ディスクに無い)
+      state.input_answer = 'n'
+      install_git {
+        git_ok, -- status: clean (バッファ上の編集は git status に現れない)
+      }
+
+      session_handler.close()
+
+      -- git status は clean でもバッファ上の未保存編集を force 確認に乗せる
+      -- (無告知の force wipe は未保存編集を黙って捨てる = E211 より悪い)。
+      assert.equals(1, #state.inputs)
+      assert.equals(
+        (
+          'review.nvim: worktree %s に未コミットの変更または未保存の編集 (バッファ %d 個) があります。'
+          .. '削除して閉じますか？ (git worktree remove --force — ディスクとバッファの編集は破棄されます) [y/N]: '
+        ):format(wt_path(), 1),
+        state.inputs[1].prompt
+      )
+      assert.equals('open', load_saved().status)
+      assert.equals(SLUG, session_handler.active().id)
+      assert.equals(1, #state.git_calls) -- status のあと remove は走らない
+      assert.is_true(vim.api.nvim_buf_is_valid(head_buf))
+      assert.equals(true, vim.bo[head_buf].modified) -- バッファと編集も残る
+    end
+  )
+
+  it(
+    'modified バッファありの close を承認すると remove --force で進みバッファも破棄される',
+    function()
+      local wt = make_real_worktree()
+      started_with_worktree()
+      local head_buf = vim.api.nvim_win_get_buf(ui_windows.win 'head')
+      vim.api.nvim_buf_set_lines(head_buf, 1, 2, false, { 'USER EDIT' })
+      state.input_answer = 'y'
+      install_git {
+        git_ok, -- status: clean (ディスク)
+        git_ok, -- remove --force ok
+      }
+
+      session_handler.close()
+
+      assert.same({ 'git', 'worktree', 'remove', '--force', wt_path() }, state.git_calls[2])
+      assert.equals('closed', load_saved().status)
+      assert.equals(
+        0,
+        vim.fn.bufexists(vim.uv.fs_realpath(vim.fs.joinpath(wt, 'a.lua'))),
+        '承認経路でも worktree 配下のバッファを破棄する'
+      )
+    end
+  )
+
   it('worktree なしセッションの close は git 追加呼び出し 0', function()
     start_done('main', 'feature')
     install_git {}
@@ -2695,6 +2812,48 @@ describe('delete の worktree / ref 掃除', function()
       end
     )
   end)
+
+  it(
+    'closed 残骸の掃除でも worktree 配下のバッファを消してから dir を消す (E211 防止)',
+    function()
+      local wt = wt_path 'pr-7'
+      vim.fn.mkdir(wt, 'p')
+      local f = io.open(vim.fs.joinpath(wt, 'a.lua'), 'w')
+      f:write 'line1\nline2\n'
+      f:close()
+      local buf = vim.fn.bufadd(vim.fs.joinpath(wt, 'a.lua'))
+      vim.fn.bufload(buf)
+      assert.equals(
+        1,
+        vim.fn.bufexists(buf),
+        '前提: 残骸 dir のファイルを指す loaded バッファ'
+      )
+      store.save(existing_stub {
+        id = 'pr-7',
+        mode = 'pr',
+        base = 'main',
+        head = 'review-nvim/pr-7',
+        pr = { number = 7, url = 'https://github.com/acme/demo/pull/7' },
+        worktree = { path = wt, created_by_us = true },
+      })
+      install_git {
+        top_ok,
+        git_ok, -- status clean
+        git_ok, -- remove ok
+        git_ok, -- update-ref ok
+      }
+      state.input_answer = 'y'
+
+      session_handler.delete 'pr-7'
+
+      assert.equals(
+        0,
+        vim.fn.bufexists(buf),
+        'delete 掃除でも worktree 配下のバッファを破棄する'
+      )
+      assert.is_true(vim.uv.fs_stat(paths.session_file(state.repo, 'pr-7')) == nil)
+    end
+  )
 
   it(
     'active 同一 id の delete は close 相当の掃除 (status -> save -> remove) -> JSON 削除',
