@@ -386,14 +386,14 @@ describe('commentmarks.apply: 罫線の箱', function()
   )
 
   it(
-    'opts.max_width を超える本文は内側幅で折り返され、折り返し行にも pad と両端 chunk が付く',
+    'opts.width の外幅を超える本文は内側幅で折り返され、折り返し行にも pad と両端 chunk が付く',
     function()
       local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/box2.lua')
       commentmarks.apply(
         session_of { comment { body = string.rep('a', 20) } },
         buf,
         'a.lua',
-        { max_width = 24 }
+        { width = 24 }
       )
       local vl = head_virt_lines(buf)
       -- 内側幅 = 24 - strdisplaywidth('│ ') - strdisplaywidth(' │') = 20。
@@ -433,7 +433,7 @@ describe('commentmarks.apply: 罫線の箱', function()
       session_of { comment { body = table.concat(body, '\n') } },
       buf,
       'a.lua',
-      { max_width = 24 }
+      { width = 24 }
     )
     local vl = head_virt_lines(buf)
     assert.equals(
@@ -512,7 +512,7 @@ describe('commentmarks.apply: 罫線の箱', function()
         session_of { comment { body = table.concat(body, '\n') } },
         buf,
         'a.lua',
-        { max_width = 20 }
+        { width = 20 }
       )
       local vl = head_virt_lines(buf)
       -- 上限 20 で内側幅 16。打ち切り文言 (表示幅 12 + pad 7 = 19) も折り返される
@@ -556,10 +556,11 @@ describe('commentmarks.apply: 罫線の箱', function()
       -- 上罫線 + 見出し + c1 + 区切り + c2 + 下罫線
       assert.equals(6, #vl, '集約の箱が期待の行数でない: ' .. vim.inspect(vl))
       assert.equals('ReviewCommentBorder', vl[1][1][2], '集約の 1 行目が上罫線でない')
-      assert.same(
-        { { ' 2 outdated (prompt 除外中)', 'ReviewCommentOutdated' } },
-        inner_chunks(vl[2])
-      )
+      -- 見出しも箱の中身行: id 接頭辞幅の pad (本文色) + 見出し文言 (警告色)
+      assert.same({
+        { '       ', 'ReviewCommentBody' },
+        { ' 2 outdated (prompt 除外中)', 'ReviewCommentOutdated' },
+      }, inner_chunks(vl[2]))
       assert.same({
         { '  [c1] ', 'ReviewCommentOutdated' },
         { 'gone place', 'ReviewCommentBody' },
@@ -575,9 +576,97 @@ describe('commentmarks.apply: 罫線の箱', function()
       assert.equals('ReviewCommentBorder', vl[6][1][2], '集約の末行が下罫線でない')
       for i, line in ipairs(vl) do
         assert.equals(
-          31,
+          38,
           row_width(line),
           ('集約の箱の %d 行目が右辺で揃っていない'):format(i)
+        )
+      end
+    end
+  )
+
+  it(
+    '短い本文 1 行の箱が width の外幅で右辺揃え (全行が pad で埋まり、各行の strdisplaywidth == width)',
+    function()
+      local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/w1.lua')
+      commentmarks.apply(session_of { comment { body = 'hi' } }, buf, 'a.lua', { width = 40 })
+      local vl = head_virt_lines(buf)
+      -- 外幅 40 = width そのもの (自然幅 9 + 罫線分 = 13 や下限 20 に縮まない)。
+      -- 内側幅 36 まで pad で埋まり、右辺が窓右端で揃う
+      assert.equals(3, #vl, '上罫線 + 本文 1 行 + 下罫線でない: ' .. tostring(#vl))
+      assert.same({ { '┌' .. string.rep('─', 38) .. '┐', 'ReviewCommentBorder' } }, vl[1])
+      assert.same({
+        { '│ ', 'ReviewCommentBorder' },
+        { '  [c1] hi', 'ReviewCommentBody' },
+        { string.rep(' ', 27), 'ReviewCommentBody' },
+        { ' │', 'ReviewCommentBorder' },
+      }, vl[2])
+      assert.same({ { '└' .. string.rep('─', 38) .. '┘', 'ReviewCommentBorder' } }, vl[3])
+      for i, line in ipairs(vl) do
+        assert.equals(
+          40,
+          row_width(line),
+          ('箱の %d 行目の表示幅が width の外幅で揃っていない'):format(i)
+        )
+      end
+    end
+  )
+
+  it(
+    '集約見出し行が内側幅で折り返され、見出し幅 > 内側幅の width でも箱の右辺がはみ出さない',
+    function()
+      local buf = mk_buf({ 'only' }, 'commentmarks-spec/w2.lua')
+      commentmarks.apply(
+        session_of {
+          comment { line = 9, end_line = 9, state = 'outdated', body = 'gone' },
+          comment { line = 9, end_line = 9, state = 'outdated', id = 'c2', body = 'also gone' },
+        },
+        buf,
+        'a.lua',
+        { width = 20 }
+      )
+      local above = nil
+      for _, m in ipairs(marks(buf)) do
+        if m[4].virt_lines_above then
+          above = m
+        end
+      end
+      assert.is_not_nil(above, 'virt_lines_above の集約 mark が無い')
+      local vl = above[4].virt_lines or {}
+      -- 外幅 20 = 内側幅 16。見出し (表示幅 27 + pad 7 = 34) は budget 9 で
+      -- 3 行に折り返される (単語境界は考慮しない)
+      assert.equals(
+        8,
+        #vl,
+        '上罫線 + 見出し 3 行 + c1 + 区切り + c2 + 下罫線でない: '
+          .. vim.inspect(vl)
+      )
+      assert.same(
+        { { '       ', 'ReviewCommentBody' }, { ' 2 outdat', 'ReviewCommentOutdated' } },
+        inner_chunks(vl[2])
+      )
+      assert.same(
+        { { '       ', 'ReviewCommentBody' }, { 'ed (promp', 'ReviewCommentOutdated' } },
+        inner_chunks(vl[3])
+      )
+      assert.same(
+        { { '       ', 'ReviewCommentBody' }, { 't 除外中)', 'ReviewCommentOutdated' } },
+        inner_chunks(vl[4])
+      )
+      assert.same({
+        { '  [c1] ', 'ReviewCommentOutdated' },
+        { 'gone', 'ReviewCommentBody' },
+      }, inner_chunks(vl[5]))
+      assert.is_true(line_text(vl[6]):find('├', 1, true) ~= nil, '区切り罫線が無い')
+      assert.same({
+        { '  [c2] ', 'ReviewCommentOutdated' },
+        { 'also gone', 'ReviewCommentBody' },
+      }, inner_chunks(vl[7]))
+      assert.equals('ReviewCommentBorder', vl[8][1][2], '集約の末行が下罫線でない')
+      for i, line in ipairs(vl) do
+        assert.equals(
+          20,
+          row_width(line),
+          ('集約の箱の %d 行目が width の外幅で揃っていない'):format(i)
         )
       end
     end
@@ -613,10 +702,10 @@ describe('commentmarks.apply: outdated 集約', function()
         above[4].virt_lines[1][1][2],
         '集約 1 行目が上罫線でない'
       )
-      assert.same(
-        { { ' 2 outdated (prompt 除外中)', 'ReviewCommentOutdated' } },
-        inner_chunks(above[4].virt_lines[2])
-      )
+      assert.same({
+        { '       ', 'ReviewCommentBody' },
+        { ' 2 outdated (prompt 除外中)', 'ReviewCommentOutdated' },
+      }, inner_chunks(above[4].virt_lines[2]))
     end
   )
 
@@ -641,7 +730,8 @@ describe('commentmarks.apply: outdated 集約', function()
     -- 集約は箱: 上罫線 / 見出し (箱 1 行目) / 本文 (区切り罫線で分離) / 下罫線
     local vl = above[4].virt_lines or {}
     assert.equals('ReviewCommentBorder', vl[1][1][2], '集約の 1 行目が上罫線でない')
-    assert.equals(' 2 outdated (prompt 除外中)', inner_chunks(vl[2])[1][1])
+    -- 見出し行 = id 接頭辞幅の pad chunk + 見出し文言 chunk
+    assert.equals(' 2 outdated (prompt 除外中)', inner_chunks(vl[2])[2][1])
     local joined = {}
     for i = 3, #vl - 1 do
       joined[#joined + 1] = line_text(vl[i])

@@ -330,6 +330,39 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
     return store.load(REPO_TOP, 'main--feature').data
   end
 
+  local function chunk_text(chunk)
+    return type(chunk[1]) == 'table' and chunk[1][1] or chunk[1]
+  end
+
+  -- 集約箱の見出し文言を再構成する (見出しは内側幅で折り返しされうる = 罫線行と
+  -- 本文行を飛ばして警告色 chunk を連結すると完全一致)。body_mark = 本文行判定
+  -- (最初のコメント行 = id 接頭辞 '[c1]' を含む行で打ち切る)
+  local function aggregate_head_text(mark, body_mark)
+    local pieces = {}
+    for _, line in ipairs(mark[4].virt_lines or {}) do
+      local row = {}
+      for _, chunk in ipairs(line) do
+        row[#row + 1] = chunk_text(chunk)
+      end
+      row = table.concat(row)
+      if
+        row:find('┌', 1, true) == nil
+        and row:find('├', 1, true) == nil
+        and row:find('└', 1, true) == nil
+      then
+        if row:find(body_mark, 1, true) ~= nil then
+          break -- 見出し行はここまで (以降は本文)
+        end
+        for _, chunk in ipairs(line) do
+          if chunk[2] == 'ReviewCommentOutdated' then
+            pieces[#pieces + 1] = chunk_text(chunk)
+          end
+        end
+      end
+    end
+    return table.concat(pieces)
+  end
+
   it(
     'comments あり: 3 窓を開き placeholder に全 outdated を集約 (panel 空一覧・files map 純粋)',
     function()
@@ -368,11 +401,17 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
         end
       end
       assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
-      -- 集約は箱で描かれ、見出しは箱 1 行目 (上罫線の次行 = virt_lines[2] の
-      -- 内容 chunk [2])
-      assert.equals(' 1 outdated (prompt 除外中)', above[4].virt_lines[2][2][1])
+      -- 集約は箱で描かれ、見出しは箱 1 行目の内容行 (内側幅で折り返しされうる =
+      -- 警告色 chunk の連結で完全一致を見る。本文行の位置は幅依存)
+      assert.equals(' 1 outdated (prompt 除外中)', aggregate_head_text(above, '[c1]'))
+      local joined = {}
+      for _, line in ipairs(above[4].virt_lines) do
+        for _, chunk in ipairs(line) do
+          joined[#joined + 1] = chunk_text(chunk)
+        end
+      end
       assert.is_true(
-        above[4].virt_lines[3][2][1]:find('[c1]', 1, true) ~= nil,
+        table.concat(joined):find('[c1]', 1, true) ~= nil,
         vim.inspect(above[4].virt_lines)
       )
 
@@ -448,17 +487,31 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
         end
       end
       assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
-      -- 集約は箱: 上罫線 / 見出し (箱 1 行目) / c1 / 区切り罫線 / c2 / 下罫線
-      assert.equals(' 2 outdated (prompt 除外中)', above[4].virt_lines[2][2][1])
-      local bodies = {}
-      for i = 3, #above[4].virt_lines - 1 do
-        local row = above[4].virt_lines[i]
-        -- 内容 chunk (先頭ボーダーの次)。区切り罫線行は chunk 1 件のみ
-        bodies[#bodies + 1] = row[2] ~= nil and row[2][1] or row[1][1]
+      -- 集約は箱: 上罫線 / 見出し (内側幅で折り返しされうる) / c1 / 区切り罫線 /
+      -- c2 / 下罫線。本文行の位置は幅依存なので順序で見る
+      assert.equals(' 2 outdated (prompt 除外中)', aggregate_head_text(above, '[c1]'))
+      local c1_row, sep_row, c2_row
+      for i, line in ipairs(above[4].virt_lines) do
+        local texts = {}
+        for _, chunk in ipairs(line) do
+          texts[#texts + 1] = chunk_text(chunk)
+        end
+        local row = table.concat(texts)
+        if row:find('├', 1, true) ~= nil then
+          sep_row = sep_row or i
+        end
+        if row:find('[c1]', 1, true) ~= nil then
+          c1_row = c1_row or i
+        end
+        if row:find('[c2]', 1, true) ~= nil then
+          c2_row = c2_row or i
+        end
       end
-      assert.equals(3, #bodies, vim.inspect(bodies)) -- c1 + 区切り + c2
-      assert.is_true(bodies[1]:find('[c1]', 1, true) ~= nil)
-      assert.is_true(bodies[3]:find('[c2]', 1, true) ~= nil)
+      assert.is_not_nil(c1_row, 'c1 行が無い: ' .. vim.inspect(above[4].virt_lines))
+      assert.is_not_nil(sep_row, '区切り罫線行が無い')
+      assert.is_not_nil(c2_row, 'c2 行が無い')
+      assert.is_true(c1_row < sep_row, 'c1 が区切りより前でない')
+      assert.is_true(sep_row < c2_row, 'c2 が区切りより後でない')
 
       -- panel winbar: 集約先 placeholder が見える = ⚠N なし
       assert.equals(
