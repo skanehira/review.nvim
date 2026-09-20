@@ -1654,9 +1654,10 @@ end
 
 --- panel <CR>/o/l: 一覧のそのファイルを open_file で diff 窓へ張る。focus と
 --- カーソルは file panel に維持する (Enter で一覧から動かない契約。bind は head 窓へ
---- focus を送るため開通後に panel へ戻す)。diff 窓へ移るのは移動系 (<Tab> 等) と
---- 標準の窓移動 (<C-w>l 等) の役割 — UX review F12 の «c/e が効く位置から開始» は
---- セッション開始時 focus の契約として残る。
+--- focus を送るため開通後に panel へ戻す。panel 起点の移動系 <Tab>/<S-Tab>/[F/]F も
+--- open_file_keep_focus で同じく panel に残る)。panel から離れるのは head/base
+--- 窓起点の移動系と標準の窓移動 (<C-w>l 等) — UX review F12 の «c/e が効く位置から
+--- 開始» はセッション開始時 focus の契約として残る。
 function M.open_selected_file()
   if active == nil then
     notify_warn 'アクティブなセッションがありません'
@@ -1717,6 +1718,18 @@ local function current_path()
   return active ~= nil and active.current ~= nil and active.current.path or nil
 end
 
+-- 移動系 (<Tab>/<S-Tab>/[F/]F) open の focus 契約は origin 依存: 押下時点の窓
+-- role が panel なら open 後に focus を panel へ戻す (<CR>/o/l と同じ。bind は
+-- head 窓へ focus を送るため開通後に戻す)。head/base 窓起点では focus は head 窓
+-- に残す (既存 spec と e2e の契約 — diff-review「file panel」選択追従)。
+local function open_file_keep_focus(path)
+  local from_panel = ui_windows.role_of(vim.api.nvim_get_current_win()) == 'panel'
+  M.open_file(path)
+  if from_panel then
+    M.focus_sidebar()
+  end
+end
+
 -- 移動系 (<Tab>/<S-Tab>/[F/]F): file panel の表示順 (ツリーを上から下) から次の
 -- 対象を解決し open_file (処理は panel <CR> と同一)。render と同じ treelist.build
 -- を単一源にし、折りたたみ dir の子・絞り込み外は表示と同一規則で飛ばす。
@@ -1774,7 +1787,7 @@ local function step_file(delta)
   if ni < 1 or ni > #order then
     return
   end
-  M.open_file(order[ni])
+  open_file_keep_focus(order[ni])
 end
 
 --- `<Tab>`: 次のファイルへ。
@@ -1794,7 +1807,7 @@ function M.first_file()
   if target == nil or target == current_path() then
     return
   end
-  M.open_file(target)
+  open_file_keep_focus(target)
 end
 
 --- `]F`: 最後のファイルへ (現対象が最後なら無動作)。
@@ -1804,7 +1817,7 @@ function M.last_file()
   if target == nil or target == current_path() then
     return
   end
-  M.open_file(target)
+  open_file_keep_focus(target)
 end
 
 --- `<leader>e`: panel へ focus を移す。窓が閉じられていた場合は左に再建し

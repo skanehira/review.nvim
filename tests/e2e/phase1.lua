@@ -389,6 +389,16 @@ local function run()
       == 'review://sidebar/main--feature'
   end, '<leader>e で panel focus')
 
+  -- panel 起点の <Tab> も <CR> と同じく focus を panel に維持する (issue #36)。
+  -- 上の head 窓起点の移動シーケンスが focus を head に残すことの対照にもなる。
+  -- 現対象 a.lua の次 = b.lua (表示順 [new.lua, a.lua, b.lua])
+  vim.cmd('normal 0' .. tab_key)
+  wait_for(function()
+    return win_buf_name(windows.win 'head') == realpath(vim.fs.joinpath(top, 'b.lua'))
+      and windows.role_of(vim.api.nvim_get_current_win()) == 'panel'
+  end, 'panel 起点の <Tab> で b.lua 張替 + focus panel 維持')
+  print 'E2E-M5 Tab-from-panel=focus-kept'
+
   -- --- prompt yank (ai-prompt.md テスト方針 golden path) -------------------
   -- b.lua (head 実ファイル) で視覚選択 range コメントを作り (既知の制約: :normal
   -- の視覚選択は Vj -> c の分割投入が単位)、y で "0、:Review prompt で全文照合。
