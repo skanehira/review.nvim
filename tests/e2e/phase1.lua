@@ -337,6 +337,21 @@ local function run()
       == realpath(vim.fs.joinpath(top, 'src/deep/new.lua'))
   end, '[F で最初のファイル src/deep/new.lua (ツリーは dir 先行)')
   print 'E2E-M3 [F=first'
+  -- 追加ファイル (A) は base = 0 行 null scratch とのペアなので両窓 diffoff
+  -- (全行 DiffAdd の塗りつぶしを作らない — issue #38。a.lua (M) の窓 diff 有効が
+  -- 上の L1 ループで陰性対照になる)
+  local nbase = windows.win 'base'
+  if win_buf_name(nbase) ~= 'review://null/main--feature/src/deep/new.lua' then
+    fail('new.lua base 窓が null scratch でない: ' .. win_buf_name(nbase))
+  end
+  if vim.wo[windows.win 'head'].diff or vim.wo[nbase].diff then
+    fail '追加ファイル (new.lua) で窓 diff が有効 (diffoff 契約違反)'
+  end
+  local nbar = vim.w[windows.win 'head'].review_winbar or ''
+  if nbar:find('new file', 1, true) == nil then
+    fail('head winbar に new file マークが無い: ' .. nbar)
+  end
+  print 'E2E-A1 diffoff=newfile'
   -- <Tab> 次ファイル (押下は 0 接頭で渡す = :normal の引数先頭 whitespace 回避。
   -- 実測で 0<Tab> 注入の発火を確認済み)。表示順 [new.lua, a.lua, b.lua] を辿る。
   local tab_key = vim.api.nvim_replace_termcodes('<Tab>', true, false, true)
