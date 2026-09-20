@@ -43,8 +43,10 @@ nvim を起動せずに通る)。
 
 ## 3. 窓レイアウトを触るとき (#16 で壊しかけた契約)
 
-- **窓の役割は id でなく buffer 名から導く** (`ui/windows.lua` role_of:
-  `review://base|<name>` / `w:review_key_gate`)。id が生きていても `:buffer` で中身が
+- **窓の役割は id でなく内容から導く** (`ui/windows.lua` role_of: panel =
+  `review://sidebar/` バッファ一致、head = `w:review_key_gate` + 表示 buf 一致、
+  base = `w:review_base_gate` + 表示 buf 一致、scratch は `review_meta.scratch`
+  の fallback)。id が生きていても `:buffer` で中身が
   差し替わる drift で誤作動したことがある (UX_REVIEW F1 系)
 - 新しい tabpage を作るときは **専有 tab にする** (ユーザー窓と同 tab にすると
   窓 diff の相乗りで base と user file が diff し出す) + `t<tab>` で開き直せること

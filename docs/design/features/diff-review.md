@@ -21,7 +21,7 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 
 - `tabnew` でレビュー専有 tab を作る (ユーザーの窓・tab は触らない)。構成: **file panel (左) │ base 窓 │ head 窓** の横 3 分割。panel は上段の左 (`<leader>b` 再建は `leftabove vsplit` — `wincmd H` はコメント一覧 (最下部全幅) の全幅を崩すため使わない)・幅 `config.panel_width` (既定 35)・`winfixwidth`。**開通順序は vsplit 前に buffer を張らない現行契約の流れを踏襲**し role 導出を内容基準で行う (AGENTS/DESIGN「窓の所有」)
 - **開通時 focus は head 窓** (直後の c/e が効く位置から開始する — diffview は panel focus だが、review はコメント主経路を即座に使えることを選ぶ)
-- base/head 窓オプション (窓ローカル): `diff scrollbind cursorbind foldmethod=diff foldlevel=0 foldcolumn=1 wrap=off`。行番号は `config.number` に従う。**`diffopt` は変更しない** (global option で伝播 — DESIGN「既知の制約」)。binary 注釈共有・no-changes・追加 (base = 0 行 null scratch)・削除告知の各ペアは窓 diff ペアを作らず**両窓 `diffoff`** で退避する (素の色で読める。`foldclosed()` が -1 になることで退避を検証できる)
+- base/head 窓オプション (窓ローカル): `diff scrollbind cursorbind foldmethod=diff foldlevel=0 foldcolumn=1 wrap=off`。行番号は `config.number` に従う。**`diffopt` は変更しない** (global option で伝播 — DESIGN「既知の制約」)。binary 注釈共有・no-changes・追加 (base = 0 行 scratch)・削除告知の各ペアは窓 diff ペアを作らず**両窓 `diffoff`** で退避する (素の色で読める。`foldclosed()` が -1 になることで退避を検証できる)
 - tab 作成時に `:tcd <repo または worktree>` (tab-local cwd)。効果の対象は LSP server プロセスの spawn cwd と相対パス解決ツール。root_dir 自体はバッファパス起点の遡上で決まる (DESIGN 決定表「LSP 連携」)
 - 窓 role は id ではなく内容 + 窓変数から導く: panel = `review://sidebar/...` バッファ、base = `review://base/...`、head = `w:review_key_gate == winid` かつ表示バッファの file がセッションの期待パスと一致 (フィンガープリント照合)
 - **レビュー tab の消滅経路は 2 種類**: (a) `q` / `:Review close` = セッション close (コメント 0 件でなければ確認プロンプト付きの終了手順 — pr-worktree「セッションとレビューの終了」。repo 本体の実ファイルバッファは消さず、`created_by_us=true` の worktree 配下の実ファイルバッファのみ worktree remove の前に破棄する)。 (b) ユーザーが `:tabclose` / `:tabonly` 等で直接閉じる = TabClosed フックが検知し **save (status=open 維持) + extmark clear + active 解除 + in-flight refresh 破棄**を行い、INFO «レビュー tab を閉じました (セッションは保存済み・`:Review` で開き直し可)» を出す。tab 消滅そのものを close と解釈しない (黙ってレビュー状態を変えない)。契約化された「閉じる」操作は `q` / `:Review close` のみ
@@ -34,9 +34,9 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 | 通常経路 (head == チェックアウト) | `<repo>/<path>` を `:edit` (編集可・filetype detect・LSP attach。既にユーザーが開いていれば同一バッファを再利用) | `review://base/<session>/<path>` scratch (`git show <base>:<path>`、`bufhidden=hide`、modifiable=false、filetype detect) |
 | PR | `<worktree>/<path>` を `:edit` (tab は worktree に tcd 済み) | 同上 |
 | scratch 縮退 | `review://head/<session>/<path>` scratch (`git show <head>:<path>`、read-only) + INFO | 同上 |
-| 追加ファイル | 上記経路どおり | `review://null/<session>/<path>` (0 行 scratch。base = 0 行との窓 diff は全行 DiffAdd になるため **両窓 `diffoff`**) |
+| 追加ファイル | 上記経路どおり | `review://base/<session>/<path>` の**0 行 (空) scratch** (名前は変更ファイルと同じ。種別は winbar の `base · <path> (new file)` / `· new file` で分かる。base = 0 行との窓 diff は全行 DiffAdd になるため **両窓 `diffoff`**) |
 | 削除ファイル | **告知 scratch** `review://deleted/<session>/<path>`。`:edit` しない (`:w` で空の新規ファイルが復活する — DESIGN「既知の制約」) | 旧内容 scratch。head = 告知 1 行 / base = 旧内容の**告知ペア**として両窓 `diffoff` |
-| rename | **新パス**の実ファイル/scratch | `git show <base>:<旧パス>` (旧パス自体が新規なら `review://null/...`) |
+| rename | **新パス**の実ファイル/scratch | `git show <base>:<旧パス>` (旧パス自体が新規なら git show が失敗し同名 scratch は空 = 0 行) |
 | binary | 告知 scratch `review://binary/<session>/<path>` ×両窓共有 (`diffoff`。git パースの „Binary files differ“ を 1 行表示) | 同 buffer を共有 |
 
 - open_file(path) = 移動系の唯一経路: head/base を上記で張り、chrome 再適用、panel 再描画、コメント extmark 再適用。open はレビュー完了マークを変えず永続状態も触らないため save しない (INV-4 の save 対象 = コメント CRUD / マーク切替 / 差分再取得)。head が実バッファのとき内容変化があれば `:diffupdate`
@@ -101,7 +101,7 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 | 操作フローと float 入力 | handlers | `lua/review/handlers/comments.lua` (行取得が恒等になっても API 形は維持 — scratch 縮退窓と共通) |
 | 3 窓レイアウト・role 導出・drift 復旧・tcd・tab 開閉 | ui | `lua/review/ui/windows.lua` (新規 + `_spec`) |
 | window role gate + buffer-local キー install/uninstall (衝突検出スキップ含む) | ui | `lua/review/ui/keygate.lua` (新規 + `_spec`) |
-| base / head / null / deleted / binary 窓の中身 (git show 充填・filetype detect) | ui | `lua/review/ui/scratchwin.lua` (新規) |
+| base / head / deleted / binary 窓の中身 (git show 充填・filetype detect) | ui | `lua/review/ui/scratchwin.lua` (新規) |
 | コメント extmark 再適用・ns クリーンアップ収集 | ui | `lua/review/ui/commentmarks.lua` (新規 — 現行 diffbuffer のスレッド部を移す) |
 | file panel 描画・相互追従 | ui | `lua/review/ui/filepanel.lua` (新規 + `_spec`) |
 | ツリーモデル (純ロジック: path→node、連結、集約、fold 集合) | ui (純) | `lua/review/ui/treelist.lua` (新規 + `_spec`) |
@@ -113,7 +113,7 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 
 - 未追跡ファイル: `git diff` 出力に出ないためレビュー対象にならない (`git add` 前の新ファイルは不可。DESIGN「既知の制約」)
 - 削除ファイル・binary: head 窓が告知 scratch のファイルにはコメント不可 (WARN)。削除そのものへの指摘コメントは v1 対象外 (現行決定)
-- rename: 新パス 1 ファイルとして扱い、旧パスとの対応表示はしない。base 窓だけ旧パスの中身 (`git show` で解決不能 = 旧パス自体が新規の場合は `review://null/<session>/<path>`)
+- rename: 新パス 1 ファイルとして扱い、旧パスとの対応表示はしない。base 窓だけ旧パスの中身 (`git show` で解決不能 = 旧パス自体が新規の場合は同名 scratch が空 = 0 行)
 - hunk 行数 0 (`@@ -0,0 +0,0 @@` 相当): パース側契約そのまま (新側行番号を持たない)。窓 diff 表示には影響しない
 - scratch 縮退 + 別プロセス checkout 変更: LSP が attach しない・diff が開いた時点固定 — INFO 済みなので仕様
 - ユーザーがレビュー中に裏で switch/checkout: 次のリフレッシュ時に現在チェックアウト内容がレビュー対象になる (定義)。head 解決の commit 比較で不一致を検出し INFO 1 回 (定義は「リフレッシュ」節が正本)
@@ -124,7 +124,7 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 
 - 単体 (core/diff):生出力フィクスチャパースは現行維持。単引数 `git diff <base>` 出力形状での回帰を追加
 - 単体 (git リポジトリ実 FS): `git/repo.lua` switch 成功/失敗、`git/diff.lua` cwd 指定 (worktree) の引数組み立て (`_set_system` 応答キューで呼び出し順 pin)
-- 単体 (handlers/session): head 解決フローの全分岐 (一致 / 不一致+clean+branch+承諾 / 拒否 / dirty / 非ブランチ — `ui.input` スタブ + rev-parse キュー)、open_file の種別別張り分け (実バッファ / scratch / null / deleted)、リフレッシュ in-flight まとめ・失敗保持・save 契約 (INV-4)、drift 復旧経路 (window role 再導出)、close の tab 消滅 + extmark 残骸 0 (`tabpage が消え、張った buf の get_extmarks が空`)
+- 単体 (handlers/session): head 解決フローの全分岐 (一致 / 不一致+clean+branch+承諾 / 拒否 / dirty / 非ブランチ — `ui.input` スタブ + rev-parse キュー)、open_file の種別別張り分け (実バッファ / scratch / 追加の 0 行 scratch / deleted)、リフレッシュ in-flight まとめ・失敗保持・save 契約 (INV-4)、drift 復旧経路 (window role 再導出)、close の tab 消滅 + extmark 残骸 0 (`tabpage が消え、張った buf の get_extmarks が空`)
 - 単体 (ui): windows.lua (panel│base│head 配置・tcd・winfixwidth)、keygate (衝突検出スキップ・install/uninstall 残骸・gate 発火/不発火マトリクス)、treelist (連結・集約・fold 集合・list/tree 切替の純関数)、filepanel (viewed/表示行・選択追従 scroll)
 - E2E (golden path): temp repo `main`/`feature` で `:Review start main` → 専有 tab 3 窓・head 窓 buf 実パス==repo 内・窓 opts・**tcd==repo** → head 窓 `c` でコメント (打鍵は `:normal`) → 実ファイルの extmark・panel 行・winbar 件数 assert → 編集 `:w` → ±カウント増(panel) とリフレッシュ assert → `<Tab>` 次ファイル → 閉じて (q) tab 消滅・ns 残骸 0 → 再起動 `:Review` 復元→コメント位置同一。縮退シナリオ (`:Review start main other` + n スタブ) は両窓 scratch assert。switch シナリオ (y) は switch 後 repo の content==head であること。PR シナリオは worktree + tcd==worktree + `o` が worktree 基準パス
 - 実 PTY 契約 (tmux + `--remote-expr`、手順を commit message): 同一ファイルの 2 窓 (review 窓 + ユーザー窓) でキーが review 窓のみ発火・ユーザー窓 built-in、insert-mode 残留 (F8)、fold 時のスレッド非表示の画面確認
