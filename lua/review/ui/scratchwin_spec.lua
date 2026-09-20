@@ -22,8 +22,8 @@ describe('scratchwin.buffer 命名・再利用・オプション契約', functio
     assert.equals('review://base/s1/a.lua', vim.api.nvim_buf_get_name(buf))
   end)
 
-  it('全 kind (base/head/null/deleted/binary) が同じ命名規則', function()
-    for _, kind in ipairs { 'base', 'head', 'null', 'deleted', 'binary' } do
+  it('全 kind (base/head/deleted/binary) が同じ命名規則', function()
+    for _, kind in ipairs { 'base', 'head', 'deleted', 'binary' } do
       local buf = scratchwin.buffer { kind = kind, session_id = 'ses', path = 'x/y.lua' }
       assert.equals(('review://%s/ses/x/y.lua'):format(kind), vim.api.nvim_buf_get_name(buf))
     end
@@ -77,12 +77,15 @@ describe('scratchwin.set_content / detect_filetype', function()
   )
 
   it(
-    'null kind は中身なし scratch (追加ファイルの base 側。0 行表示 = diff ペア参加)',
+    'base kind の新規作成は 0 行に正規化される (追加ファイルの base 側。0 行表示 = diff ペア参加)',
     function()
-      local buf = scratchwin.buffer { kind = 'null', session_id = 's1', path = 'b.lua' }
+      local buf = scratchwin.buffer { kind = 'base', session_id = 's1', path = 'b.lua' }
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       local empty = #lines == 0 or (#lines == 1 and lines[1] == '')
-      assert.is_true(empty, 'null scratch に内容が残っている: ' .. vim.inspect(lines))
+      assert.is_true(
+        empty,
+        'base scratch の新規作成に内容が残っている: ' .. vim.inspect(lines)
+      )
     end
   )
 

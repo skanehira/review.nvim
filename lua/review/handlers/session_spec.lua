@@ -12,6 +12,7 @@ local paths = require 'review.store.paths'
 local commentmarks = require 'review.ui.commentmarks'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
+local ui_scratchwin = require 'review.ui.scratchwin'
 local ui_windows = require 'review.ui.windows'
 
 local SLUG = 'main--feature'
@@ -842,7 +843,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
   )
 
   it(
-    '追加ファイル (A): base 窓は review://null scratch (git show を呼ばない)',
+    '追加ファイル (A): base 窓は review://base の 0 行 scratch (git show を呼ばない)',
     function()
       install_git {
         top_ok,
@@ -855,14 +856,14 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       session_handler.start { base = 'main', head = 'feature' }
       session_handler.next_file() -- b.lua (A)
 
-      assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
+      assert.equals('review://base/' .. SLUG .. '/b.lua', base_buf_name())
       assert.equals(state.repo .. '/b.lua', head_buf_name())
       assert.is_false(has_call 'git show main:b.lua')
     end
   )
 
   it(
-    '追加ファイル (A): base が 0 行 null scratch なので両窓で窓 diff を無効にし、head winbar に new file マークを出す',
+    '追加ファイル (A): base が 0 行 scratch なので両窓で窓 diff を無効にし、head winbar に new file マークを出す',
     function()
       install_git {
         top_ok,
@@ -875,9 +876,9 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       session_handler.start { base = 'main', head = 'feature' }
       session_handler.next_file() -- b.lua (A)
 
-      assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
+      assert.equals('review://base/' .. SLUG .. '/b.lua', base_buf_name())
       assert.equals(state.repo .. '/b.lua', head_buf_name())
-      -- 追加 (A) は base = 0 行 null scratch とのペアなので窓 diff を張らない
+      -- 追加 (A) は base = 0 行 scratch とのペアなので窓 diff を張らない
       -- (全行 DiffAdd の塗りつぶしを作らない。M ファイルの窓 diff 有効は別 test が陰性対照)
       assert.equals(false, vim.wo[ui_windows.win 'head'].diff)
       assert.equals(false, vim.wo[ui_windows.win 'base'].diff)
@@ -891,7 +892,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
   )
 
   it(
-    'scratch 縮退 + 追加ファイル (A): base は null scratch のまま両窓 diffoff',
+    'scratch 縮退 + 追加ファイル (A): base は 0 行 scratch のまま両窓 diffoff',
     function()
       install_git {
         top_ok,
@@ -907,13 +908,64 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       session_handler.start { base = 'main', head = 'feature' }
       session_handler.next_file() -- b.lua (A)
 
-      assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
+      assert.equals('review://base/' .. SLUG .. '/b.lua', base_buf_name())
       assert.equals('review://head/' .. SLUG .. '/b.lua', head_buf_name())
-      -- 縮退経路でも追加 (A) は 0 行 null scratch とのペアなので窓 diff を張らない
+      -- 縮退経路でも追加 (A) は 0 行 scratch とのペアなので窓 diff を張らない
       assert.equals(false, vim.wo[ui_windows.win 'head'].diff)
       assert.equals(false, vim.wo[ui_windows.win 'base'].diff)
     end
   )
+
+  it(
+    '追加ファイル (A): M で開いた同名 base scratch が hide で残った状態で開き直すと 0 行に正規化される',
+    function()
+      -- M として開いた review tab を :tabclose で閉じると base scratch は hide の
+      -- まま残る (on_review_tab_closed「scratch buffer は hide 状態で残る」)。
+      -- base ブランチ移動等で同じ path が A に変わって開き直ると同名バッファを
+      -- 再利用する。0 行化しないと (new file) ラベルの base 窓に旧 git show 内容が
+      -- 残る = 名前を review://base に統一したときに開く穴 (陽性対照)。
+      local leftover = ui_scratchwin.buffer { kind = 'base', session_id = SLUG, path = 'b.lua' }
+      ui_scratchwin.set_content(leftover, { 'old base content' })
+
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(RAW_DIFF_A_B)
+        end,
+      }
+      session_handler.start { base = 'main', head = 'feature' }
+      session_handler.next_file() -- b.lua (A)
+
+      assert.equals('review://base/' .. SLUG .. '/b.lua', base_buf_name())
+      -- 空の観測形は 0 行 or 1 個の空行 (vim の空バッファ表現。scratchwin_spec と同規約)。
+      -- 「旧 git show 内容が残る」検出には内容比較が要るため行数でなく中身で判定する。
+      local lines =
+        vim.api.nvim_buf_get_lines(vim.fn.bufnr('review://base/' .. SLUG .. '/b.lua'), 0, -1, false)
+      assert.is_true(
+        #lines == 0 or (#lines == 1 and lines[1] == ''),
+        '(new file) の base 窓に旧内容が残っている: ' .. vim.inspect(lines)
+      )
+    end
+  )
+
+  it('追加ファイル (A): base winbar が «base · <path> (new file)» を出す', function()
+    install_git {
+      top_ok,
+      RP_HEAD_MATCH[1],
+      RP_HEAD_MATCH[2],
+      function()
+        return diff_ok(RAW_DIFF_A_B)
+      end,
+    }
+    session_handler.start { base = 'main', head = 'feature' }
+    session_handler.next_file() -- b.lua (A)
+
+    -- 種別表示の正本は cur.kind_base_null (バッファ名は変更ファイルと同じ
+    -- review://base に統一されるため、種別は winbar で分かる)
+    assert.equals('base · b.lua (new file)', vim.w[ui_windows.win 'base'].review_winbar)
+  end)
 
   -- 再利用分岐 (diff-review「head / base 窓の中身» «既にユーザーが開いていれば
   -- 同一バッファを再利用») でも_review キーの張込は必須 (head 窓で c/e/d/y/i/o/q が
@@ -1861,7 +1913,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
       session_handler.open_selected_file()
 
       assert.equals(false, load_saved().files['b.lua'].viewed)
-      assert.equals('review://null/' .. SLUG .. '/b.lua', base_buf_name())
+      assert.equals('review://base/' .. SLUG .. '/b.lua', base_buf_name())
       assert.equals(state.repo .. '/b.lua', head_buf_name())
     end
   )

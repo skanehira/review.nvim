@@ -459,7 +459,7 @@ end
 -- created_by_us=true の worktree 配下の実ファイルバッファは例外的に、dir を消す
 -- 終了手順 3 (finish_close / sweep_or_abort 等) が remove の前に破棄する
 -- (E211 対策。ここでは触らない)。review://*
--- (panel / base / head 縮退 scratch / null / 告知) はここで消す。
+-- (panel / base / head 縮退 scratch / 告知) はここで消す。
 -- extmark / キーマップはこの時点で張った全バッファから除く (残骸 0 契約)。
 local function detach()
   if active == nil then
@@ -912,19 +912,24 @@ local function fill_show(bufnr, ref, path, token, move_line)
   end)
 end
 
--- base 窓 = git show <base>:<リゾルブ後 path> scratch。追加ファイル (A) は
--- 0 行の review://null、rename は旧パスの中身、旧パス自体が新規なら git 失敗
--- で null 相当 (空) になる (diff-review「head / base 窓の中身」)。
+-- base 窓 = git show <base>:<リゾルブ後 path> scratch。追加ファイル (A) は中身
+-- 0 行の同 scratch (名前は変更ファイルと同じ review://base、種別は winbar の
+-- (new file) = cur.kind_base_null)、rename は旧パスの中身、旧パス自体が新規なら
+-- git 失敗で空 (0 行) になる (diff-review「head / base 窓の中身」)。
 local function open_base_scratch(cur, file, token)
   local sid = active.session.id
   if file ~= nil and file.status == 'A' then
     cur.kind_base_null = true
-    cur.base_buf = ui_scratchwin.buffer { kind = 'null', session_id = sid, path = cur.path }
+    cur.base_buf = ui_scratchwin.buffer { kind = 'base', session_id = sid, path = cur.path }
+    -- buffer() は同名バッファを再利用して内容を触らない。M として開いて git show
+    -- 済みの scratch が hide で残っている状態 (tab close 後の開き直し等) で同じ
+    -- path が A に変わると旧内容が残るため、空へ正規化する (追加 = base は空)。
+    ui_scratchwin.set_content(cur.base_buf, {})
     track_scratch(cur.base_buf)
     return
   end
   cur.base_buf = ui_scratchwin.buffer { kind = 'base', session_id = sid, path = cur.path }
-  -- 窓の中身表 «filetype detect» (内容と同じ名前の path から判定)。null (追加) は
+  -- 窓の中身表 «filetype detect» (内容と同じ名前の path から判定)。追加 (A) は
   -- 0 行なので detect しない。告知窓 (deleted/binary) も告知 1 行のまま。
   ui_scratchwin.detect_filetype(cur.base_buf, cur.path)
   track_scratch(cur.base_buf)
@@ -1018,7 +1023,7 @@ local function resolve_and_open(path, opts)
       cur.head_buf = hb
       fill_show(hb, session.head, path, token, move_line)
       if file ~= nil and file.status == 'A' then
-        -- 縮退でも追加 (A) の base は 0 行 null scratch なので窓 diff を張らない
+        -- 縮退でも追加 (A) の base は 0 行 scratch なので窓 diff を張らない
         ui_windows.bind(cur.base_buf, hb, { diffoff = 'both' })
       else
         ui_windows.bind(cur.base_buf, hb)
@@ -1039,7 +1044,7 @@ local function resolve_and_open(path, opts)
         cur.head_buf = open_head_real(full)
         local bind_opts = { head_kind = 'real' }
         if file ~= nil and file.status == 'A' then
-          -- 追加 (A): base = 0 行 null scratch とのペアだと全行が DiffAdd になるため
+          -- 追加 (A): base = 0 行 scratch とのペアだと全行が DiffAdd になるため
           -- 両窓 diffoff で素の色で読めるようにする (winbar の種別マークは head 側)
           bind_opts.diffoff = 'both'
         end
@@ -1659,7 +1664,7 @@ local function build_file_state(session, files)
   -- コメント付きファイルは map にも一覧にも合成行を作らない: window diff の
   -- 張り先が無いファイルの outdated は panel winbar 末尾 ⚠N とプロンプト除外
   -- INFO で可視化する (persistence-restore「anchor 検証」「差分がまるごと消滅」。
-  -- 合成 scratch kind を review:// 契約 (base/head/null/deleted/binary) に足さない)。
+  -- 合成 scratch kind を review:// 契約 (base/head/deleted/binary) に足さない)。
   local old_files = session.files or {}
   local new_files = {}
   for _, path in ipairs(file_order) do

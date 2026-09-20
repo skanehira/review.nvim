@@ -177,8 +177,8 @@ function M.role_of(win)
   local meta = vim.b[buf].review_meta or {}
   if meta.kind == 'scratch' then
     -- 告知系 (deleted/binary) はどの窓に現れてもコメント不可側 (head 窓枠と同じ
-    -- 扱いで keygate 側が meta から WARN を選ぶ)。null は base 側。
-    if meta.scratch == 'base' or meta.scratch == 'null' then
+    -- 扱いで keygate 側が meta から WARN を選ぶ)。base scratch は base 側。
+    if meta.scratch == 'base' then
       return 'base'
     end
     return 'head'
@@ -248,8 +248,8 @@ local function ensure_pair()
 end
 
 --- base / head 窓にバッファを張り、役割 gate 窓変数を更新する。
---- opts = { diffoff? = 'both' (binary 注釈・no-changes の共有窓 / 追加 (null scratch)
----          ペア / 削除告知ペア — 窓 diff ペアを作らない窓),
+--- opts = { diffoff? = 'both' (binary 注釈・no-changes の共有窓 / 追加 (base 0 行
+---          scratch) ペア / 削除告知ペア — 窓 diff ペアを作らない窓),
 ---          head_kind? = 'real' (head が実ファイル = gate の内容指紋は bufnr) }。
 --- 呼び出し側 (handlers/session.open_file) が中身の充填を終えた後に呼ぶ。
 --- 前回張り付いていた別 buf の窓変数 (stale gate) は set_buf 前に消し、
@@ -286,7 +286,7 @@ function M.bind(base_buf, head_buf, opts)
   vim.api.nvim_win_set_buf(bw, base_buf)
   vim.api.nvim_win_set_buf(hw, head_buf)
   if opts.diffoff ~= nil then
-    -- 窓 diff ペアを作らない窓 (binary 注釈共有・no-changes・追加 null scratch ペア・
+    -- 窓 diff ペアを作らない窓 (binary 注釈共有・no-changes・追加 (0 行 base) ペア・
     -- 削除告知ペア): 両窓を退避させる
     apply_diffoff(bw)
     apply_diffoff(hw)

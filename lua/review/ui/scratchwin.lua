@@ -12,7 +12,7 @@ M.NOTIFY = {
   binary = { 'Binary files differ' },
 }
 
-local KINDS = { base = true, head = true, null = true, deleted = true, binary = true }
+local KINDS = { base = true, head = true, deleted = true, binary = true }
 
 --- opts = { kind, session_id, path } -> bufnr (同名バッファは再利用)。
 --- 内容は触らない (新規は 0 行、再利用時は既存内容が残る = 呼び出し側が
@@ -31,8 +31,9 @@ function M.buffer(opts)
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
   vim.api.nvim_buf_set_name(buf, name)
-  -- 同名再利用で前回内容を残さないため 0 内容へ正規化してから返す
-  -- (null scratch = 中身なしが契約。vim の空バッファは 1 個の空行で表現される)。
+  -- 新規作成時に内容を空へ正規化してから返す (追加ファイルの base = 空が契約。
+  -- vim の空バッファは 1 個の空行として表現される。再利用時は内容を触らない =
+  -- 呼び出し側が set_content で全面置換する)。
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
   vim.bo[buf].modifiable = false

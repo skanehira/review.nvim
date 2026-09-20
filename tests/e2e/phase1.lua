@@ -2,7 +2,7 @@
 -- :Review start main feature -> 専有 tab 3 窓 (panel│base│head) + tcd==repo +
 -- head 窓は実ファイル (a.lua 実パス・編集可) -> head 窓で c キー (keygate 実経路)
 -- -> 実ファイルへの extmark (件数 eol + 行下スレッド) と w:review_winbar ->
--- panel <CR> で b.lua へ (追加ファイル: base=null scratch, focus は panel 維持) ->
+-- panel <CR> で b.lua へ (変更ファイル: base は git show scratch, focus は panel 維持) ->
 -- head 窓が実ファイル (編集可) -> <S-Tab>/]F/[F/i/<leader>e の
 -- 窓移動 (最終キー表 #18) -> panel l で entry 開く -> 視覚選択で range コメント ->
 -- y で "0 -> :Review prompt 全文一致 -> 正常終了 (status=open)。
@@ -266,7 +266,7 @@ local function run()
       and windows.role_of(vim.api.nvim_get_current_win()) == 'panel'
   end, 'b.lua head 実ファイル + focus panel 維持')
   -- 変更ファイルの base 窓 = review://base scratch に git show main:b.lua。
-  -- (追加 A の null scratch / 削除・binary 告知の張り分けは session_spec が unit pin)
+  -- (追加 A の 0 行 scratch / 削除・binary 告知の張り分けは session_spec が unit pin)
   local b_base_buf = vim.api.nvim_win_get_buf(windows.win 'base')
   if win_buf_name(windows.win 'base') ~= 'review://base/main--feature/b.lua' then
     fail('b.lua base 窓 scratch でない: ' .. win_buf_name(windows.win 'base'))
@@ -337,12 +337,13 @@ local function run()
       == realpath(vim.fs.joinpath(top, 'src/deep/new.lua'))
   end, '[F で最初のファイル src/deep/new.lua (ツリーは dir 先行)')
   print 'E2E-M3 [F=first'
-  -- 追加ファイル (A) は base = 0 行 null scratch とのペアなので両窓 diffoff
+  -- 追加ファイル (A) は base = 0 行 scratch とのペアなので両窓 diffoff
   -- (全行 DiffAdd の塗りつぶしを作らない — issue #38。a.lua (M) の窓 diff 有効が
-  -- 上の L1 ループで陰性対照になる)
+  -- 上の L1 ループで陰性対照になる)。名前は変更ファイルと同じ review://base
+  -- (issue #39。種別は winbar の (new file) で分かる)
   local nbase = windows.win 'base'
-  if win_buf_name(nbase) ~= 'review://null/main--feature/src/deep/new.lua' then
-    fail('new.lua base 窓が null scratch でない: ' .. win_buf_name(nbase))
+  if win_buf_name(nbase) ~= 'review://base/main--feature/src/deep/new.lua' then
+    fail('new.lua base 窓の scratch 名が不正: ' .. win_buf_name(nbase))
   end
   if vim.wo[windows.win 'head'].diff or vim.wo[nbase].diff then
     fail '追加ファイル (new.lua) で窓 diff が有効 (diffoff 契約違反)'
