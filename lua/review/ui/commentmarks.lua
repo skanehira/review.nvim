@@ -220,7 +220,7 @@ function M.apply(session, bufnr, path, opts)
 
   local line_count_count = vim.api.nvim_buf_line_count(bufnr)
   if line_count_count == 0 then
-    -- 0 行バッファ (null scratch / 中身消失) には anchor を張れない
+    -- 0 行バッファ (追加ファイルの base scratch / 中身消失) には anchor を張れない
     -- (virt_lines を掛ける行が存在しない)。
     return
   end
