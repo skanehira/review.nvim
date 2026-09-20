@@ -926,10 +926,11 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
         end
       end
       assert.is_not_nil(above, 'placeholder の outdated 集約 mark が無い')
-      local text = ''
-      for _, chunk in ipairs(above[4].virt_lines[1] or {}) do
-        text = text .. (type(chunk[1]) == 'table' and chunk[1][1] or chunk[1])
-      end
+      -- 集約は箱で描かれ、見出しは箱 1 行目の内容 chunk (virt_lines[2][2] =
+      -- 先頭ボーダー chunk の次)。見出し chunk の抽出は chunk[1] が table の
+      -- 形も吸収する
+      local chunk = (above[4].virt_lines[2] or {})[2] or {}
+      local text = type(chunk[1]) == 'table' and chunk[1][1] or chunk[1]
       assert.equals(' 1 outdated (prompt 除外中)', text)
     end
   )
@@ -1019,9 +1020,82 @@ describe('panel winbar ⚠N (集約先 head 窓の無い outdated)', function()
         end
       end
       assert.is_not_nil(found, 'outdated 混在 mark が無い')
-      assert.equals('ReviewCommentOutdated', found[4].virt_lines[1][1][2])
+      assert.equals('ReviewCommentOutdated', found[4].virt_lines[2][2][2])
+      assert.equals('ReviewCommentBorder', found[4].virt_lines[2][1][2])
     end
   )
+end)
+
+-- ---------------------------------------------------------------------------
+-- コメント箱幅のリサイズ追従 (diff-review「コメント表示」。箱幅は apply 時点の
+-- head 窓のテキスト幅で固定されるため、WinResized / VimResized で再 apply する。
+-- headless では set_width が autocmd を発火しない実測があるため exec_autocmds で
+-- 経路を駆動し、実発火は tmux 実測で確認する)
+-- ---------------------------------------------------------------------------
+
+describe('コメント箱幅のリサイズ追従 (WinResized / VimResized)', function()
+  use_env()
+
+  -- スレッド mark (virt_text) の箱行の最大表示幅
+  local function box_max_width()
+    local hw = ui_windows.win 'head'
+    local buf = vim.api.nvim_win_get_buf(hw)
+    local ns = vim.api.nvim_get_namespaces().review_comment
+    local maxw = 0
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })) do
+      if m[4].virt_text ~= nil then
+        for _, line in ipairs(m[4].virt_lines or {}) do
+          local w = 0
+          for _, chunk in ipairs(line) do
+            w = w + vim.fn.strdisplaywidth(chunk[1])
+          end
+          if w > maxw then
+            maxw = w
+          end
+        end
+      end
+    end
+    return maxw
+  end
+
+  local function head_text_width()
+    local hw = ui_windows.win 'head'
+    local info = vim.fn.getwininfo(hw)[1]
+    return vim.api.nvim_win_get_width(hw) - info.textoff
+  end
+
+  it('窓幅の変化で箱幅が head 窓のテキスト幅に追随する', function()
+    start_done('main', 'feature')
+    inject_comment(string.rep('x', 60), 'a.lua', 2)
+
+    local w0 = head_text_width()
+    local m0 = box_max_width()
+    assert.is_true(m0 > 0, '箱が描かれていない')
+    assert.is_true(m0 <= w0, '初期箱が head 窓のテキスト幅を超えている')
+
+    -- 広げる: 本文 60 + 罫線の自然幅までは窓幅に応じて伸びる
+    vim.api.nvim_win_set_width(ui_windows.win 'head', 70)
+    local w1 = head_text_width()
+    assert.is_true(
+      w1 > w0,
+      'テスト前置: head 窓が広がっていない (レイアウト制約)'
+    )
+    vim.api.nvim_exec_autocmds('WinResized', {})
+    local m1 = box_max_width()
+    assert.is_true(m1 <= w1, 'WinResized 後の箱が head 窓のテキスト幅を超えている')
+    assert.is_true(m1 > m0, 'WinResized で箱幅が窓幅に追随しない (広げた)')
+
+    -- 狭める
+    vim.api.nvim_win_set_width(ui_windows.win 'head', 30)
+    local w2 = head_text_width()
+    assert.is_true(
+      w2 < w1,
+      'テスト前置: head 窓が狭まっていない (レイアウト制約)'
+    )
+    vim.api.nvim_exec_autocmds('VimResized', {})
+    local m2 = box_max_width()
+    assert.is_true(m2 <= w2, 'VimResized で箱幅が窓幅に追随しない (狭めた)')
+  end)
 end)
 
 -- ---------------------------------------------------------------------------

@@ -368,9 +368,11 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
         end
       end
       assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
-      assert.equals(' 1 outdated (prompt 除外中)', above[4].virt_lines[1][1][1])
+      -- 集約は箱で描かれ、見出しは箱 1 行目 (上罫線の次行 = virt_lines[2] の
+      -- 内容 chunk [2])
+      assert.equals(' 1 outdated (prompt 除外中)', above[4].virt_lines[2][2][1])
       assert.is_true(
-        above[4].virt_lines[2][1][1]:find('[c1]', 1, true) ~= nil,
+        above[4].virt_lines[3][2][1]:find('[c1]', 1, true) ~= nil,
         vim.inspect(above[4].virt_lines)
       )
 
@@ -446,10 +448,13 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
         end
       end
       assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
-      assert.equals(' 2 outdated (prompt 除外中)', above[4].virt_lines[1][1][1])
+      -- 集約は箱: 上罫線 / 見出し (箱 1 行目) / c1 / 区切り罫線 / c2 / 下罫線
+      assert.equals(' 2 outdated (prompt 除外中)', above[4].virt_lines[2][2][1])
       local bodies = {}
-      for i = 2, #above[4].virt_lines do
-        bodies[#bodies + 1] = above[4].virt_lines[i][1][1]
+      for i = 3, #above[4].virt_lines - 1 do
+        local row = above[4].virt_lines[i]
+        -- 内容 chunk (先頭ボーダーの次)。区切り罫線行は chunk 1 件のみ
+        bodies[#bodies + 1] = row[2] ~= nil and row[2][1] or row[1][1]
       end
       assert.equals(3, #bodies, vim.inspect(bodies)) -- c1 + 区切り + c2
       assert.is_true(bodies[1]:find('[c1]', 1, true) ~= nil)

@@ -399,6 +399,30 @@ local function run()
   vim.cmd 'normal iprefer early return'
   vim.cmd('normal ' .. cy)
 
+  -- 範囲コメント (1..2) のスレッド mark は最終行の下 (row == end_line-1) に来て、
+  -- 下線 mark と分かれる (diff-review「コメント表示」。旧契約は開始行の下)
+  wait_for(function()
+    local dmarks = vim.api.nvim_buf_get_extmarks(fbuf, ns, 0, -1, { details = true })
+    for _, m in ipairs(dmarks) do
+      if m[4].virt_text ~= nil and m[2] == 1 then
+        return true
+      end
+    end
+    return false
+  end, '範囲コメントのスレッド mark が最終行 (row 1) に来る')
+  local underlines = 0
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(fbuf, ns, 0, -1, { details = true })) do
+    if m[4].virt_text == nil and m[4].hl_group == 'ReviewCommentLine' then
+      underlines = underlines + 1
+      if m[2] ~= 0 or m[4].end_row ~= 1 then
+        fail '範囲コメントの下線 mark が 1..2 行を覆っていない'
+      end
+    end
+  end
+  if underlines ~= 1 then
+    fail('範囲コメントの下線 mark が 1 本でない: ' .. tostring(underlines))
+  end
+
   -- provider 無し退路の WARN を決定的に pin する: macOS の既定 pbcopy provider は
   -- provider#clipboard#Call として検出されるため (2026-09 修正)、ログの WARN だけを
   -- 見ると環境で結果が変わる。検出元 4 系統をこのプロセスで落としてから yank する
