@@ -118,6 +118,7 @@ The ref for `start`, the number for `pr` and the id for `delete` are `<Tab>`-com
 ## Documentation
 
 - Help contents: `:h review` (Usage / API / Setup / Keymaps / Sessions / Display)
+- Japanese help: `:h review_ja` (a translation of this help; `set helplang=ja` makes `:h review-*` resolve to it)
 - Public Lua API: `:h review-api`
 - Design: [docs/design/DESIGN.md](docs/design/DESIGN.md) and [docs/design/features/](docs/design/features/)
 - Development / verification: `make check` (test / lint / format / plugin-check) and `make e2e` (real headless nvim + real git golden path). Tests need plenary.nvim (set via `PLENARY_PATH`)

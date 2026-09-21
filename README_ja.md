@@ -116,7 +116,7 @@ hunk 間の移動 `[c` / `]c` と fold (`za` / `zo` / `zR`) は Neovim 標準の
 
 ## ドキュメント
 
-- ヘルプの目次: `:h review` (Usage / API / Setup / Keymaps / Sessions / Display)
+- ヘルプの目次: `:h review` (english) / 日本語版は `:h review_ja` (`set helplang=ja` で `:h review-*` が日本語版に解決される)
 - 公開 Lua API: `:h review-api`
 - 設計: [docs/design/DESIGN.md](docs/design/DESIGN.md) と [docs/design/features/](docs/design/features/)
 - 開発・検証: `make check` (test / lint / format / plugin-check) と `make e2e` (実 headless nvim + 実 git のゴールデンパス)。テストに plenary.nvim が必要 (`PLENARY_PATH` で指定)

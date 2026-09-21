@@ -117,13 +117,20 @@ vsplit すると新窓が sidebar buf を継承して drift 誤検出 → **先�
 2. キーマップ wiring (ui/diffbuffer.lua / ui/list.lua) — rhs は未実装関数を
    弾く dangling 検出テストがある
 3. `<F1>` help float (`ui/help.lua` SECTIONS + `help_spec` の完全一致行)
-4. `doc/review.txt`: 既定値の全体表 (KEYMAPS) / 該当節 / CONTENTS の tag
-   (新規 tag は `:helptags` で生成確認。doc/tags は committed しない = gitignored)
-5. `README.md` (コマンド解説・キー表・操作 paragraph)
+4. `doc/review.txt`: **英語正本**。同内容の変更は `doc/review_ja.txt` (日本語版。tag は
+   `*_ja` サフィックス) にも同じタイミングで反映する (どれか 1 ファイルだけ変えると英日差分事故)。
+   既定値の全体表 (KEYMAPS) / 該当節 / CONTENTS の tag (新規 tag は `:helptags` で生成確認。
+   doc/tags は committed しない = gitignored)
+5. `README.md`: **英語正本**。同上で `README_ja.md` へも同内容を反映。
+   コマンド解説・キー表・操作 paragraph
 6. 設計正本: `docs/design/DESIGN.md`「デフォルトキーマップ」+ 該当 features/*.md の
    操作表・エッジケース表
 
 doc 文体: **現行契約のみ**を書く (「以前は X だったが変更」等の過程記録を入れない)。
+ランタイムのユーザー向け文言 (notify / プロンプト / winbar / help float) は i18n なしで
+**英語が正本**。新規実装の文言も英語で書く。日本語 docs / 設計書には英語の実文字列を
+そのまま引用する (解説文は日本語可)。doc/review.txt と README.md が英正本、
+doc/review_ja.txt と README_ja.md が訳 (相互リンク必須)。
 日本語文書の漢字混入 (廃/废、後/后 など) と誤字は機械チェックする。help 内の参照は
 `:helptags` 後に全 tag が解決できることも確認する。
 

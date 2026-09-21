@@ -42,15 +42,18 @@ if notified[1].level ~= vim.log.levels.WARN then
   fail '通知レベルが WARN でない'
 end
 
--- :help review — doc/review.txt がテンポラリ rtp にコピーして helptags を作り
--- 到達を確認する (リポジトリの doc/ を汚染しない)。
+-- :help review / :help review_ja — doc/review.txt (英語正本) と doc/review_ja.txt
+-- (日本語版) をテンポラリ rtp にコピーして helptags を作り到達を確認する
+-- (リポジトリの doc/ を汚染しない)。
 local rtp_copy = vim.fn.tempname()
 if vim.fn.mkdir(rtp_copy .. '/doc', 'p') == 0 then
   fail('テンポラリ rtp が作れない: ' .. rtp_copy)
 end
-local lines = vim.fn.readfile(repo .. '/doc/review.txt')
-if vim.fn.writefile(lines, rtp_copy .. '/doc/review.txt') ~= 0 then
-  fail 'doc/review.txt がコピーできない'
+for _, name in ipairs { 'review.txt', 'review_ja.txt' } do
+  local lines = vim.fn.readfile(repo .. '/doc/' .. name)
+  if vim.fn.writefile(lines, rtp_copy .. '/doc/' .. name) ~= 0 then
+    fail('doc/' .. name .. ' がコピーできない')
+  end
 end
 vim.opt.runtimepath:append(rtp_copy)
 -- FileType autocmd (help ftplugin の treesitter 等) は検証対象の外。
@@ -62,9 +65,15 @@ vim.cmd('helptags ' .. vim.fn.fnameescape(rtp_copy .. '/doc'))
 vim.cmd 'help review'
 local bufname = vim.api.nvim_buf_get_name(0)
 vim.cmd 'bwipeout!'
-vim.o.eventignore = ei_save
 if not bufname:match 'review%.txt$' then
   fail(':help review が review.txt に到達できない (bufname=' .. bufname .. ')')
+end
+vim.cmd 'help review_ja'
+bufname = vim.api.nvim_buf_get_name(0)
+vim.cmd 'bwipeout!'
+vim.o.eventignore = ei_save
+if not bufname:match 'review_ja%.txt$' then
+  fail(':help review_ja が review_ja.txt に到達できない (bufname=' .. bufname .. ')')
 end
 vim.fn.delete(rtp_copy, 'rf')
 

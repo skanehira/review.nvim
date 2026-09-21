@@ -1,4 +1,7 @@
-*review.txt*	GitHub Files changed 風のブランチ / PR 差分レビュー
+*review.txt*	GitHub Files changed-style branch / PR diff review
+
+Language: English (this file) | 日本語: |review_ja| (`:h review_ja`, or set
+'helplang' to prefer the Japanese version)
 
 Author: skanehira
 License: MIT
@@ -6,129 +9,142 @@ License: MIT
 ==============================================================================
 INTRODUCTION					*review* *review-nvim*
 
-review.nvim は GitHub の Files changed のようにブランチ間 (git ref 間) 差分を
-Neovim 内でレビューし、コメントを蓄積して AI エージェント向けプロンプトとして
-出力するプラグイン。永続化したコメントは Neovim 再起動後 `:Review` 1 操作で
-復元できる。
+review.nvim reviews diffs between branches (git refs) inside Neovim the way
+GitHub's Files changed page does, accumulates comments and exports them as a
+prompt for AI agents. Persisted comments are recovered with a single `:Review`
+after restarting Neovim.
 
 ==============================================================================
 USAGE						*review-usage*
 
-すべての操作は単一コマンドとそのサブコマンドで行う:
+Everything runs through one command and its subcommands:
 
 	:Review
-	  続きのセッションを復元。open 状態のみが対象で、複数あれば選択 UI。
-	  closed は |review-list| から再開する
+	  Restore a session to continue. Only open sessions are eligible; with
+	  several, a selection UI is shown. closed sessions are resumed from
+	  |review-list|
 
 	:Review start {base} [{head}]
-	  ブランチレビュー開始。レビュー対象は現在のチェックアウトの作業ツリー
-	  (未コミット変更を含む)。{base} / {head} は cmdline で <Tab> により
-	  branches -> tags 順に補完される (取得は同期・短時間 cache)。head
-	  省略時は現在のブランチ名 (rev-parse --abbrev-ref HEAD。detach では
-	  "HEAD") を自動採用・保存し、入力 UI は出さない。head を明示して現在
-	  の HEAD と違うコミットを指す場合、head がローカルブランチで作業ツリー
-	  が clean なら git switch するか [y/N] で確認する (承諾 = switch して
-	  レビュー、拒否・dirty・非ローカルブランチ・switch 失敗 = git show
-	  内容の読み取り専用レビューに縮退し INFO 通知)。branch レビューでは
-	  worktree を作らない。head 窓で :w すると差分が自動で再取得され
-	  レビューに反映される (|review-sessions| の「保存時自動反映」)。同一
-	  refs 組の保存済みセッションがある場合は「継承するか」の [y/N] 確認が
-	  出る (y で comments / 完了マークを引き継ぎ、n で何もしない)
+	  Start a branch review. The review target is the working tree of the
+	  current checkout (including uncommitted changes). {base} / {head} are
+	  <Tab>-completed on the cmdline in branches -> tags order (fetched
+	  synchronously with a short cache). With head omitted, the current
+	  branch name (rev-parse --abbrev-ref HEAD; "HEAD" when detached) is
+	  adopted and saved automatically — no input UI. When head is stated
+	  explicitly and points at a commit other than the current HEAD, and
+	  head is a local branch with a clean working tree, a [y/N] prompts
+	  whether to git switch (accept = switch and review; refuse / dirty /
+	  non-local branch / switch failure = fall back to a read-only review
+	  of the git show content with an INFO). Branch reviews never create a
+	  worktree. `:w` in the head window automatically refetches the diff
+	  and reflects it in the review ("auto-apply on save" in
+	  |review-sessions|). When a saved session exists for the same refs
+	  pair, a carry-over [y/N] prompt appears (y carries comments /
+	  completion marks over, n does nothing)
 
 	:Review pr {number|url}
-	  PR レビュー開始 (gh 連携)。{number} は <Tab> で open PR の番号が
-	  補完できる (gh を同期実行)。head を git worktree に展開し、レビュー窓
-	  (tcd 済み) の head 側が worktree 内の実ファイルになる (worktree 作成
-	  は pr モードのみ。掃除は |review-sessions|)
+	  Start a PR review (gh integration). {number} is <Tab>-completed with
+	  open PR numbers (gh runs synchronously). The head is expanded into a
+	  git worktree and the head side of the review windows (tcd done)
+	  becomes the real files under the worktree (worktree creation is pr
+	  mode only; cleanup: |review-sessions|)
 
-	:Review list			保存済みセッション一覧 |review-list|
+	:Review list			saved-session list |review-list|
 
 	:Review comments
-	  現セッションのコメント (絞り込み適用後) を横断一覧でレビュー tab の
-	  最下部に全幅で開く (<leader>c と同じ)。開いていればその窓へ focus。
-	  active が無ければ WARN。操作は |review-keymaps-commentlist|
+	  Open the current session's comments (after the filter is applied) as
+	  a cross-file list, full-width at the bottom of the review tab (same
+	  as <leader>c). If already open, that window is focused. WARN when no
+	  session is active. Keys: |review-keymaps-commentlist|
 
-	:Review close		現セッションを保存して閉じる |review-sessions|
+	:Review close		save and close the current session |review-sessions|
 
 	:Review delete {id}
-	  保存済みセッションを削除。<id> は <Tab> で保存済み id が補完できる
+	  Delete a saved session. <id> is <Tab>-completed with saved ids
 
-	:Review prompt [file]			プロンプトをクリップボードへ
+	:Review prompt [file]			copy the prompt to the clipboard
 
 	:Review clear
-	  現セッションのコメントを全件削除 ([y/N] 確認。outdated も含む。キー
-	  |review-keymaps-diff| の D と同じ。prompt コピー後の残骸掃除用)
+	  Delete all comments of the current session ([y/N] confirm; outdated
+	  included; same as the D key from |review-keymaps-diff|; the cleanup
+	  pass after copying a prompt)
 
-確認プロンプト ([y/N] 等) は y か n を押して <Enter> で応答する。応答後は
-cmdline をクリアするので、続けてコマンドを打っても入力に混ざらない。
+Confirmation prompts ([y/N] etc.) are answered with y or n then <Enter>. The
+cmdline is cleared after the answer, so the next keystroke cannot leak into
+an input.
 
 ==============================================================================
 API						*review-api*
 
-Lua から呼ぶ公開 API (~require("review")~)。同じ操作のコマンドライン相当は
-|review-usage| を見る。戻り値は結果型 `{ok, data, error, code}` で、同期的に
-判定できる失敗 (引数不正、active 不在 `E_NOT_ACTIVE`、config 不正) を表す。
-git/gh を伴う実行の成否は非同期に UI 開閉か vim.notify で返る。
+Public Lua API (~require("review")~). The command equivalents are under
+|review-usage|. Return values are result types `{ok, data, error, code}` and
+describe only failures determinable synchronously (bad arguments, missing
+active session `E_NOT_ACTIVE`, invalid config). The success or failure of
+executions involving git/gh is reported asynchronously via UI open/close or
+vim.notify.
 
 	setup(opts)
-	  config 合成と初期化 (省略可、既定値で動作)。設定項目は |review-setup|
+	  config merge and initialization (optional; works with the defaults).
+	  Options: |review-setup|
 
 	start({ base=[, head=] })
-	  ブランチレビュー開始。head 省略時は現在のブランチ名を自動採用・保存
-	  する (入力 UI なし)。振る舞いは |review-usage| と同じ
+	  Start a branch review. With head omitted, the current branch name is
+	  adopted and saved automatically (no input UI). Behavior matches
+	  |review-usage|
 
-	start_pr({ number= })		PR レビュー開始 (gh 連携、|review-usage|)
-	resume({ id= })			保存済みセッションを id で復元
+	start_pr({ number= })		start a PR review (gh, |review-usage|)
+	resume({ id= })			restore a saved session by id
 
 	close()
-	  現セッションの save + 窓を閉じる + worktree 掃除
+	  save the current session + close the windows + worktree cleanup
 
 	delete({ id= })
-	  保存済みセッションを削除 (worktree 掃除含む。active な id も可)
+	  delete a saved session (includes worktree cleanup; may be active)
 
 	prompt_all(opts)
-	  全コメントのプロンプトを整形しクリップボード/"0 へ。opts.copy = false
-	  でコピーせずに text を返す (テストフック)
+	  format the prompt of all comments and copy it to the clipboard/"0.
+	  opts.copy = false returns text without copying (test hook)
 
-	prompt_for_file(path, opts)	そのファイルのコメントのみ同上
+	prompt_for_file(path, opts)	same, restricted to that file
 
 ==============================================================================
 SETUP						*review-setup*
 
 >
 	require("review").setup({
-		git_bin = "git",           -- git 実行ファイル
-		gh_bin = "gh",             -- gh 実行ファイル (PR 用)
-		diff_context = nil,        -- diff context 行数 (nil = git 既定 3)
-		auto_notify_resume = true, -- 起動時に open セッションを通知
-		panel_width = 35,          -- file panel (左窓) の幅
-		comment_list_height = 10,  -- コメント一覧窓 (最下部全幅) の高さ
-		keymaps = {},              -- buffer-local キーマップ override
-		highlight = {},            -- グループ別 highlight override
-		winbar = true,           -- review 窓に winbar 情報 (review 外 tab は行を確保しない)
-		number = false,            -- review 窓の行番号 (既定 off、global は不変)
+		git_bin = "git",           -- git executable
+		gh_bin = "gh",             -- gh executable (PR support)
+		diff_context = nil,        -- diff context lines (nil = git default 3)
+		auto_notify_resume = true, -- notify open sessions on startup
+		panel_width = 35,          -- file panel (left window) width
+		comment_list_height = 10,  -- comments-list window (full-width bottom) height
+		keymaps = {},              -- buffer-local keymap overrides
+		highlight = {},            -- per-group highlight overrides
+		winbar = true,           -- winbar info in review windows (no line reserved outside review tabs)
+		number = false,            -- line numbers in review windows (off by default; global untouched)
 	})
 <
 
-setup は省略可能。呼ばなくても既定値のキーが貼り付き、起動時の継続通知と
-worktree 残骸スキャンは走る (plugin read 時点で登録されるため)。設定を
-後から渡す場合も |review-sessions| の起動通知は設定値を実行時に読む。
+setup is optional. Even without calling it the default keys are installed and
+the startup resume-notify and worktree sweepscan run (registered from plugin
+load). Options passed later are read at run time by the notifications in
+|review-sessions|.
 
 ==============================================================================
 KEYMAPS						*review-keymaps*
 
-すべてのキーマップは buffer-local。押した箇所 (バッファ種別) が違うと効く
-キーも違うので、以下のセクションで引くこと。
+All keymaps are buffer-local. Which keys are live depends on where you press
+(where the buffer comes from), so look up the section below.
 
-既定値の全体と override の書式:
+Defaults and the override format:
 
 	keymaps = {
-		diff = {                      -- レビュー窓 (head / base)
+		diff = {                      -- review windows (head / base)
 			add_comment    = 'c',     -- |review-comment-input|
 			edit_comment   = 'e',
 			delete_comment = 'd',
-			delete_all     = 'D',     -- 全コメント一括削除
-			cancel_arming  = '<Esc>', -- d / D の arming 解除
+			delete_all     = 'D',     -- delete all comments at once
+			cancel_arming  = '<Esc>', -- cancel the d / D arming
 			yank_prompt    = 'y',
 			close          = 'q',
 			help           = '<F1>',
@@ -140,34 +156,34 @@ KEYMAPS						*review-keymaps*
 			focus_panel    = '<leader>e',
 			toggle_panel   = '<leader>b',
 			view_comments  = 'i',
-			comments_list  = '<leader>c', -- 横断コメント一覧
+			comments_list  = '<leader>c', -- cross-file comments list
 		},
-		sidebar = {                   -- file panel (変更ファイル一覧)
+		sidebar = {                   -- file panel (changed files)
 			open_diff      = '<CR>',
-			open_file      = 'o',     -- <CR> と同じ «entry を開く»
-			open_entry     = 'l',     -- 同上
+			open_file      = 'o',     -- same as <CR> (open the entry)
+			open_entry     = 'l',     -- ditto
 			next_file      = '<Tab>',
 			prev_file      = '<S-Tab>',
 			first_file     = '[F',
 			last_file      = ']F',
 			refresh        = 'R',
-			toggle_style   = 'i',    -- list ⇄ tree 表示切替
+			toggle_style   = 'i',    -- list / tree view toggle
 			toggle_viewed  = 'x',
 			filter         = '/',    -- |review-keymaps-sidebar|
-			help           = '<F1>', -- g? も固定別名で同じ呼び出し
+			help           = '<F1>', -- g? is a fixed alias for the same call
 			close          = 'q',
-			comments_list  = '<leader>c', -- 横断コメント一覧
+			comments_list  = '<leader>c', -- cross-file comments list
 		},
-		sessionlist = {               -- :Review list の一覧
+		sessionlist = {               -- the :Review list buffer
 			open           = '<CR>',
 			close          = 'q',
 			delete         = 'd',
 		},
-		commentlist = {               -- :Review comments の一覧
+		commentlist = {               -- the :Review comments list
 			jump           = '<CR>',
 			delete         = 'd',
-			delete_all     = 'D',     -- 全コメント一括削除
-			cancel_arming  = '<Esc>', -- d / D の arming 解除
+			delete_all     = 'D',     -- delete all comments at once
+			cancel_arming  = '<Esc>', -- cancel the d / D arming
 			edit           = 'e',
 			yank           = 'y',
 			close          = 'q',
@@ -180,279 +196,302 @@ KEYMAPS						*review-keymaps*
 	})
 <
 
-レビュー窓 (head / base)			*review-keymaps-diff*
+Review windows (head / base)			*review-keymaps-diff*
 
-	レビューは専有 tabpage の 3 窓 (file panel │ base │ head) で開く。head 窓は
-	実ファイル (`:edit`・編集可)、base 窓は `git show` の scratch。2 窓は Neovim
-	標準の窓 diff なので hunk 移動の `[c` / `]c` や fold が標準のまま効く。以下の
-	キーは head / base 窓に buffer-local で貼り、押した時点の窓 role gate を通る
-	ものだけが発火する。gate を通らない窓 (ユーザーが自分の窓で開いた同じ実
-	ファイルなど) では 1 キーストロークが built-in 動作に戻る (レビュー操作は
-	誤発火しない)。
+	Reviews open in a dedicated tabpage with 3 windows (file panel │ base │
+	head). The head window is the real file (`:edit`, editable); the base
+	window is a `git show` scratch. The two windows use Neovim's standard
+	window diff, so `[c` / `]c` hunk movement and folds work as-is. The
+	keys below are installed buffer-local in the head/base windows and
+	fire only when the window role gate passes at press time. In windows
+	that fail the gate (the same real file opened in your own window) 1
+	keystroke falls back to built-in behavior (review actions never
+	mis-fire).
 
 	c
-	  コメント作成 (head 窓のみ)。visual-line で範囲指定。base 窓・削除/
-	  binary 告知窓では «この窓にはコメントを付けられません»
+	  add a comment (head window only). visual-line for a range. base
+	  window and deleted/binary notice windows show «comments are not
+	  available in this window»
 
 	e
-	  カーソル行のコメントを編集 (入力窓は |review-comment-input|)。その行
-	  に複数ある場合は番号選択のプロンプトになる (既定の vim.ui.select =
-	  `Type number and <Enter>`)
+	  edit the comment on the cursor line (input window:
+	  |review-comment-input|). with several comments on the line a numbered
+	  prompt appears (the default vim.ui.select = `Type number and <Enter>`)
 
 	d
-	  カーソル行のコメントを削除。誤爆防止の二重押し: 1 回目は armed + WARN
-	  だけを発し、同じ行で 2 秒以内に続けて d で削除が確定する (vim 筋の dd
-	  で複数件が消えないため)。arming は他行移動・e での編集確定・2 秒経過・
-	  <Esc> で解除
+	  delete the comment on the cursor line. mis-fire guard double-press:
+	  press once and it only arms + WARNs; press d again within 2s on the
+	  same line to confirm (so vim-style dd cannot silently delete several).
+	  The arming is cancelled by moving to another line, confirming an
+	  edit with e, waiting 2s or pressing <Esc>
 
 	D
-	  全コメントを一括削除 (:Review clear と同じ)。誤爆防止の二重押し:
-	  1 回目は armed + WARN、2 秒以内にもう一度押して確定。arming 中の
-	  コメント増減・<Esc> で無効化 (outdated も含む全件が消える。prompt
-	  コピー後の残骸掃除用。自動では消えない)
+	  delete all comments at once (same as :Review clear). mis-fire guard
+	  double-press: press once and it only arms + WARNs; press again within
+	  2s to confirm. A comment count change during the arming or <Esc>
+	  cancels it (everything disappears, outdated included; meant for
+	  cleaning leftovers after copying a prompt — never automatic)
 
 	<Esc>
-	  d / D の arming を解除して INFO。arming 物が無いときは何もせず
-	  built-in の <Esc> に戻る
+	  cancel the d / D arming (INFO). When nothing is armed the key is not
+	  consumed and returns to built-in <Esc>
 
-	y		カーソル行のコメントのプロンプトを yank
-	q		セッションを閉じる (コメント 0 件は無確認)
+	y		yank the prompt of the comment on the cursor line
+	q		close the session (no confirmation with 0 comments)
 
 	<F1> / g?
-	  キーバインドの help float (内容は markdown 表示)。g? は <F1> と同じ
-	  機能呼び出しの固定別名で、config では変えられない (<F1> が端末に奪われる
-	  環境向け)
+	  keymap help float (rendered as markdown). g? is a fixed alias calling
+	  the same function as <F1>; it is not configurable (<F1> is eaten by
+	  some terminals)
 
 	<Tab>
-	  次のファイルを開く (head/base を張り替え。file panel の表示順 =
-	  ツリーを上から下。折りたたみ・絞り込みを反映。端では無動作。一覧の
-	  <CR> と同じ open 経路 (マークは変えない))
+	  open the next file (swaps head/base; file panel display order = tree
+	  top-down, reflecting folds and filter. no-op at the edges. same open
+	  path as <CR> in the list — marks are untouched)
 
-	<S-Tab>		前のファイルを開く (上記と同じ規則)
-	[F		最初のファイルを開く (現対象が最初のとき無動作)
-	]F		最後のファイルを開く (現対象が最後のとき無動作)
+	<S-Tab>		open the previous file (same rule)
+	[F		open the first file (no-op when already first)
+	]F		open the last file (no-op when already last)
 
 	R
-	  差分を再取得 (git diff 再実行 -> 再パース -> anchor 検証 -> ±カウント・
-	  スレッド・panel 更新 -> :diffupdate)。窓の役割が壊れたとき復旧する
-	  経路でもある
+	  refetch the diff (git diff re-run -> reparse -> anchor verification ->
+	  ±counts, threads, panel update -> :diffupdate). Also the recovery
+	  path when window roles got broken
 
 	<leader>e
-	  file panel (変更ファイル一覧) へ移動 (窓が閉じていれば左に再建してから
-	  移動)
+	  go to the file panel (changed files). If its window is closed it is
+	  rebuilt on the left first
 
-	<leader>b	file panel の表示トグル (閉じても tab とレビュー窓は残る)
+	<leader>b	toggle the file panel (closing keeps the tab and review windows)
 
 	<leader>c
-	  コメント一覧 (横断) をレビュー tab の最下部に全幅で開く (:Review
-	  comments と同じ。既に開いていればその窓へ focus)
+	  open the comments list (cross-file) full-width at the bottom of the
+	  review tab (same as :Review comments; focuses the window if already
+	  open)
 
 	i
-	  カーソル行のコメント全文を read-only 窓 (markdown) で閲覧 (編集は e)。
-	  q / <Esc> で閉じる
+	  view the full comment text on the cursor line in a read-only
+	  (markdown) window (edit with e). q / <Esc> closes
 
- file panel (変更ファイル一覧)			*review-keymaps-sidebar*
+ file panel (changed files)			*review-keymaps-sidebar*
 
-	既定はフォルダツリー表示。ヘッダ 2 行 («Changes (N)» と «Showing changes
-	for: <base>..<head 表示名>»。head 表示名は通常経路 «作業ツリー»、読み取り
-	専用 scratch 縮退時み ref 名) の下にパスツリーが続く。dir 行は末尾 «/» で
-	ファイルと区別し、status は配下の集約 (全子同一記号ならそのまま、種類混在
-	は «*»)。単一 child の dir 連鎖は «a/b/c/» と連結表示する。file 行は
-	«[✓?] <status> <コメントアイコン?> <icon?> <basename> +a -d»。+n は緑、
-	-n は赤で、コメントがあるファイルは status の後にコメントアイコン
-	(nf-cod-comment。Nerd Font のグリフ) が付く (親パスは出さない = ツリーの
-	インデントで判別)。filetype アイコンは nvim-web-devicons があるときだけ
-	自動で出る (無くてもテキスト表示)。
-	レビュー完了マークは行頭に [✓]。open や移動では決して付かず、パネルの
-	x でユーザーが付ける (セッションに保存され再起動後も復元)。
+	The default view is a folder tree. Below two header lines («Changes
+	(N)» and «Showing changes for: <base>..<head display name>»; the head
+	display name is «working tree» on the normal path and the saved ref
+	name when degraded to the read-only scratch) follows the path tree. dir
+	rows end with «/» to distinguish them from files; their status = the
+	aggregation of children (same symbol = as-is, mixed = «*»). Single-child
+	dir chains render joined («a/b/c/»). File rows are «[✓?] <status>
+	<comment-icon?> <icon?> <basename> +a -d»; +n green, -n red; files with
+	comments get a comment icon (nf-cod-comment; a Nerd Font glyph) after the
+	status (no parent path — the tree indent is the context). filetype icons
+	show automatically only when nvim-web-devicons is installed (plain text
+	without it).
+	The review-done mark [✓] sits at the start of the row. Never set by
+	open/movement — only the panel's x toggles it (saved in the session and
+	restored after restarts).
 
 	<CR>
-	  file 行 = そのファイルを head/base 窓に開く。focus とカーソルは file
-	  panel に残る (開いただけでレビュー完了マークは付かない)。dir 行 =
-	  折り畳み/展開のトグル (カーソルは dir 行に残る)
+	  file row = open the file in the head/base windows. focus and cursor
+	  stay in the panel (opening never sets the review-done mark). dir row =
+	  toggle fold (cursor stays on the dir row)
 
 	o
-	  <CR> と同じ «entry を開く» (2026-09 まで存在した «実ファイルを別 tab
-	  で開く» は削除。head 窓が実ファイルそのもの)
+	  same as <CR>, «open the entry» (the «open the real file in another
+	  tab» that existed until 2026-09 was removed — the head window is the
+	  real file itself)
 
-	l		<CR> と同じ «entry を開く» (ツリー UI の慣習のエイリアス)
+	l		same as <CR>, «open the entry» (a tree-UI convention alias)
 
 	<Tab>
-	  次のファイル (一覧順 = <CR> と同一処理。focus も panel に残る。端は
-	  無動作)
+	  next file (list order = the same handling as <CR>; focus stays in the
+	  panel; no-op at the edges)
 
-	<S-Tab>		前のファイル (同上)
-	[F		最初のファイル (上記と同じ規則)
-	]F		最後のファイル (上記と同じ規則)
-	R		差分を再取得 (レビュー窓の R と同一)
+	<S-Tab>		previous file (ditto)
+	[F		first file (same rule as above)
+	]F		last file (same rule as above)
+	R		refetch the diff (same as R in the review windows)
 
 	i
-	  list 表示 (フルパス 1 行) ⇄ tree 表示を切替。絞り込み・折り畳み・選択行
-	  は状態として引き継ぐが、セッションファイルには保存しない (開き直しで
-	  tree 既定に戻る)
+	  toggle list view (full path 1 line) / tree view. filter, folds and
+	  the selected row carry over across the toggle but are not saved to
+	  the session file (reopening returns to the tree default)
 
 	x
-	  レビュー完了マーク [✓] を付ける / 外す (dir ヘッダ行では無動作。open
-	  や移動では自動で付かない)
+	  toggle the review-done mark [✓] (no-op on dir header rows; open and
+	  movement never set it automatically)
 
 	/
-	  一覧を絞り込む。入力 = paths の大文字小文字無視の部分一致で再描画。
-	  空入力で解除、Esc で現状維持。絞り込み中は <CR>/o/l/x/<Tab>/
-	  <S-Tab>/[F/]F も一致集合内だけを辿る (winbar に一致数と filter が
-	  出る)
+	  filter the list. input = case-insensitive substring match on paths
+	  for the redraw. empty input clears, Esc keeps the current filter.
+	  While filtering, <CR>/o/l/x/<Tab>/<S-Tab>/[F/]F also walk only inside
+	  the matching set (winbar shows the match count and filter)
 
-	q		セッションを閉じる (diff の q と同じ)
-	<leader>c	コメント一覧 (横断) を開く (diff 窓と同じ)
-	<F1> / g?	キーバインドの help float (diff 窓と同じ。g? は固定別名)
+	q		close the session (same as q in the diff windows)
+	<leader>c	open the comments list (same as the diff windows)
+	<F1> / g?	keymap help float (same as the diff windows. g? is a fixed alias)
 
-	panel のカーソル移動だけでは diff を切り替えない。逆にファイルを open_file
-	すると panel のカーソルがその行へ追従する (相互ハイライト: 選択行 +
-	cursorline)。panel から押した移動キー (<Tab>/<S-Tab>/[F/]F) も focus を
-	panel に残す (レビュー窓から押したときは head 窓に残る)。
+	Cursor movement in the panel alone never swaps the diff. Conversely
+	open_file scrolls the panel cursor to the row (mutual highlight:
+	selection + cursorline). Movement keys pressed from the panel
+	(<Tab>/<S-Tab>/[F/]F) return focus to the panel too (from the review
+	windows focus stays in the head window).
 
- コメント一覧 (横断)			*review-keymaps-commentlist*
+ comments list (cross-file)			*review-keymaps-commentlist*
 
-	セッションの全コメントをファイル横断の一覧
-	(`review://comments/<session-id>`) で見る。一覧はレビュー tab の最下部に
-	全幅 (高さは既定 10 行・`comment_list_height` で変更可) で開かれ、どの
-	窓から押しても位置は変わらない。1 行 = 1 コメントで
-	«<path>:<line>[-<end>]  [<id>]  <body 1 行目>» (60 文字を超える分は …。
-	outdated は末尾に « ⚠ outdated»)。並びは file panel と同一の tree 表示順
-	(折畳・list 表示は反映しない) → 同一ファイル内 line 昇順。絞り込み (/)
-	は反映し、winbar に «<base>..<head 表示名> · N comments [· ⚠M]» を出す
-	(0 件でも開ける)。
+	All comments of the session in one cross-file list
+	(`review://comments/<session-id>`). The list opens full-width at the
+	bottom of the review tab (default height 10 lines, configurable via
+	`comment_list_height`) and its position never depends on which window
+	you press from. 1 row = 1 comment formatted
+	«<path>:<line>[-<end>]  [<id>]  <body line 1>» (anything beyond 60
+	columns trails in …; outdated rows append « ⚠ outdated»). Order = the
+	same tree display order as the file panel (folds / list view are not
+	reflected) → line ascending within a file. The filter (/) IS applied and
+	the winbar shows «<base>..<head display name> · N comments [· ⚠M]»
+	(0 comments can still be opened).
 
 	<CR>
-	  カーソル行のコメント位置へジャンプ。実ファイル (または縮退 head の
-	  scratch) を開いて記録行へ移動する (行数外は最終行へクランプ。fold は
-	  開く)。outdated は記録行へ移動して INFO。binary / 削除の告知表示の
-	  ファイル、現在の差分に無いファイルは移動せず WARN
+	  jump to the comment on the cursor line. Opens the real file (or the
+	  degraded-head scratch) and moves to the recorded line (clamped to the
+	  last line when out of range; folds are opened). outdated comments
+	  jump to the recorded line with INFO. Files shown as binary / deletion
+	  notices and files not in the current diff do not move (WARN)
 
 	d
-	  カーソル行のコメントを削除 (一覧専用の arming。同じ行でもう一度 d で
-	  確定。解除は <Esc> / 2 秒経過 / 編集確定)
+	  delete the comment on the cursor line (list-only arming: press d
+	  again on the same line to confirm. Cancel with <Esc> / 2s / a
+	  confirmed edit)
 
 	D
-	  全コメントを一括削除 (一覧専用の arming。もう一度押して確定。:Review
-	  clear と同じ。絞り込み外のコメントも全件消える。解除は <Esc> / 2 秒
-	  経過 / コメントの増減)
+	  delete all comments at once (list-only arming: press again to
+	  confirm. Same as :Review clear. Comments hidden by the filter are
+	  deleted too. Cancel with <Esc> / 2s / a comment count change)
 
 	e
-	  カーソル行のコメントを編集 (diff 窓と同じ入力 float。確定で保存し
-	  一覧も追随する)
+	  edit the comment on the cursor line (same input float as the diff
+	  window. Saving also refreshes the list)
 
 	y
-	  カーソル行のコメント 1 件のプロンプトを "0 (+クリップボード) へ
-	  コピー (outdated はコピーせず INFO)
+	  copy the prompt of the single comment on the cursor line to "0 (+the
+	  clipboard). outdated rows are not copied (INFO)
 
-	q		一覧を閉じる (セッション状態は変えない)
+	q		close the list (the session state is untouched)
 
-セッション一覧 (:Review list)			*review-keymaps-sessionlist* *review-list*
+ Sessions list (:Review list)			*review-keymaps-sessionlist* *review-list*
 
-	<CR>		選択セッションを開く (closed -> open)
-	q		一覧を閉じる (セッション状態は変えない)
+	<CR>		open the selected session (closed -> open)
+	q		close the list (the session state is untouched)
 
 	d
-	  選択セッションを削除 (:Review delete と同じ確認フロー)
+	  delete the selected session (the same confirm flow as :Review delete)
 
 ==============================================================================
-SESSION 状態と復旧				*review-sessions*
+SESSION state and recovery			*review-sessions*
 
-保存済みセッションには open / closed の 2 状態がある (list で 1 行表示):
+Saved sessions have two states, open / closed (1 line each in the list):
 
- 契約化された「閉じる」操作は q / `:Review close` の 2 つ (同じ手順): comments +
- 完了マークを保存して closed にし、レビュー tab を閉じ、plugin が作った worktree を
- 掃除する (closed は `:Review` では復元できず、`:Review list` からのみ再開できる。
- 開くと自動的に open に戻り worktree は再生成される)。
+ The contractual "close" operations are q / `:Review close` (same procedure):
+ save comments + completion marks and set closed, close the review tab and
+ clean up plugin-made worktrees (closed sessions cannot be restored by
+ `:Review` and are only reopened from `:Review list`; opening flips back to
+ open and the worktree is regenerated).
 
-	ユーザーがレビュー tab を `:tabclose` / `:tabonly` 等で直接閉じるのは close
-	と区別される: コメントと open 状態は保存されたまま (status=open)、extmark と
-	キーマップだけ掃除し、INFO «レビュー tab を閉じました (セッションは保存済み・
-	`:Review` で開き直し可)» を出す。次回 `:Review` で開き直せる。head 窓に
-	なっていた実ファイルバッファ (未保存編集を含む) とユーザーの窓・tab は
-	どちらの経路でも消さない。
+	Directly closing the review tab with `:tabclose` / `:tabonly` etc. is
+	distinct from close: comments and the open state stay saved
+	(status=open) and only extmarks and keymaps are cleaned up, plus the
+	INFO «review tab closed (session saved; reopen with :Review)». The
+	next `:Review` reopens it. The real-file buffer that was in the head
+	window (unsaved edits included) and user windows / tabs are never
+	discarded on either path.
 
-	Neovim 異常終了
-	  open のまま JSON が data dir に残り、次回起動時に「続けられます」通知
-	  (:Review で復元 / worktree 残骸は起動 scan が掃除)
+	Neovim crash
+	  The JSON stays in the data dir with status=open and the next start
+	  sends the «you can resume…» notification (:Review restores it;
+	  worktree leftovers are swept by the startup scan)
 
-	保存時自動反映
-	  保存した差分は自動でレビューに反映される。レビュー対象ファイルの保存
-	  (head 窓でもユーザー窓の :w でも可。縮退中の読み取り専用 scratch は
-	  対象外) で差分を再取得し、±カウント・コメント位置 (anchor 補正 /
-	  outdated)・スレッド・:Review prompt が直近保存基準で再適用、窓 diff は
-	  保存時に再計算される。未保存のバッファ編集は表示にだけ映り、カウント
-	  と prompt には入らない。再取得の失敗は WARN 通知で前の表示とコメントを
-	  保持する
+	Auto-apply on save
+	  Saved diffs are automatically reflected in the review. Saving a
+	  reviewed file (either :w in the head window or a user window; the
+	  read-only scratch during degradation is excluded) refetches the diff
+	  and reapplies the ±counts, comment positions (anchor correction /
+	  outdated), threads and :Review prompt against the latest saved
+	  state; the window diff recomputes on save. Unsaved buffer edits show
+	  in the view only and never reach counts or prompts. A failed refetch
+	  WARNs and keeps the previous view and comments.
 
-outdated 認定 (差分の揺れで対象行を特定できないコメント) は head バッファで
- 解ける位置にあれば行末 `コメントアイコン N` と行下スレッド (outdated は id
- 接頭辞が警告色、本文は通常色)、head 窓に解けない分は head バッファ 1 行目の
- 行上に «N outdated (prompt 除外中)» として集約、窓のさえないファイル (削除/
- binary 告知) の分は file panel winbar 末尾の `⚠N` で示す
- (:h review-display)。`:Review prompt` の既定出力からは除外される。本文は失わず
- closed 前の JSON に残るため、refs を戻せば再度 active として扱える場合がある。
+Comments whose recorded position is no longer resolvable after diff drift
+(outdated) show as line-end `comment-icon N` + the thread under the line when
+they resolve inside the head buffer (outdated id prefixes in warning color,
+bodies in plain color); unresolved ones aggregate in a box above line 1 of the
+head buffer headed «N outdated (excluded from prompt)», and comments of files
+without a window (deleted/binary notices) show as `⚠N` at the end of the file
+panel winbar (:h review-display). They are excluded from the default
+`:Review prompt` output. Bodies are never lost — they remain in the pre-close
+JSON, and walking refs back can make them active again.
 
 ==============================================================================
-表示の特性					*review-display*
+DISPLAY characteristics				*review-display*
 
-レビューの 3 窓				*review-display-diff*
+The three review windows			*review-display-diff*
 
-	レビューは専有 tabpage に file panel (左・既定幅 35)│base│head の横 3 窓で
-	開く。tab は repo / worktree へ tcd される (LSP server の spawn cwd と
-	相対パス解決用)。
+	Reviews open in a dedicated tabpage as file panel (left; default width
+	35) │ base │ head. The tab is tcd'ed to the repo / worktree (for LSP
+	spawn cwd and relative-path resolution).
 
-	head 窓
-	  差分の new 側 = 実ファイルそのもの (:edit)。編集可・filetype / LSP が
-	  効く。base との比較は Neovim 標準の窓 diff (DiffAdd / DiffChange /
-	  DiffDelete / DiffText) で、fold・`[c` / `]c` hunk 移動・scrollbind は
-	  標準のまま (マップしていない)。追加・削除ファイルは窓 diff を無効化
-	  して素の色で開き、種別は winbar のマーク (` · new file` / ` ·
-	  deleted`) で判別する。
+	head window
+	  the new side of the diff = the real file itself (:edit). Editable,
+	  filetype / LSP work. Comparison with base is Neovim's standard window
+	  diff (DiffAdd / DiffChange / DiffDelete / DiffText); folds, `[c` /
+	  `]c` hunk movement and scrollbind stay standard (unmapped). Added and
+	  deleted files exit the window diff and open in plain colors; the type
+	  is told by the winbar marks (` · new file` / ` · deleted`).
 
-	base 窓
-	  `git show <base>:<path>` の読み取り専用 scratch。追加ファイルは 0 行
-	  scratch、削除 / binary ファイルは告知 scratch に置き換わり、これらの
-	  ペアは両窓で窓 diff から退避する (diffoff)。
+	base window
+	  the read-only scratch of `git show <base>:<path>`. Added files get a
+	  0-line scratch; deleted / binary files are replaced by a notice
+	  scratch; such pairs leave the window diff in both windows (diffoff).
 
-	コメント一覧窓
-	  `<leader>c` / `:Review comments` で開く横断一覧。tab の最下部に全幅
-	  (高さは既定 10 行) で開き、窓 diff には参加しない (詳細は
-	  |review-keymaps-commentlist|)。
+	comments-list window
+	  the cross-file list opened by `<leader>c` / `:Review comments`.
+	  Full-width at the bottom of the tab (10 lines by default) and never
+	  joins the window diff (details: |review-keymaps-commentlist|).
 
-	head/base の縮退 (scratch 縮退)
-	  両窓 git show の読み取り専用になる (INFO 通知済み)。
+	head/base degradation (scratch degradation)
+	  both windows become read-only git show (INFO notified).
 
-	コメントは head 実バッファの extmark (範囲全体の下線 + 範囲の最終行の
-	行末 `コメントアイコン N`。outdated 混在でも件数は変えず、outdated は
-	行下スレッドの id 接頭辞を警告色にする)。本文は **範囲の最終行の下に
-	罫線の箱** (`┌─┐ │ └─┘`) で囲んだスレッドで表示する (GitHub 風。箱の
-	幅は head 窓のテキスト幅いっぱいに広がり右辺は常に窓右端で揃い、本文は
-	箱の内側で折り返し、10 行で打ち切り、全文は markdown filetype の `i` 窓)。
-	スレッドはそのバッファを見る全窓に
-	見える (窓単位で抑える API が Neovim に無い実測。バッファ行を占有しない
-	ので行番号写像は不変。他窓が head 窓より狭いときは右辺が切れる)。
-	位置を解けない outdated は その head バッファ
-	1 行目の行上に «N outdated (prompt 除外中)» を見出しにした箱で集約、
-	窓のさえないファイル (告知窓 / 差分から消えたファイル) の分は file panel
-	の winbar 末尾 `⚠N` に出す。
+	Comments live as extmarks in the head buffer (an underline across the
+	range + line-end `comment-icon N` on the last row; a mixed old/new
+	group keeps the count, outdated id prefixes go warning color). Bodies
+	render as a thread in a ruled box (`┌─┐ │ └─┘`) under the last row of
+	the range (GitHub-style. The box spans the head window's text width so
+	its right edge always aligns to the window's, bodies wrap inside, 10
+	lines then truncate; full text: the `i` window, filetype markdown).
+	Threads are visible in every window that shows the buffer (Neovim has
+	no window-local virt_lines; measured). Buffer lines are not consumed,
+	so the line-number mapping stays intact (narrower windows clip the
+	right edge). Unresolvable outdated comments aggregate in a box headed
+	«N outdated (excluded from prompt)» above line 1 of that head buffer;
+	comments of files with no window (notice windows / files gone from the
+	diff) go to the trailing `⚠N` of the file panel winbar.
 
 ==============================================================================
 COMMENT INPUT					*review-comment-input*
 
-c/e で開くコメント入力 (float、filetype=markdown) の確定と閉じる操作:
+Confirming and closing the comment input float (filetype=markdown) opened by
+c/e:
 
-	<CR>		Normal で確定。insert 中はただの改行
+	<CR>		confirm in Normal. <CR> while inserting is a newline
 
 	q
-	  Normal で閉じる。本文がなければキャンセル。本文があるときは閉じず、
-	  続けて (2 秒以内に) q を押したときだけ入力を破棄して閉じる
+	  close in Normal. An empty body cancels. With a body the window stays
+	  open and only a second q (within 2s) discards the input and closes
 
-	<C-y>		insert 中の確定 (エイリアス)
-	<Esc>		Normal へ戻るだけで窓は閉じない
+	<C-y>		confirm while inserting (alias)
+	<Esc>		return to Normal only (the window stays)
 
-窓の title には対象の `path:line` と確定/閉じるの操作を表示する。<F1> の
-help float にも同じ一覧がある。
+The window title shows the target `path:line` and the confirm/close
+operations. The same list lives in the <F1> help float.
 
 ==============================================================================
 CONTENTS					*review-contents*
