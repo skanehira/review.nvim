@@ -485,22 +485,33 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       press(base_buf, '[F', windows.win 'base')
       wait_msg 'SPY:first_file'
       -- ユーザー窓 (gate 不成立) では同じキーが built-in 化し handlers は走らない
-      -- (head 実ファイルと同じ buf をユーザー窓で見る = review で想定する事故形)
+      -- (head 実ファイルと同じ buf をユーザー窓で見る = review で想定する事故形)。
       vim.api.nvim_win_set_buf(state.user_win, head_buf)
       vim.api.nvim_set_current_win(state.user_win)
-      state.notifications = {}
-      local res = press(head_buf, 'R', state.user_win)
-      assert.equals('R', res, 'R の fallback が built-in へ返らない')
-      vim.wait(100, function()
-        for _, n in ipairs(state.notifications) do
-          if n.msg:find('SPY:', 1, true) ~= nil then
-            return true
+      -- 特キーは fallback が nvim_replace_termcodes 変換済みで返す契約 (変換除去の
+      -- 変異を検出するため特キー含めキーごとに完全一致。'<Tab>' 素戻しは <Tab> でない)
+      for _, key in ipairs { '<Tab>', '<S-Tab>', '[F', ']F', 'R' } do
+        state.notifications = {}
+        local res = press(head_buf, key, state.user_win)
+        assert.equals(
+          vim.api.nvim_replace_termcodes(key, true, false, true),
+          res,
+          key .. ' の fallback が built-in へ返らない'
+        )
+        vim.wait(100, function()
+          for _, n in ipairs(state.notifications) do
+            if n.msg:find('SPY:', 1, true) ~= nil then
+              return true
+            end
           end
+          return false
+        end, 10)
+        for _, n in ipairs(state.notifications) do
+          assert.is_true(
+            n.msg:find('SPY:', 1, true) == nil,
+            key .. ' が gate 不成立窓で発火した'
+          )
         end
-        return false
-      end, 10)
-      for _, n in ipairs(state.notifications) do
-        assert.is_true(n.msg:find('SPY:', 1, true) == nil)
       end
     end
   )

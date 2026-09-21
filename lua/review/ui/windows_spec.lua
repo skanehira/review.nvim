@@ -380,6 +380,53 @@ describe('windows.bind / set_panel_buf: role 導出', function()
     end
   )
 
+  -- is_commentlist_win (fallback ループの除外) 自体の pin。上記 2 テストは
+  -- anchor=panel 経路与たったり (一覧が list_wins の後ろに並ぶため除外が無くても
+  -- 偶然選ばれない) 終端分岐で、除外判定を実行しない。ここでは一覧窓を winnr 先頭
+  -- (左全高) に寄せ、後方に untracked の生き窓 (stale 掃除後も残る anchor 候補) を
+  -- 置いてから再建させる。除外が効けば anchor = untracked 窓で再建ペアはその右、
+  -- 効かなければ anchor = 一覧窓でペアはその左に積まれる (列位置で判別)。
+  it(
+    '一覧窓が tab 先頭に並ぶ配置でも fallback anchor は一覧窓を飛ばす (除外判定自体の pin)',
+    function()
+      local st0 = windows.state()
+      windows.bind(base_buf, head_buf)
+      local lw = windows.open_comment_list()
+      local cl_buf = scratch_buf 'review://comments/sx/pin.lua'
+      vim.b[cl_buf].review_meta = { kind = 'commentlist' }
+      vim.api.nvim_win_set_buf(lw, cl_buf)
+      windows.hide_panel()
+      vim.api.nvim_win_close(windows.win 'head', true)
+      -- 一覧窓を左全高へ (winnr 先頭)。untracked 窓は base 窓の下段に作り、
+      -- ensure_pair の stale 掃除 (st.base/head 窓を閉じる) 後も残る anchor にする。
+      vim.api.nvim_win_call(lw, function()
+        vim.cmd 'wincmd H'
+      end)
+      vim.api.nvim_set_current_win(st0.base_win)
+      vim.cmd 'belowright split'
+      local xw = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_buf(xw, scratch_buf 'review://scratch/sx/x.lua')
+      assert.equals(
+        lw,
+        vim.api.nvim_tabpage_list_wins(st0.tab)[1],
+        '前提: 一覧窓が list_wins の先頭 (除外判定を通る配置)'
+      )
+
+      local ok, err = pcall(windows.bind, base_buf, head_buf)
+      assert.is_true(ok, 'bind が死んだ: ' .. tostring(err))
+
+      assert.equals('head', windows.role_of(windows.win 'head'))
+      -- 再建ペアが untracked 窓より右にあること = fallback anchor が一覧窓でなく
+      -- untracked 窓だったことの観測 (除外除去の変異では anchor=一覧窓となり
+      -- ペアが untracked の左 [lw, base, head, x] の順に並ぶ)。窓は同一行へ
+      -- 平坦化されるため列位置で判定する。
+      assert.is_true(
+        vim.fn.win_screenpos(windows.win 'head')[2] > vim.fn.win_screenpos(xw)[2],
+        'fallback anchor に一覧窓が選ばれた (再建ペアが一覧窓の左に積まれた)'
+      )
+    end
+  )
+
   it(
     'bind は窓が消えていればペアを再建する (drift 復旧。open_file 再張付の前提)',
     function()
