@@ -28,6 +28,10 @@ local function use_env()
     state.user_win = vim.api.nvim_get_current_win()
   end)
   after_each(function()
+    for _, fn in ipairs(state.finally or {}) do
+      pcall(fn)
+    end
+    state.finally = nil
     windows.close()
     if vim.api.nvim_tabpage_is_valid(state.tab) then
       vim.api.nvim_set_current_tabpage(state.tab)
@@ -137,6 +141,12 @@ local function wait_msg(pat)
     return false
   end, 10)
   assert.is_true(ok, 'dispatch が発火しない: ' .. pat)
+end
+
+-- テスト内で差し替えたモジュール関数の戻し処理 (use_env の after_each で実行)。
+local function finally_restore(fn)
+  state.finally = state.finally or {}
+  table.insert(state.finally, fn)
 end
 
 describe('keygate.install / uninstall', function()
@@ -299,8 +309,8 @@ describe('keygate.install / uninstall', function()
       end
       -- config.keymaps.diff の n -mode 全キー = 15 (c/e/d/y/i/q/<F1>/<Tab>/
       -- <S-Tab>/[F/]F/R/<leader>e/<leader>b/<leader>c) + g? 別名 = 16。v の c は別 mode。
-      -- focus_panel / toggle_panel / comments_list は非 expr の callback map
-      -- (同期発火) で数える。
+      -- focus_panel / toggle_panel / comments_list / help (<F1>・g?) は非 expr の
+      -- callback map (同期発火) で数える。
       assert.equals(16, ours)
     end
   )
@@ -473,6 +483,62 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       state.notifications = {}
       press(head_buf, lhs, state.user_win)
       assert.equals(0, #state.notifications)
+    end
+  )
+
+  it(
+    'help (<F1> / g? 別名) は同期発火する (schedule 遅延なし。diff 窓 g? が次打鍵まで出ない回帰 pin)',
+    function()
+      windows.bind(base_buf, head_buf, { head_kind = 'real' })
+      local module = require 'review.ui.help'
+      local help_open_real = module.open
+      module.open = function()
+        table.insert(state.notifications, { msg = 'SPY:help.open', level = 0 })
+      end
+      finally_restore(function()
+        module.open = help_open_real
+      end)
+
+      -- 押下 = callback をその窓で呼ぶ。expr+schedule 経路 (旧実装) では spy 通知が
+      -- 即時に載らない (DESIGN「既知の制約」キー «次の打鍵まで反映されない» 実測)。
+      state.notifications = {}
+      press(head_buf, '<F1>', windows.win 'head')
+      assert.equals(
+        1,
+        #state.notifications,
+        '<F1> が同期発火していない (schedule 遅延)'
+      )
+      assert.equals('SPY:help.open', state.notifications[1].msg)
+
+      state.notifications = {}
+      press(head_buf, 'g?', windows.win 'head')
+      assert.equals(1, #state.notifications, 'g? が同期発火していない (schedule 遅延)')
+      assert.equals('SPY:help.open', state.notifications[1].msg)
+    end
+  )
+
+  it(
+    'gate 不成立窓の help (<F1> / g?) は元キーを built-in へ返す (expr 版の返り値フォールバックと同一契約)',
+    function()
+      windows.bind(base_buf, head_buf, { head_kind = 'real' })
+      vim.api.nvim_win_set_buf(state.user_win, head_buf)
+      vim.api.nvim_set_current_win(state.user_win)
+      -- 非 expr callback mapping は「返り値で元キーを返す」ことができないため、
+      -- built-in 復帰は restore_builtin (feedkeys で remap せず再投入) で行う。
+      -- 投入自体の押下等价性は PTY 実測契約 (commit message 手順) なので、ここでは
+      -- 「どのキー列を built-in へ返したか」を contract として pin する。
+      local got = {}
+      local restore_real = keygate.restore_builtin
+      keygate.restore_builtin = function(keys)
+        table.insert(got, keys)
+      end
+      finally_restore(function()
+        keygate.restore_builtin = restore_real
+      end)
+
+      press(head_buf, '<F1>', state.user_win)
+      press(head_buf, 'g?', state.user_win)
+      assert.same({ '<F1>', 'g?' }, got)
     end
   )
 

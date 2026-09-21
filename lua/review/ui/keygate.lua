@@ -164,18 +164,32 @@ local function install_one(buf, mode, lhs, op)
   return true
 end
 
--- 窓切替系 (focus_panel / toggle_panel / comments_list) の同期張込。expr mapping の
--- rhs は textlock 下で評価されるため buffer/窓を作る dispatch は vim.schedule に回すが、
--- 環境によって «次の打鍵まで反映されない» 遅延が出る (実測: ユーザー設定で <leader>e の
--- focus が 1 打鍵遅延 — ユーザー報告)。非 expr の関数 mapping は textlock 外なので
--- 窓作成 (panel 再建・一覧 vsplit) も安全に同期実行できる。gate 不成立 (ユーザー窓) は
--- no-op (leader 前置のキーに built-in の意味は無い)。
-local function install_sync(buf, lhs, op)
+--- gate 不成立窓で元キーを built-in へ返す (非 expr callback mapping 版)。
+--- expr 版の「返り値 = 変換済み元キー (再 map されない)」と同契約にするため
+--- mode は 'n' (remap 無効) で再投入する。help の <F1> (= :help) / g? (=
+--- rot13) のように built-in 意味のあるキーが no-op で黙って消えないため
+--- (DESIGN「既知の制約」キー «gate 不成立窓では 1 キーストロークが built-in»).
+function M.restore_builtin(fallback)
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(fallback, true, false, true), 'n', false)
+end
+
+-- 窓切替系 (focus_panel / toggle_panel / comments_list) と help (<F1> / g?) の
+-- 同期張込。expr mapping の rhs は textlock 下で評価されるため buffer/窓を作る
+-- dispatch は vim.schedule に回すが、環境によって «次の打鍵まで反映されない»
+-- 遅延が出る (実測: ユーザー報告の <leader>e 1 打鍵遅延に続き、diff 窓の g? で
+-- help float が次打鍵まで出ない。multi-char printable lhs の expr 経路で顕在化)。
+-- 非 expr の関数 mapping は textlock 外なので窓作成 (panel 再建・一覧 vsplit・
+-- help float) も安全に同期実行できる。fallback なし (leader 前置) の gate 不成立
+-- (ユーザー窓) は no-op、fallback あり (help) は restore_builtin で built-in 復帰。
+local function install_sync(buf, lhs, op, fallback)
   if user_keytaken(buf, 'n', lhs) then
     return false
   end
   vim.keymap.set('n', lhs, function()
     if gate_state(op) == false then
+      if fallback ~= nil then
+        M.restore_builtin(fallback)
+      end
       return
     end
     local target = DISPATCH[op]
@@ -206,10 +220,15 @@ function M.install(buf, session_id)
   install_one(buf, 'n', k.yank_prompt, 'yank_prompt')
   install_one(buf, 'n', k.view_comments, 'view_comments')
   install_one(buf, 'n', k.close, 'close')
-  install_one(buf, 'n', k.help, 'help')
+  -- help (<F1> と fixed alias g?) は float 作成なので install_sync の同期経路。
+  -- fire (expr+schedule 経由) は環境により «次打鍵まで反映されない» 遅延が実測され
+  -- (diff 窓 g? で help float が出ないユーザー報告。filepanel の非 expr 張込は即
+  -- 出る = 同一キーの窓间差)、DESIGN「既知の制約」キーの移行先と同じ枠。
   -- g? は config を持たない固定の別名 (<F1> が terminal に奪われる環境向け。
-  -- DESIGN キー表。衝突時は install_one がスキップする)。
-  install_one(buf, 'n', 'g?', 'help')
+  -- DESIGN キー表。衝突時は install_sync がスキップする)。built-in 復帰のみ
+  -- fire 同款の fallback 再投入 (restore_builtin) を保つ。
+  install_sync(buf, k.help, 'help', k.help)
+  install_sync(buf, 'g?', 'help', 'g?')
   install_one(buf, 'n', k.next_file, 'next_file')
   install_one(buf, 'n', k.prev_file, 'prev_file')
   install_one(buf, 'n', k.first_file, 'first_file')
