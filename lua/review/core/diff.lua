@@ -95,6 +95,9 @@ local function finalise(state)
   return {
     path = path,
     status = status,
+    -- rename のときだけ旧パスを公開する (base 窓の git show <base>:<旧パス> が唯一の
+    -- 消費者。head 基準の path / anchor / prompt は新パスのまま = 対応表示しない)。
+    old_path = (state.renamed_to ~= nil) and (state.renamed_from or state.old_path) or nil,
     binary = state.binary,
     added = added,
     deleted = deleted,
@@ -174,9 +177,13 @@ function M.parse(text)
         elseif starts_with(line, 'deleted file mode ') then
           file.deleted_file_mode = true
         elseif starts_with(line, 'rename to ') then
-          -- rename from (旧パス) は意図的に無視 — 旧パスとの対応表示はしない
-          -- (diff-review.md「エッジケースの決定」)。
+          -- 新パスは rename to から取る (head 窓や path 解決は新パス基準 =
+          -- 旧パスとの対応表示はしない)。rename from は base 窓だけが必要
+          -- (git show <base>:<旧パス>、diff-review「head / base 窓の中身」rename 行)。
           file.renamed_to = line:sub(#'rename to ' + 1)
+        elseif starts_with(line, 'rename from ') then
+          -- 純 rename は ---/+++ 行自体が出ない (git 実測) ため旧パスの取る所はここだけ。
+          file.renamed_from = line:sub(#'rename from ' + 1)
         elseif starts_with(line, 'Binary files ') then
           file.binary = true
         elseif starts_with(line, '+++ ') then

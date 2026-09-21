@@ -197,6 +197,9 @@ describe('core/diff rename', function()
       assert.same({
         path = 'new-name.txt',
         status = 'R',
+        -- base 窓は <base>:<旧パス> を参照するため rename from を保持する
+        -- (DESIGN「リネームファイル」/ diff-review「head / base 窓の中身」rename 行)
+        old_path = 'old-name.txt',
         binary = false,
         added = 1,
         deleted = 1,
@@ -217,6 +220,32 @@ describe('core/diff rename', function()
             },
           },
         },
+      }, files[1])
+    end
+  )
+
+  it(
+    '純 rename (内容変更なし = ---/+++ 行が出ない) でも rename from 行から old_path を保持する',
+    function()
+      local raw = table.concat({
+        'diff --git a/old.txt b/new.txt',
+        'similarity index 100%',
+        'rename from old.txt',
+        'rename to new.txt',
+        '',
+      }, '\n')
+
+      local files = diff.parse(raw)
+
+      assert.equals(1, #files)
+      assert.same({
+        path = 'new.txt',
+        status = 'R',
+        old_path = 'old.txt',
+        binary = false,
+        added = 0,
+        deleted = 0,
+        hunks = {},
       }, files[1])
     end
   )
