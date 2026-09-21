@@ -263,8 +263,8 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
   -- 全条件不成立の対照を、同一構造
   -- (provider を配置 -> all() -> 期待を assert) のパラメータとして 1 本に揃える。
   -- 検出元を 1 つでも has_provider から消すと、その系統が「無し経路」に落ち
-  -- (WARN があるのに +/* が書けない = 有り経路の assert 側では WARN 0 / 通知数で、無し
-  -- 経路側では provider が誤検出されると WARN が消える) 失敗する。+/* 内容の sentinel は
+  -- (有り経路側は notifications[1] が WARN になりコピー INFO の assert が落ち、無し
+  -- 側は provider が誤検出されて WARN が消える) 失敗する。+/* 内容の sentinel は
   -- 無し環境で初期 setreg が保持されないため検証に使わない (CI stable/0.10 実測)。
   local provider_cases = {
     {
@@ -358,15 +358,57 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
           }, state.notifications[1], case.name .. ': WARN')
           assert.equals(1, #state.notifications, case.name .. ': 通知は WARN のみ')
         else
-          -- 有り経路: 無し経路に落ちていないこと = WARN 0 件 (arrange した provider が
-          -- has_provider で検出され、「無し」なら WARN 1 件でこの assert が落ちる)。
+          -- 有り経路: 無し経路に落ちていないこと = 通知がコピー成功 INFO 1 件
+          -- (arrange した provider が has_provider で検出され、「無し」に誤判定なら
+          -- notifications[1] が WARN になりこの assert が落ちる)。コピー完了の
+          -- 可視化 (2026-09 ユーザー依頼: 無音成功が分かりにくい)。
           -- +/* の読み戻しはしない: command provider ('cat' 等) では getreg('+')が
           -- provider 側の paste 実行に依存し、CI (Linux) と local (macOS) で成否が
           -- 分かれる (実測)。setreg('+') 自体は Neovim 標準動作であり、実環境での
           -- クリップボード載りは e2e / 手動確認の担当 (ai-prompt.md 検証方針)。
-          assert.equals(0, #state.notifications, case.name .. ': WARN を出さない')
+          assert.same({
+            msg = 'review.nvim: 1 件のコメントをクリップボードにコピーしました',
+            level = vim.log.levels.INFO,
+          }, state.notifications[1], case.name .. ': コピー成功 INFO')
+          assert.equals(1, #state.notifications, case.name .. ': 通知はコピー INFO のみ')
         end
       end
+    end
+  )
+
+  it(
+    'provider ありで outdated 混在では除外 INFO → コピー完了 INFO の順で計 2 件',
+    function()
+      -- has_provider 検出元 1 系統 (command provider 定義)。probe は before_each で
+      -- false のままなので成功経路は provider 検出でしか通らない = arrange 漏れは
+      -- 無し経路化 (WARN が先頭) してこの assert が落ちる。
+      vim.g.clipboard = {
+        type = 'command',
+        copy = { ['+'] = 'cat', ['*'] = 'cat' },
+        paste = { ['+'] = 'cat', ['*'] = 'cat' },
+      }
+      seed {
+        comment('c1', 'a.lua', 2, nil, 'keep'),
+        comment('c2', 'a.lua', 3, nil, 'stale', 'outdated'),
+      }
+      state.notifications = {}
+
+      local res = prompt_handler.all()
+
+      assert.same({
+        __class = 'review.Result',
+        ok = true,
+        data = { text = full_prompt { '@a.lua#L2', 'keep' }, count = 1 },
+      }, res)
+      assert.same({
+        msg = 'review.nvim: 1 件を除外しました (outdated)',
+        level = vim.log.levels.INFO,
+      }, state.notifications[1], '除外 INFO が先')
+      assert.same({
+        msg = 'review.nvim: 1 件のコメントをクリップボードにコピーしました',
+        level = vim.log.levels.INFO,
+      }, state.notifications[2], 'コピー完了 INFO が後')
+      assert.equals(2, #state.notifications)
     end
   )
 

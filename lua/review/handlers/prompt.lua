@@ -72,15 +72,18 @@ end
 --- text を常時 "0 へ、クリップボードが実効なら +/* にもコピーする。
 --- 実効判定は定義済み provider (has_provider) または実書込 round-trip。無しは
 --- WARN して "0 のみ (ai-prompt.md 退路。失敗で止めない)。
+--- 戻り値 = クリップボード (+/*) に書けたか。false は WARN 済みなので呼び出し側
+--- の完了 INFO は true のときだけ (二重通知防止)。
 local function copy_text(text)
   vim.fn.setreg('0', text)
   if not (M.has_provider() or clipboard_writable(text)) then
     notify_warn 'クリップボード provider がありません。"0 レジスタにのみコピーしました'
-    return
+    return false
   end
   -- nvim 0.13-nightly 実機: setreg の第 1 引数 List は E730 (既知の制約)。個別に書く。
   vim.fn.setreg('+', text)
   vim.fn.setreg('*', text)
+  return true
 end
 
 local function table_or_nil(v)
@@ -102,6 +105,8 @@ end
 
 -- 構築 + コピー共通の後半。comments はスコープ解決済みの候補一覧。
 -- 0 件 (全 outdated / 空) はコピーせず info_msg を出して空データを返す。
+-- 実コピー (copy=false で抑制済み) がクリップボードに載ったら件数を INFO、
+-- 無し退路は copy_text 内の WARN のみ (二重通知しない)。
 local function emit(session, comments, opts, header, info_msg)
   local included, excluded = core_prompt.filter_active(comments)
   if #included == 0 then
@@ -114,7 +119,11 @@ local function emit(session, comments, opts, header, info_msg)
   local ctx = ctx_for(session)
   local text = header and core_prompt.build(comments, ctx) or core_prompt.body(comments, ctx)
   if opts == nil or opts.copy ~= false then
-    copy_text(text)
+    if copy_text(text) then
+      notify_info(
+        ('%d 件のコメントをクリップボードにコピーしました'):format(#included)
+      )
+    end
   end
   return result.ok { text = text, count = #included }
 end

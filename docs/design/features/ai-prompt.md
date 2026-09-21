@@ -31,7 +31,7 @@ setup 側で config を deep merge したい
 
 | 経路 | 挙動 |
 | --- | --- |
-| `:Review prompt [file]` | 全コメント (file 指定時はそのファイルのみ) を 1 文字列に整形。クリップボード provider (`+`/`*` レジスタ) があれば両方に、常に `"0` へも入れる。本文 0 件なら「コメントがありません」INFO |
+| `:Review prompt [file]` | 全コメント (file 指定時はそのファイルのみ) を 1 文字列に整形。クリップボード provider (`+`/`*` レジスタ) があれば両方に、常に `"0` へも入れる。本文 0 件なら「コメントがありません」INFO。クリップボードへのコピー成功時は件数を INFO « N 件のコメントをクリップボードにコピーしました » (全経路共通。無し退路は WARN のみで INFO を重ねない。`copy=false` は無通知) |
 | キーマップ `y` (head 窓) | カーソル行 range に含まれるコメントのみ同上 (outdated の既定除外も同じルール。カーソル行のコメントがすべて outdated の場合はコピーせず INFO「outdated のためプロンプトに含めませんでした」) |
 | キーマップ `y` (コメント一覧) | カーソル行 1 件のコメントのみ同上 (単一 range と同じ規則。outdated 行はコピーせず INFO「outdated のためプロンプトに含めませんでした」) |
 | Lua API | `require("review").prompt_all(opts)` / `prompt_for_file(path, opts)` が結果型 `{ok, data={text, count}}` を返し、copy を opts (`copy=false` 可) で制御 (テストフック) |
