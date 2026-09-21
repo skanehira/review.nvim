@@ -22,6 +22,10 @@ M.defaults = {
       add_comment = 'c',
       edit_comment = 'e',
       delete_comment = 'd',
+      -- 全コメント一括削除 (arming 二重押し / :Review clear のキー相当)
+      delete_all = 'D',
+      -- d / D の arming 解除 (arming 中以外は built-in の <Esc> に戻る)
+      cancel_arming = '<Esc>',
       yank_prompt = 'y',
       close = 'q',
       help = '<F1>',
@@ -71,6 +75,8 @@ M.defaults = {
     commentlist = {
       jump = '<CR>',
       delete = 'd',
+      delete_all = 'D',
+      cancel_arming = '<Esc>',
       edit = 'e',
       yank = 'y',
       close = 'q',

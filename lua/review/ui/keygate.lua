@@ -21,6 +21,7 @@ local COMMENT_OPS = {
   add_comment_visual = { mode = 'v', fn = 'add_visual_marks' },
   edit_comment = { mode = 'n', fn = 'edit_current' },
   delete_comment = { mode = 'n', fn = 'delete_current' },
+  delete_all = { mode = 'n', fn = 'delete_all_arming' },
   yank_prompt = { mode = 'n', fn = 'yank_current' },
   view_comments = { mode = 'n', fn = 'view_current' },
 }
@@ -87,6 +88,16 @@ function M.fire(op, fallback)
       vim.log.levels.WARN
     )
     return '' -- キーストロークを消費 (built-in 化すると誤発火する)
+  end
+  -- <Esc> (arming 解除) は schedule なしの同期判定: 解除物が無い押下はキーを
+  -- 呑まず built-in へ返すため、発火するかどうかを戻り値で決める必要がある
+  -- (通常の dispatch は expr 返り値 '' で確定消費してから schedule で撃つ)。
+  -- state 書込と notify (echo) だけなので textlock の制約外。
+  if op == 'cancel_arming' then
+    if require('review.handlers.comments').cancel_arming() then
+      return ''
+    end
+    return (vim.api.nvim_replace_termcodes(fallback or '', true, false, true))
   end
   -- NOTE (e2e 実測): expr キーマップの rhs は textlock 下で評価されるため、その場
   -- での窓作成 / バッファ変更が E565 になる (0.10 / 0.13Nightly 実測。textlock を
@@ -217,6 +228,8 @@ function M.install(buf, session_id)
   install_one(buf, 'v', k.add_comment, 'add_comment_visual')
   install_one(buf, 'n', k.edit_comment, 'edit_comment')
   install_one(buf, 'n', k.delete_comment, 'delete_comment')
+  install_one(buf, 'n', k.delete_all, 'delete_all')
+  install_one(buf, 'n', k.cancel_arming, 'cancel_arming')
   install_one(buf, 'n', k.yank_prompt, 'yank_prompt')
   install_one(buf, 'n', k.view_comments, 'view_comments')
   install_one(buf, 'n', k.close, 'close')

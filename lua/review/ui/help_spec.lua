@@ -62,6 +62,18 @@ describe('help.open', function()
       )
     )
     assert.is_true(
+      has_line(
+        lines,
+        '- **D** 全コメントを一括削除 (arming: もう一度押す。:Review clear と同じ)'
+      )
+    )
+    assert.is_true(
+      has_line(
+        lines,
+        '- **<Esc>** d / D の arming 解除 (arming 中でないときは built-in の <Esc>)'
+      )
+    )
+    assert.is_true(
       has_line(lines, '- **y** カーソル行のコメントのプロンプトを yank')
     )
     assert.is_true(has_line(lines, '- **<Tab>** 次のファイルへ (端では無動作)'))
@@ -155,6 +167,18 @@ describe('help.open', function()
       has_line(
         lines,
         '- **d** カーソル行のコメントを削除 (一覧専用 arming: 同じ行でもう一度 d)'
+      )
+    )
+    assert.is_true(
+      has_line(
+        lines,
+        '- **D** 全コメントを一括削除 (一覧専用 arming: もう一度押す。:Review clear と同じ)'
+      )
+    )
+    assert.is_true(
+      has_line(
+        lines,
+        '- **<Esc>** d / D の一覧 arming を解除 (解除物が無ければ無動作)'
       )
     )
     assert.is_true(has_line(lines, '- **e** カーソル行のコメントを編集'))

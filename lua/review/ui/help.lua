@@ -22,6 +22,14 @@ local SECTIONS = {
         'delete_comment',
         'カーソル行のコメントを削除 (arming: 同じ行でもう一度 d)',
       },
+      {
+        'delete_all',
+        '全コメントを一括削除 (arming: もう一度押す。:Review clear と同じ)',
+      },
+      {
+        'cancel_arming',
+        'd / D の arming 解除 (arming 中でないときは built-in の <Esc>)',
+      },
       { 'yank_prompt', 'カーソル行のコメントのプロンプトを yank' },
       { 'close', 'セッションを閉じる (レビュー tab を閉じる)' },
       { 'help', 'このヘルプ (g? でも開く)' },
@@ -79,6 +87,14 @@ local SECTIONS = {
       {
         'delete',
         'カーソル行のコメントを削除 (一覧専用 arming: 同じ行でもう一度 d)',
+      },
+      {
+        'delete_all',
+        '全コメントを一括削除 (一覧専用 arming: もう一度押す。:Review clear と同じ)',
+      },
+      {
+        'cancel_arming',
+        'd / D の一覧 arming を解除 (解除物が無ければ無動作)',
       },
       { 'edit', 'カーソル行のコメントを編集' },
       { 'yank', 'カーソル行のコメントのプロンプトを yank' },

@@ -151,6 +151,8 @@ local function paint_keymaps(buf)
   for _, kmap in ipairs {
     { k.jump, "require('review.handlers.comments_list').jump_current()" },
     { k.delete, "require('review.handlers.comments_list').delete_current()" },
+    { k.delete_all, "require('review.handlers.comments_list').delete_all_current()" },
+    { k.cancel_arming, "require('review.handlers.comments_list').cancel_arming()" },
     { k.edit, "require('review.handlers.comments_list').edit_current()" },
     { k.yank, "require('review.handlers.comments_list').yank_current()" },
     { k.close, "require('review.handlers.comments_list').close_current()" },

@@ -392,7 +392,7 @@ describe('comments e / d (編集・削除 arming)', function()
     focus_head_row(2)
     comments_handler.delete_current() -- arming 1 回目
     assert.same({
-      msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)',
+      msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)',
       level = vim.log.levels.WARN,
     }, state.notifications[#state.notifications])
     assert.equals(2, #saved().comments)
@@ -403,6 +403,221 @@ describe('comments e / d (編集・削除 arming)', function()
     comments_handler.delete_current() -- c2 確定削除
     assert.equals(1, #saved().comments)
     assert.equals('x1', saved().comments[1].body)
+  end)
+end)
+
+describe('comments D / clear_by_command (一括削除)', function()
+  use_env()
+
+  local function seed(count, start_row)
+    for i = 1, count do
+      focus_head_row((start_row or 2) + i - 1)
+      comments_handler.add_normal()
+      type_into_float('x' .. i)
+    end
+    state.notifications = {}
+  end
+
+  it('D: arming 二重押しで全件削除 + save + INFO (outdated も消える)', function()
+    seed(2)
+    -- outdated を 1 件混ぜる (state はセッション上の実値。削除は state 無関係)
+    state.session.comments[1].state = 'outdated'
+
+    comments_handler.delete_all_arming()
+    assert.same({
+      msg = 'review.nvim: コメント全 2 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)',
+      level = vim.log.levels.WARN,
+    }, state.notifications[1])
+    assert.equals(1, #state.notifications)
+    assert.equals(2, #saved().comments)
+
+    comments_handler.delete_all_arming()
+    assert.same({
+      msg = 'review.nvim: コメント全 2 件を削除しました',
+      level = vim.log.levels.INFO,
+    }, state.notifications[2])
+    -- INV-4: ディスクの JSON が空になる
+    assert.equals(0, #saved().comments)
+  end)
+
+  it('D: 2 秒窓を過ぎた 2 回目は 1 目に戻る (消さない)', function()
+    seed(1)
+    local clock = 100
+    comments_handler._set_now(function()
+      return clock
+    end)
+    comments_handler.delete_all_arming()
+    clock = clock + 3
+    comments_handler.delete_all_arming() -- 窓外 = 再 arming
+    assert.equals(1, #saved().comments)
+    comments_handler.delete_all_arming() -- 同一窓 2 回目で全消し
+    assert.equals(0, #saved().comments)
+    comments_handler._set_now(function()
+      return 4321
+    end)
+  end)
+
+  it('D: arming 中にコメントが増えると無効 (2 回押しても消えない)', function()
+    seed(2)
+    comments_handler.delete_all_arming() -- armed n=2
+    focus_head_row(5)
+    comments_handler.add_normal()
+    type_into_float 'added' -- n=3 に変化 = arming 解除
+    state.notifications = {}
+
+    comments_handler.delete_all_arming() -- 1 目扱い (n=3)
+    assert.equals(3, #saved().comments)
+    assert.same({
+      msg = 'review.nvim: コメント全 3 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)',
+      level = vim.log.levels.WARN,
+    }, state.notifications[1])
+  end)
+
+  it('D: 0 件は INFO «コメントがありません» で arming しない', function()
+    comments_handler.delete_all_arming()
+    assert.same({
+      msg = 'review.nvim: コメントがありません',
+      level = vim.log.levels.INFO,
+    }, state.notifications[1])
+    assert.equals(1, #state.notifications)
+  end)
+
+  it('clear_by_command: y 応答で全件削除 + save + INFO', function()
+    seed(2)
+    vim.ui.input = function(opts, cb)
+      state.confirm_prompt = opts.prompt
+      cb 'y'
+    end
+    local res = comments_handler.clear_by_command()
+    vim.ui.input = REAL_INPUT
+
+    assert.equals(true, res.ok)
+    assert.equals(
+      'review.nvim: コメント全 2 件を削除しますか？ (outdated も含む・削除は取り消せません) [y/N]: ',
+      state.confirm_prompt
+    )
+    assert.equals(0, #saved().comments)
+    assert.same({
+      msg = 'review.nvim: コメント全 2 件を削除しました',
+      level = vim.log.levels.INFO,
+    }, state.notifications[1])
+  end)
+
+  it(
+    'clear_by_command: n 応答は何も消さない (close の確認と同じく無通知)',
+    function()
+      seed(2)
+      vim.ui.input = function(_, cb)
+        cb 'n'
+      end
+      local res = comments_handler.clear_by_command()
+      vim.ui.input = REAL_INPUT
+
+      assert.equals(true, res.ok)
+      assert.same({}, state.notifications)
+      assert.equals(2, #saved().comments)
+    end
+  )
+
+  it('clear_by_command: 0 件は確認せず INFO «コメントがありません»', function()
+    local confirmed = false
+    vim.ui.input = function(_, cb)
+      confirmed = true
+      cb 'y'
+    end
+    local res = comments_handler.clear_by_command()
+    vim.ui.input = REAL_INPUT
+
+    assert.equals(true, res.ok)
+    assert.equals(false, confirmed)
+    assert.same({
+      msg = 'review.nvim: コメントがありません',
+      level = vim.log.levels.INFO,
+    }, state.notifications[1])
+  end)
+
+  it('clear_by_command: active 不在は E_NOT_ACTIVE (窓の有無は無関係)', function()
+    session_handler.close()
+    local res = comments_handler.clear_by_command()
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'review.nvim: アクティブなセッションがありません',
+      code = 'E_NOT_ACTIVE',
+    }, res)
+  end)
+end)
+
+describe('comments <Esc> cancel_arming (arming 解除)', function()
+  use_env()
+
+  local function seed2()
+    -- 前テストからの arming 残骸 (モジュール状態は spec 間で共有される) を吸う
+    comments_handler.cancel_arming()
+    for _, row in ipairs { 2, 3 } do
+      focus_head_row(row)
+      comments_handler.add_normal()
+      type_into_float('x' .. row)
+    end
+    state.notifications = {}
+  end
+
+  it('d: arming 中の <Esc> で解除 (true + INFO)。次回押下は 1 目に戻る', function()
+    seed2()
+    focus_head_row(2)
+    comments_handler.delete_current() -- d arming
+    state.notifications = {}
+
+    assert.is_true(comments_handler.cancel_arming())
+    assert.same({
+      msg = 'review.nvim: 削除の arming を解除しました',
+      level = vim.log.levels.INFO,
+    }, state.notifications[1])
+    assert.equals(1, #state.notifications)
+    assert.equals(2, #saved().comments)
+
+    -- 解除済み = 次の d は 1 目 (arming WARN のみで消えない)
+    focus_head_row(2)
+    comments_handler.delete_current()
+    assert.equals(2, #saved().comments)
+  end)
+
+  it('D: arming 中の <Esc> で解除。次回押下は 1 目に戻る', function()
+    seed2()
+    comments_handler.delete_all_arming() -- D arming (n=2)
+    state.notifications = {}
+
+    assert.is_true(comments_handler.cancel_arming())
+    assert.same({
+      msg = 'review.nvim: 削除の arming を解除しました',
+      level = vim.log.levels.INFO,
+    }, state.notifications[1])
+
+    comments_handler.delete_all_arming() -- 1 目扱い、まだ消えない
+    assert.equals(2, #saved().comments)
+  end)
+
+  it('d と D を同時に armed にしていても 1 回の <Esc> で両方解除', function()
+    seed2()
+    focus_head_row(2)
+    comments_handler.delete_current()
+    comments_handler.delete_all_arming()
+    state.notifications = {}
+
+    assert.is_true(comments_handler.cancel_arming())
+    assert.equals(1, #state.notifications) -- INFO は 1 件だけ
+    focus_head_row(2)
+    comments_handler.delete_current() -- 両方 1 目に戻っている
+    comments_handler.delete_all_arming()
+    assert.equals(2, #saved().comments)
+  end)
+
+  it('arming されていない <Esc> は false (通知せず built-in へ返す)', function()
+    comments_handler.cancel_arming() -- 前テスト残骸の arm を吸う
+    state.notifications = {}
+
+    assert.is_false(comments_handler.cancel_arming())
+    assert.same({}, state.notifications)
   end)
 end)
 

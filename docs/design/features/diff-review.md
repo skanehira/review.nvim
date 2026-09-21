@@ -67,7 +67,8 @@ base と head 側状態 (branch = 現在のチェックアウトの作業ツリ�
 | 操作 | 起きること |
 | --- | --- |
 | `c` (normal / visual-line) | head 窓のカーソル / '<~'> 行番号が new 側行そのもの。削除告知・binary 注釈・base 窓では WARN (確定文言の正本は DESIGN.md キー表 «この窓にはコメントを付けられません») で開かない。コメント入力 float は契約そのまま (マルチライン scratch、Normal `<CR>` 確定 / insert `<CR>` 改行 / `q` 閉じる [本文なし=キャンセル、本文ありは続けて q で破棄 arming] / `<C-y>` 確定エイリアス / `<Esc>` は Normal 復帰のみ、stopinsert 経路、title に `path:line[-end]` 常時表示) |
-| `e` / `d` / `y` / `i` | 現行契約そのまま (d は arming 二重押し、i は commentview float)。head 窓限定 |
+| `e` / `d` / `D` / `y` / `i` | 現行契約そのまま (d は arming 二重押し、i は commentview float)。head 窓限定。`D` = 全コメント一括削除 (arming 二重押し = 2 秒内にもう一度押して確定、arming 中のコメント増減で無効化。対象は全 comments で outdated も含む。0 件は INFO «コメントがありません» で arming しない。意味は `:Review clear` と同じ — ai-prompt「コピー後の掃除」) |
+| `<Esc>` | `d` / `D` の arming をまとめて解除 (INFO «削除の arming を解除しました»)。解除物が無いときは expr gate がキーを呑まず built-in へ返す (schedule 前の同期判定)。一覧窓の arming は comments_list 側の別状態 |
 | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後ファイル = open_file。端無動作、focus は head 窓に留まる |
 | `<leader>e` / `<leader>b` | panel focus (閉じていれば再建) / panel 表示トグル (閉じても tab とレビュー窓は残る) |
 | `R` | リフレッシュ (上記) + 窓の役割 drift の復旧 |

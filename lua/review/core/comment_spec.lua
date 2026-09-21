@@ -198,6 +198,35 @@ describe('comment.remove', function()
   end)
 end)
 
+describe('comment.remove_all', function()
+  it('comments を空にして削除件数を返す (in-place。参照は据え置き)', function()
+    local comments = {
+      existing('c1', 'a.lua', 1, 1),
+      existing('c2', 'a.lua', 2, 2),
+      existing('c3', 'a.lua', 3, 3),
+    }
+    local removed = comment.remove_all(comments)
+
+    assert.equals(3, removed)
+    assert.same({}, comments)
+  end)
+
+  it('空リストでは 0 を返す', function()
+    local comments = {}
+    assert.equals(0, comment.remove_all(comments))
+    assert.same({}, comments)
+  end)
+
+  it('outdated 状態のコメントも無条件で全件消える', function()
+    local stale = existing('c1', 'a.lua', 1, 1)
+    stale.state = 'outdated'
+    local comments = { stale, existing('c2', 'a.lua', 2, 2) }
+
+    assert.equals(2, comment.remove_all(comments))
+    assert.same({}, comments)
+  end)
+end)
+
 describe('comment.find_at', function()
   it(
     'カーソル行を range に含む全コメントを file 限定で列挙する (複数該当可)',

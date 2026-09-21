@@ -73,6 +73,18 @@ function M.remove(comments, id)
   return nil
 end
 
+--- comments の全件を in-place で空にし、削除件数を返す (:Review clear /
+--- 一括削除 `D` の本体。state 無関係 = outdated も消える — 二度と prompt に
+--- 載らない残骸も一緒に掃除するため)。呼び出し側 (handlers) は 1 回の
+--- commit_comment_change で永続化・再描画をまとめる。
+function M.remove_all(comments)
+  local n = #comments
+  for i = n, 1, -1 do
+    comments[i] = nil
+  end
+  return n
+end
+
 --- ファイル内で new 側ファイル行 line を range [line..end_line] に含む
 --- コメントを保持順で返す (diff キーマップ e / d の「カーソル行のコメント」)。
 --- 単一キーの場合は find_at(comments, file, line)[1] で取る。

@@ -180,6 +180,8 @@ describe('keygate.install / uninstall', function()
       k.add_comment,
       k.edit_comment,
       k.delete_comment,
+      k.delete_all,
+      k.cancel_arming,
       k.yank_prompt,
       k.close,
       k.help,
@@ -307,11 +309,11 @@ describe('keygate.install / uninstall', function()
           ours = ours + 1
         end
       end
-      -- config.keymaps.diff の n -mode 全キー = 15 (c/e/d/y/i/q/<F1>/<Tab>/
-      -- <S-Tab>/[F/]F/R/<leader>e/<leader>b/<leader>c) + g? 別名 = 16。v の c は別 mode。
+      -- config.keymaps.diff の n -mode 全キー = 17 (c/e/d/D/<Esc>/y/i/q/<F1>/<Tab>/
+      -- <S-Tab>/[F/]F/R/<leader>e/<leader>b/<leader>c) + g? 別名 = 18。v の c は別 mode。
       -- focus_panel / toggle_panel / comments_list / help (<F1>・g?) は非 expr の
       -- callback map (同期発火) で数える。
-      assert.equals(16, ours)
+      assert.equals(18, ours)
     end
   )
 
@@ -602,6 +604,44 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       for _, n in ipairs(state.notifications) do
         assert.is_true(n.msg:find('SPY:', 1, true) == nil)
       end
+    end
+  )
+
+  it(
+    '<Esc> は armed 解除時だけ キーを消費し、それ以外は built-in へ戻る (gate 不成立窓は解除しない)',
+    function()
+      windows.bind(base_buf, head_buf, { head_kind = 'real' })
+      local comments = require 'review.handlers.comments'
+      local real_cancel = comments.cancel_arming
+      finally_restore(function()
+        comments.cancel_arming = real_cancel
+      end)
+
+      -- 解除する物が無い (false) = 元キーを built-in へ返す
+      comments.cancel_arming = function()
+        return false
+      end
+      local res = press(head_buf, '<Esc>', windows.win 'head')
+      assert.equals(
+        vim.api.nvim_replace_termcodes('<Esc>', true, false, true),
+        res,
+        'arming なしの <Esc> が built-in に戻らない'
+      )
+
+      -- armed 解除できた (true) = キーストロークを消費
+      comments.cancel_arming = function()
+        return true
+      end
+      assert.equals('', press(head_buf, '<Esc>', windows.win 'head'))
+
+      -- gate 不成立窓 (ユーザー窓で同じ buf) では handler を呼ばず built-in
+      comments.cancel_arming = function()
+        error('gate 不成立窓で cancel_arming が呼ばれた', 0)
+      end
+      vim.api.nvim_win_set_buf(state.user_win, head_buf)
+      vim.api.nvim_set_current_win(state.user_win)
+      local out = press(head_buf, '<Esc>', state.user_win)
+      assert.equals(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), out)
     end
   )
 

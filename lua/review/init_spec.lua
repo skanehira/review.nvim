@@ -3,7 +3,7 @@ local result = require 'review.core.result'
 local config = require 'review.config'
 
 local USAGE = 'usage: :Review [start <base> [head] | pr <number|url> | list | '
-  .. 'comments | close | delete <id> | prompt [file]]'
+  .. 'comments | close | delete <id> | prompt [file] | clear]'
 
 -- describe 間で共有する spy 復元先と一時 dir (file scope の local を明示する。
 -- 無宣言代入はグローバルになり lint / 他 spec の汚染になる)。
@@ -31,6 +31,7 @@ local function mock_notify_and_handlers()
       'cmd_close',
       'cmd_delete',
       'cmd_prompt',
+      'cmd_clear',
       'cmd_resume',
     } do
       saved_handlers[name] = review[name]
@@ -199,6 +200,21 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
     require('review.handlers.session')._reset()
     require('review.ui.windows').reset()
     local res = review.command { 'comments' }
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'review.nvim: アクティブなセッションがありません',
+      code = 'E_NOT_ACTIVE',
+    }, res)
+    assert.same({
+      msg = 'review.nvim: アクティブなセッションがありません',
+      level = vim.log.levels.WARN,
+    }, notifications[1])
+  end)
+
+  it(':Review clear は active 不在で E_NOT_ACTIVE + WARN を同期で返す', function()
+    require('review.handlers.session')._reset()
+    local res = review.command { 'clear' }
     assert.same({
       __class = 'review.Result',
       ok = false,
@@ -558,14 +574,14 @@ describe('review.complete', function()
     '空 arglead では DESIGN.md「API 一覧」のサブコマンドを宣言順で返す',
     function()
       assert.same(
-        { 'start', 'pr', 'list', 'comments', 'close', 'delete', 'prompt' },
+        { 'start', 'pr', 'list', 'comments', 'close', 'delete', 'prompt', 'clear' },
         review.complete('', '', 0)
       )
     end
   )
 
   it('prefix 一致に絞り込む', function()
-    assert.same({ 'close' }, review.complete('cl', '', 0))
+    assert.same({ 'close', 'clear' }, review.complete('cl', '', 0))
     assert.same({ 'pr', 'prompt' }, review.complete('p', '', 0))
   end)
 

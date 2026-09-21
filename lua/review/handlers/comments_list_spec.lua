@@ -798,7 +798,7 @@ describe('comments_list.delete_current (一覧専用 arming)', function()
 
       assert.same({
         {
-          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)',
+          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)',
           level = vim.log.levels.WARN,
         },
       }, state.notifications)
@@ -809,7 +809,7 @@ describe('comments_list.delete_current (一覧専用 arming)', function()
 
       assert.same({
         {
-          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)',
+          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)',
           level = vim.log.levels.WARN,
         },
         { msg = 'review.nvim: コメント c1 を削除しました', level = vim.log.levels.INFO },
@@ -859,11 +859,11 @@ describe('comments_list.delete_current (一覧専用 arming)', function()
       -- diff 側の arming WARN + 一覧側の arming WARN (削除は起きていない)
       assert.same({
         {
-          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)',
+          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)',
           level = vim.log.levels.WARN,
         },
         {
-          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)',
+          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)',
           level = vim.log.levels.WARN,
         },
       }, state.notifications)
@@ -903,6 +903,126 @@ describe('comments_list.delete_current (一覧専用 arming)', function()
       comments_list.delete_current()
       assert.same({ 1, 0 }, vim.api.nvim_win_get_cursor(list_win()))
       assert.same({ 'コメントはありません' }, list_lines())
+    end
+  )
+end)
+
+describe('comments_list.delete_all_current (一覧専用の一括 arming)', function()
+  use_env()
+
+  local function seed_open()
+    start_done()
+    add_comment { file = 'a.lua', line = 1, body = 'one' }
+    add_comment { file = 'a.lua', line = 2, body = 'two', state = 'outdated' }
+    comments_list.open()
+    focus_list_row(1)
+  end
+
+  it(
+    'D: 1 回目は arming の WARN で消さず、2 回目で全件削除 + save + «コメントはありません»',
+    function()
+      seed_open()
+
+      comments_list.delete_all_current()
+      assert.same({
+        {
+          msg = 'review.nvim: コメント全 2 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)',
+          level = vim.log.levels.WARN,
+        },
+      }, state.notifications)
+      assert.equals(2, #session_handler.active().comments)
+
+      comments_list.delete_all_current()
+      assert.same({
+        {
+          msg = 'review.nvim: コメント全 2 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)',
+          level = vim.log.levels.WARN,
+        },
+        {
+          msg = 'review.nvim: コメント全 2 件を削除しました',
+          level = vim.log.levels.INFO,
+        },
+      }, state.notifications)
+      assert.same({ 'コメントはありません' }, list_lines())
+      -- INV-4: ディスクの session JSON が空
+      assert.equals(0, #store.load(state.repo, SLUG).data.comments)
+    end
+  )
+
+  it(
+    'D: diff 窓の arming とは共有しない (diff で armed でも一覧の 1 回目は消さない)',
+    function()
+      start_done()
+      add_comment { file = 'a.lua', line = 1, body = 'one' }
+      comments_list.open()
+
+      -- diff 側の一括 arming を 1 回だけ立てる
+      comments_handler.delete_all_arming()
+      assert.equals(1, #session_handler.active().comments)
+
+      -- 一覧の 1 回目は diff の arming を引き継がない
+      focus_list_row(1)
+      comments_list.delete_all_current()
+      assert.equals(1, #session_handler.active().comments)
+
+      -- 一覧の 2 回目で確定 (一覧側の arming が独立)
+      comments_list.delete_all_current()
+      assert.equals(0, #session_handler.active().comments)
+    end
+  )
+
+  it('D: 0 件は INFO «コメントがありません» で一覧は変わらない', function()
+    start_done()
+    comments_list.open()
+    state.notifications = {}
+
+    comments_list.delete_all_current()
+
+    assert.same({
+      { msg = 'review.nvim: コメントがありません', level = vim.log.levels.INFO },
+    }, state.notifications)
+    assert.same({ 'コメントはありません' }, list_lines())
+  end)
+end)
+
+describe('comments_list.<Esc> cancel_arming (一覧 arming の解除)', function()
+  use_env()
+
+  it(
+    'd / D の一覧 arming を <Esc> で解除 (true + INFO)。diff 窓の状態は触らない',
+    function()
+      -- diff 側モジュールの arming 残骸 (別 spec・別テストから共有される) を吸う
+      comments_handler.cancel_arming()
+      start_done()
+      add_comment { file = 'a.lua', line = 1, body = 'one' }
+      add_comment { file = 'a.lua', line = 2, body = 'two' }
+      comments_list.open()
+      focus_list_row(1)
+
+      comments_list.delete_current() -- 一覧 d arming
+      comments_list.delete_all_current() -- 一覧 D arming
+      -- diff 側の arming も 1 回立てる (一覧の <Esc> が触らないことを pin する)
+      comments_handler.delete_all_arming()
+      state.notifications = {}
+
+      assert.is_true(comments_list.cancel_arming())
+      assert.same({
+        {
+          msg = 'review.nvim: 削除の arming を解除しました',
+          level = vim.log.levels.INFO,
+        },
+      }, state.notifications)
+      assert.equals(2, #session_handler.active().comments)
+
+      -- 一覧は 1 目に戻る
+      comments_list.delete_all_current()
+      assert.equals(2, #session_handler.active().comments)
+      -- diff の D arming は生きている (diff 側 2 回目で全消しされる)
+      comments_handler.delete_all_arming()
+      assert.equals(0, #session_handler.active().comments)
+      -- 1 目で再 armed の一覧 D を解除、その次は false (built-in へ返す)
+      assert.is_true(comments_list.cancel_arming())
+      assert.is_false(comments_list.cancel_arming())
     end
   )
 end)

@@ -61,6 +61,10 @@ USAGE						*review-usage*
 	:Review delete {id}			保存済みセッションを削除
 					<id> は <Tab> で保存済み id が補完できる
 	:Review prompt [file]			プロンプトをクリップボードへ
+	:Review clear				現セッションのコメントを全件削除
+					([y/N] 確認。outdated も含む。キー
+					|review-keymaps-diff| の D と同じ。
+					prompt コピー後の残骸掃除用)
 
 確認プロンプト ([y/N] 等) は y か n を押して <Enter> で応答する。応答後は
 cmdline をクリアするので、続けてコマンドを打っても入力に混ざらない。
@@ -125,6 +129,8 @@ KEYMAPS						*review-keymaps*
 			add_comment    = 'c',     -- |review-comment-input|
 			edit_comment   = 'e',
 			delete_comment = 'd',
+			delete_all     = 'D',     -- 全コメント一括削除
+			cancel_arming  = '<Esc>', -- d / D の arming 解除
 			yank_prompt    = 'y',
 			close          = 'q',
 			help           = '<F1>',
@@ -162,6 +168,8 @@ KEYMAPS						*review-keymaps*
 		commentlist = {               -- :Review comments の一覧
 			jump           = '<CR>',
 			delete         = 'd',
+			delete_all     = 'D',     -- 全コメント一括削除
+			cancel_arming  = '<Esc>', -- d / D の arming 解除
 			edit           = 'e',
 			yank           = 'y',
 			close          = 'q',
@@ -194,7 +202,14 @@ KEYMAPS						*review-keymaps*
 			1 回目は armed + WARN だけを発し、同じ行で 2 秒
 			以内に続けて d で削除が確定する (vim 筋の dd で
 			複数件が消えないため)。arming は他行移動・e での
-			編集確定・2 秒経過で解除
+			編集確定・2 秒経過・<Esc> で解除
+	D		全コメントを一括削除 (:Review clear と同じ)。誤爆
+			防止の二重押し: 1 回目は armed + WARN、2 秒以内に
+			もう一度押して確定。arming 中のコメント増減・
+			<Esc> で無効化 (outdated も含む全件が消える。
+			prompt コピー後の残骸掃除用。自動では消えない)
+	<Esc>	d / D の arming を解除して INFO。arming 物が無い
+			ときは何もせず built-in の <Esc> に戻る
 	y		カーソル行のコメントのプロンプトを yank
 	q		セッションを閉じる (コメント 0 件は無確認)
 	<F1> / g?	キーバインドの help float (内容は markdown 表示)。
@@ -283,7 +298,12 @@ KEYMAPS						*review-keymaps*
 			移動して INFO。binary / 削除の告知表示のファイル、
 			現在の差分に無いファイルは移動せず WARN
 	d		カーソル行のコメントを削除 (一覧専用の arming。同じ
-			行でもう一度 d で確定)
+			行でもう一度 d で確定。解除は <Esc> / 2 秒経過 /
+			編集確定)
+	D		全コメントを一括削除 (一覧専用の arming。もう一度
+			押して確定。:Review clear と同じ。絞り込み外の
+			コメントも全件消える。解除は <Esc> / 2 秒経過 /
+			コメントの増減)
 	e		カーソル行のコメントを編集 (diff 窓と同じ入力 float。
 			確定で保存し一覧も追随する)
 	y		カーソル行のコメント 1 件のプロンプトを "0 (+クリップ

@@ -38,6 +38,15 @@ setup 側で config を deep merge したい
 
 整形は純粋関数 `core/prompt.lua` (build(comments, ctx) → string) に置き、UI 層はクリップボード書込のみ担う。
 
+### コピー後の掃除 (`D` / `:Review clear`)
+
+AI に渡した後の残骸を消す維持操作。prompt のコピー成功後に続けて使う前提だが、**コピー後の自動削除はしない** — ミスコピ時に再度コピーできる余地をユーザーに残すため、削除は常に明示操作 + 確認を挟む:
+
+- 対象は active セッションの**全 comments** (state 無関係 = 二度と prompt に載らない outdated も一緒に消す。`:Review clear` の確認文と help に outdated を含む旨を出す)
+- キー (`D`、diff 窓 / コメント一覧): arming 二重押し (1 回目 WARN、2 秒内にもう一度で確定)。arming は「コメント件数の変化」と `<Esc>` で無効化 (二度押しの間に加筆・削除で対象集合が変わったら 1 目やり直し。`<Esc>` は 2 秒待ち不要の明示解除 — 誤爆した d / D の取り消しは待機ではなく解除キーで行う)。窓ごとの別状態 (diff / 一覧で共有しない — 単一削除 `d` の arming とも別)。0 件は INFO «コメントがありません» で arming しない
+- コマンド (`:Review clear`): `vim.ui.input` の [y/N] (件数入りプロンプト。応答後 cmdline クリア — DESIGN「UI」)。キャンセルは無通知・無変更 (close の確認と同型)。0 件は確認せず INFO
+- 削除本体は `core/comment.remove_all` (in-place で空にし件数を返す純関数) 1 回 + `commit_comment_change()` 1 回で save / extmark 再構成 / winbar / 一覧追随をまとめる
+
 ## 実装の配置
 
 | 処理 | 層 | 実装先ファイル |
@@ -47,6 +56,10 @@ setup 側で config を deep merge したい
 | `:Review prompt` 委譲・file 引数解決 | facade | `lua/review/init.lua` (command 拡張) |
 | `y` キーマップ | handlers | `lua/review/handlers/comments.lua` (既存拡張) |
 | `y` キーマップ (コメント一覧) | handlers | `lua/review/handlers/comments_list.lua` (comment-list) |
+| 全削除の純ロジック (空にして件数を返す) | core | `lua/review/core/comment.lua` `remove_all` (+ `_spec`) |
+| `D` キー (diff) / `:Review clear` の arming・[y/N] 確認 | handlers | `lua/review/handlers/comments.lua` (delete_all_arming / clear_by_command) |
+| `D` キー (コメント一覧、専用の件数 arming) | handlers | `lua/review/handlers/comments_list.lua` (delete_all_current) |
+| `:Review clear` 委譲 (subcommands 表 + cmd_clear) | facade | `lua/review/init.lua` |
 
 ## エッジケースの決定
 

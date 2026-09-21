@@ -6,10 +6,10 @@ local result = require 'review.core.result'
 local M = {}
 
 -- DESIGN.md「API 一覧」のコマンド表順。Tab 補完と unknown 判定の正本。
-M.subcommands = { 'start', 'pr', 'list', 'comments', 'close', 'delete', 'prompt' }
+M.subcommands = { 'start', 'pr', 'list', 'comments', 'close', 'delete', 'prompt', 'clear' }
 
 local USAGE = 'usage: :Review [start <base> [head] | pr <number|url> | list | '
-  .. 'comments | close | delete <id> | prompt [file]]'
+  .. 'comments | close | delete <id> | prompt [file] | clear]'
 
 local function usage(msg)
   vim.notify('review.nvim: ' .. msg, vim.log.levels.WARN)
@@ -83,6 +83,17 @@ function M.cmd_prompt(args)
     return M.prompt_for_file(file)
   end
   return M.prompt_all()
+end
+
+--- `:Review clear` — active セッションの全コメントを一括削除 (prompt コピー後の
+--- 残骸掃除)。[y/N] 確認と削除本体は handlers.comments.clear_by_command。
+--- active 不在は WARN (close / comments と同型)。
+function M.cmd_clear(_args)
+  local res = require('review.handlers.comments').clear_by_command()
+  if not res.ok then
+    vim.notify(res.error, vim.log.levels.WARN)
+  end
+  return res
 end
 
 -- Lua API (DESIGN.md「API 一覧」) — 結果型 passthrough。

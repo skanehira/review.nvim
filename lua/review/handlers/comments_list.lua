@@ -185,7 +185,7 @@ function M.delete_current()
   end
   delete_armed = { id = c.id, at = t }
   notify_warn(
-    ('コメント %s を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)'):format(
+    ('コメント %s を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)'):format(
       c.id
     )
   )
@@ -221,6 +221,63 @@ function M.yank_current()
     return
   end
   prompt_handler.for_line(session, { c })
+end
+
+-- 一括削除 arming (D)。diff 窓 (handlers.comments) の arming とは共有しない一覧
+-- 専用の状態は単一削除の delete_armed とも別。対象は active セッションの全
+-- comments (state 無関係 = outdated も消す)、arming は「件数の変化」で無効化。
+local delete_all_armed = nil
+
+--- `D`: 全コメントを arming 二重押しで一括削除する (:Review clear のキー相当)。
+--- 0 件は INFO «コメントがありません»。確定では単一削除の arming も解除する。
+--- 一覧の再 render / 永続化は commit_comment_change 経由 (追随)。
+function M.delete_all_current()
+  local session = session_handler.active()
+  if session == nil then
+    notify_warn 'アクティブなセッションがありません'
+    return
+  end
+  if #session.comments == 0 then
+    vim.notify('review.nvim: コメントがありません', vim.log.levels.INFO)
+    return
+  end
+  local n = #session.comments
+  local t = now()
+  if
+    delete_all_armed ~= nil
+    and delete_all_armed.n == n
+    and t - delete_all_armed.at <= DELETE_ARM_WINDOW_S
+  then
+    delete_all_armed = nil
+    delete_armed = nil
+    comment_model.remove_all(session.comments)
+    session_handler.commit_comment_change()
+    vim.notify(
+      ('review.nvim: コメント全 %d 件を削除しました'):format(n),
+      vim.log.levels.INFO
+    )
+    return
+  end
+  delete_all_armed = { n = n, at = t }
+  notify_warn(
+    ('コメント全 %d 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)'):format(
+      n
+    )
+  )
+end
+
+--- `<Esc>`: 一覧専用の arming (単一削除 d / 一括削除 D) をまとめて解除する。
+--- 解除物がなければ false (通知しない)。diff 窓の arming は comments 側の別状態
+--- なので触らない (一覧/diff 共有しない契約は d と同じ)。
+function M.cancel_arming()
+  local had = delete_armed ~= nil or delete_all_armed ~= nil
+  delete_armed = nil
+  delete_all_armed = nil
+  if not had then
+    return false
+  end
+  vim.notify('review.nvim: 削除の arming を解除しました', vim.log.levels.INFO)
+  return true
 end
 
 --- 追随: 一覧窓が表示中のときだけ再 render する (非表示は開く時に最新を render

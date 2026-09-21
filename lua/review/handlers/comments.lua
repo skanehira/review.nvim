@@ -7,6 +7,7 @@
 -- handlers/session の persist が担当)。
 local comment_model = require 'review.core.comment'
 local prompt_handler = require 'review.handlers.prompt'
+local result = require 'review.core.result'
 local session_handler = require 'review.handlers.session'
 local ui_input = require 'review.ui.input'
 local ui_view = require 'review.ui.commentview'
@@ -254,10 +255,113 @@ function M.delete_current()
   end
   delete_armed = { ref = c, at = t }
   notify_warn(
-    ('コメント %s を削除するには、この行で d をもう一度 (取り消しは他行へ移動か 2 秒待機)'):format(
+    ('コメント %s を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)'):format(
       c.id
     )
   )
+end
+
+-- ============================================================================
+-- 一括削除 (D / :Review clear)。:Review prompt でコピーし終えた後の残骸掃除用。
+-- 対象は active セッションの全 comments (state 無関係 = 二度と prompt に載らない
+-- outdated も一緒に消す)。コピー後の自動削除はしない — ミスコピ時に再コピーの
+-- 余地を残すため、明示操作 + 確認 (キーは arming 二重押し = <Esc> でも解除、
+-- コマンドは [y/N])。
+-- ============================================================================
+
+-- 個別削除の delete_armed とは別状態。arming 中は「件数の変化」で無効化する
+-- (二重押しの間に加筆・削除で対象集合が変わったら 1 目やり直し = 消したくない
+-- ものを消さない)。単一 delete と違い窓・行に依存しないので active のみ見る。
+local delete_all_armed = nil
+
+local function do_clear(session)
+  local n = comment_model.remove_all(session.comments)
+  session_handler.commit_comment_change()
+  vim.notify(
+    ('review.nvim: コメント全 %d 件を削除しました'):format(n),
+    vim.log.levels.INFO
+  )
+end
+
+function M.delete_all_arming()
+  local session = session_handler.active()
+  if session == nil then
+    notify_warn 'アクティブなセッションがありません'
+    return
+  end
+  if #session.comments == 0 then
+    vim.notify('review.nvim: コメントがありません', vim.log.levels.INFO)
+    return
+  end
+  local n = #session.comments
+  local t = now()
+  if
+    delete_all_armed ~= nil
+    and delete_all_armed.n == n
+    and t - delete_all_armed.at <= DELETE_ARM_WINDOW_S
+  then
+    delete_all_armed = nil
+    do_clear(session)
+    return
+  end
+  delete_all_armed = { n = n, at = t }
+  notify_warn(
+    ('コメント全 %d 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)'):format(
+      n
+    )
+  )
+end
+
+-- [y/N] 確認。handlers/session.confirm と同じ契約 (応答後の cmdline を空 echo で
+-- 明示クリア — UX review F15)。local なのでここでも同じ形を置く。
+local function confirm(prompt_text, cb)
+  vim.ui.input({ prompt = prompt_text }, function(answer)
+    vim.api.nvim_echo({}, false, {})
+    cb(answer == 'y')
+  end)
+end
+
+--- `:Review clear`。件数入りの [y/N] 確認 (0 件は確認せず INFO) の後、全 comments
+--- を削除して永続化。キャンセルはセッション close の確認と同じく無通知・無変更
+--- (同期戻りはディスパッチ受理)。
+function M.clear_by_command()
+  local session = session_handler.active()
+  if session == nil then
+    return result.err(
+      'review.nvim: アクティブなセッションがありません',
+      result.codes.E_NOT_ACTIVE
+    )
+  end
+  if #session.comments == 0 then
+    vim.notify('review.nvim: コメントがありません', vim.log.levels.INFO)
+    return result.ok()
+  end
+  confirm(
+    ('review.nvim: コメント全 %d 件を削除しますか？ (outdated も含む・削除は取り消せません) [y/N]: '):format(
+      #session.comments
+    ),
+    function(yes)
+      if yes then
+        do_clear(session)
+      end
+    end
+  )
+  return result.ok()
+end
+
+--- `<Esc>`: 単一削除 (d) と一括削除 (D) の arming をまとめて解除する。解除物が
+--- あったとき only INFO を出し true を返す (keygate は true のときだけキーを消費し、
+--- false は built-in の <Esc> へ戻す)。一覧窓の arming は comments_list 側の別状態
+--- (共有しない — comment-list「操作」)。
+function M.cancel_arming()
+  local had = delete_armed ~= nil or delete_all_armed ~= nil
+  delete_armed = nil
+  delete_all_armed = nil
+  if not had then
+    return false
+  end
+  vim.notify('review.nvim: 削除の arming を解除しました', vim.log.levels.INFO)
+  return true
 end
 
 return M

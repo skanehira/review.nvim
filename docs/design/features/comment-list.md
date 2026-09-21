@@ -51,7 +51,9 @@ prompt yank までできる (diff 窓の同名キーと同一動作)。
 | --- | --- |
 | `<leader>c` / `:Review comments` | 一覧を開く (レビュー tab の最下部に全幅の水平分割 — どの窓・どの tab から押しても位置は変わらない。tab gate を持たないため、別 tab から押すと review tab へ切替えてから開く)。既に開いていればその窓へ focus (別 tab でも tab を切替えて focus。再分割しない。内容は常に最新)。active 0 件はコマンド層が WARN «アクティブなセッションがありません»、handler は `E_NOT_ACTIVE` を返す |
 | `<CR>` | カーソル行コメントの位置へジャンプ (下記) |
-| `d` | 行コメントを削除 (一覧専用の arming 二重押し = 同じ comment id・2 秒内。diff 窓の arming とは共有しない。arming は編集確定・削除確定で解除する (diff 窓と同じ規則)。通知文言は diff と同じ «コメント %s を削除しました») |
+| `d` | 行コメントを削除 (一覧専用の arming 二重押し = 同じ comment id・2 秒内。diff 窓の arming とは共有しない。arming は編集確定・削除確定・`<Esc>` で解除する (diff 窓と同じ規則)。通知文言は diff と同じ «コメント %s を削除しました») |
+| `D` | active セッションの**全コメント一括削除** (`:Review clear` と同じ意味。一覧専用の arming 二重押し = 件数一致・2 秒内。単一削除 `d` の arming や diff 窓の `D` arming とは別状態。対象は state・絞り込み無関係の全 comments = outdated / 絞り込み外も消える。0 件は WARN 経由でなく INFO «コメントがありません» で arming しない。確定で `d` の arming も解除し、INFO «コメント全 %d 件を削除しました»。永続化・再 render・winbar 追随は commit_comment_change 経由) |
+| `<Esc>` | 一覧専用の `d` / `D` arming を解除 (INFO «削除の arming を解除しました»。解除物が無ければ無動作。diff 窓の arming は触らない) |
 | `e` | 行コメントを編集 (diff `e` と同じ float。確定で session 永続化 + 追随) |
 | `y` | 行コメント 1 件の prompt を "0 (+クリップボード) へ (書式は features/ai-prompt.md「出力経路」。outdated 行は diff 窓と同じくコピーせず INFO «outdated のためプロンプトに含めませんでした») |
 | `q` | 一覧窓を閉じる (セッション状態は変えない) |
