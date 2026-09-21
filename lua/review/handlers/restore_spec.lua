@@ -761,4 +761,41 @@ describe('restore の worktree 解决 (mode=pr は resume でも常時作成/再
       end
     end
   )
+
+  it(
+    '記録再利用 + 復元時の差分取得失敗: worktree 掃除が走り保存 JSON の記録を nil 化する (pr-worktree「0 差分・差分取得失敗時の掃除」復元経路)',
+    function()
+      local wt = paths.worktree_path(REPO_TOP, 'pr-7')
+      vim.fn.mkdir(wt, 'p')
+      pr_session { status = 'open', worktree = { path = wt, created_by_us = true } }
+
+      local calls = {}
+      cli._set_system(function(cmd, _opts, on_exit)
+        table.insert(calls, table.concat(cmd, ' '))
+        if cmd[2] == 'worktree' and cmd[3] == 'list' then
+          on_exit {
+            code = 0,
+            stdout = 'worktree ' .. REPO_TOP .. '\nworktree ' .. wt .. '\n',
+            stderr = '',
+          }
+        elseif cmd[2] == 'diff' then
+          on_exit { code = 128, stdout = '', stderr = "fatal: bad revision 'main'\n" }
+        else
+          on_exit { code = 0, stdout = '', stderr = '' }
+        end
+      end)
+
+      restore.resume_session(store.load(REPO_TOP, 'pr-7').data)
+
+      assert.is_nil(session_handler.active())
+      local removed = false
+      for _, c in ipairs(calls) do
+        if c:find('worktree remove', 1, true) ~= nil then
+          removed = true
+        end
+      end
+      assert.is_true(removed, '差分取得失敗で worktree 掃除が走っていない')
+      assert.equals(vim.NIL, store.load(REPO_TOP, 'pr-7').data.worktree)
+    end
+  )
 end)

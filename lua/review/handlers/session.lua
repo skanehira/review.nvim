@@ -146,14 +146,27 @@ end
 -- remove 失敗後の二段目 (delete 側 sweep と共通の正攻): 崩れた自己登録は prune
 -- が直し、dir は再帰削除で消す (git 自身の手順)。close 側は dir 残りを理由に
 -- 終了を中断しないので成否に関わらず完了コールへ進む。
-local function prune_and_rm_dir(repo, path, done)
+-- recoverable = その dir を指す created_by_us 記録がセッション JSON に残る状態か
+-- (true なら 起動 scan / :Review delete が回収できる)。作って即失敗した分のように
+-- 記録なしで孤児化する dir は scan が触れない (INV-3) ため、WARN を手动削除案内に
+-- 切り替える («回収» が嘘になるのを防ぐ)。
+local function prune_and_rm_dir(repo, path, recoverable, done)
   git_worktree.prune({ repo = repo }, function()
     if not git_worktree.remove_dir(path) then
-      notify_warn(
-        ('worktree dir を削除できませんでした (起動 scan / :Review delete が回収します): %s'):format(
-          path
+      if recoverable then
+        notify_warn(
+          ('worktree dir を削除できませんでした (起動 scan / :Review delete が回収します): %s'):format(
+            path
+          )
         )
-      )
+      else
+        notify_warn(
+          (
+            'worktree dir を削除できませんでした。自前記録の無い dir は起動 scan が'
+            .. '回収できませんので %s を手動で削除してください'
+          ):format(path)
+        )
+      end
     end
     done()
   end)
@@ -189,6 +202,14 @@ local function owned_worktree(session)
   return wt ~= nil and wt.created_by_us == true
 end
 
+-- 同 dir を指す自前 (created_by_us=true) 記録かの述語。掃除後の記録 nil 化対象と
+-- 二段目掃除の recoverable (削除後 dir が起動 scan / :Review delete に回収されるか =
+-- INV-3 の削除許可と同一条件。health.classify と同形) の単一定義。非自前の
+-- legacy 記録を黙って nil 化したり、回収不能な dir に «scan が回収» と嘘まない。
+local function self_owned_at(record, path)
+  return type(record) == 'table' and record.created_by_us == true and record.path == path
+end
+
 -- close / delete / 開始時の掃除で使う単一の --force 確認文。
 -- n_modified > 0 のときバッファ上の未保存編集を明示する (git status はディスク
 -- しか見ないため、告知しないまま force wipe すると未保存編集を黙って捨てる)。
@@ -208,6 +229,7 @@ end
 -- worktree dir 配下のバッファ走査 (destroy / count_modified) は
 -- handlers/worktree_buffers.lua に共通化 (起動 scan の sweep_dir も同じ契約を
 -- 使うため)。
+
 -- ============================================================================
 -- worktree 作成判断 (pr-worktree.md 決定表)
 -- ============================================================================
@@ -284,7 +306,8 @@ local function cleanup_skipped_record(record, cb)
             )
           )
           -- resolve_worktree の lock 下なので prune+dir 削除も同じ lock 内で続ける
-          prune_and_rm_dir(record.repo, record.path, function()
+          -- record は created_by_us=true の既存セッション記録 (JSON に残る = scan 回収可)
+          prune_and_rm_dir(record.repo, record.path, true, function()
             cb(result.ok(vim.NIL))
           end)
           return
@@ -292,8 +315,9 @@ local function cleanup_skipped_record(record, cb)
         cb(result.ok(vim.NIL))
       end)
     end
-    if res.data.dirty then
-      confirm(force_prompt(record.path), function(yes)
+    local n_modified = wt_buffers.count_modified(record.path)
+    if res.data.dirty or n_modified > 0 then
+      confirm(force_prompt(record.path, n_modified), function(yes)
         if yes then
           finish(true)
         else
@@ -369,8 +393,13 @@ function M.resolve_worktree(args, cb)
   end)
 end
 
-local function persist()
-  local res = store.save(active.session)
+-- 全 save 経路の唯一の出口 (:Review list 追随込み)。sess 省略 = active.session。
+-- close のように「捕捉済み current を後で保存する」非同期経路は sess を明示する
+-- (tab 消滅で active が nil 化しても finish_close が nil index で中断しない —
+-- on_review_tab_closed は唯一の finish_close を通らない active=nil 経路)。
+local function persist(sess)
+  local session = sess or active.session
+  local res = store.save(session)
   if not res.ok then
     -- INV-4 の留保: メモリ上の状態は保ち WARN。次の save 時に再挑戦する。
     notify_warn(res.error)
@@ -380,7 +409,7 @@ local function persist()
   -- toggle_viewed_current / apply_refresh / close 経路という全 save 経路の唯一の
   -- 出口なのでここ 1 箇所でよい。表示中ガードは refresh 側 = 一覧を開いていない
   -- 通常の操作にコストはほぼ乗らない)。
-  refresh_sessionlist(active.session.repo)
+  refresh_sessionlist(session.repo)
 end
 
 local function close_buffer(bufnr)
@@ -458,11 +487,13 @@ end
 -- 読めない — pr-worktree.md「セッションの削除」手順 1〜3)。
 local function finish_close(current, force, skip_remove, cb, after_remove)
   current.session.status = 'closed'
-  -- persist (全 save 経路の唯一の出口) を通る: current == active (detach 前で
-  -- INV-1 のため他セッションに化けない)。失敗 WARN は persist 側。q close による
+  -- persist (全 save 経路の唯一の出口) を捕捉済み current で通す: status 確認の
+  -- 非同期窓中に on_review_tab_closed が active を nil 化しても、save 対象は
+  -- current.session (detach 前で INV-1 のため他セッションに化けない)。以降の
+  -- 掃除 (remove / finalize) を中断させない。失敗 WARN は persist 側。q close による
   -- status 列変化をセッション一覧 (:Review list) へ追随させる
   -- (persistence-restore「:Review list の再 render (アクション後の追随)」)。
-  persist()
+  persist(current.session)
   detach()
   if cb ~= nil then
     cb()
@@ -493,7 +524,9 @@ local function finish_close(current, force, skip_remove, cb, after_remove)
             rres.error
           )
         )
-        prune_and_rm_dir(current.session.repo, wt.path, function()
+        -- current.session は closed + created_by_us 記録済みで save 済み
+        -- (起動 scan / delete が回収できる)
+        prune_and_rm_dir(current.session.repo, wt.path, true, function()
           wt_unlock(wt.path)
           finish_after_remove()
         end)
@@ -1061,10 +1094,9 @@ local function on_review_tab_closed()
   -- 開いていた窓は消えている (tab 全体)。scratch buffer は hide 状態で残るが、
   -- 開き直し時に同一名的のまま中身再充填るので残置 (セッション open のまま、が
   -- 定義)。extmark だけ実ファイル窓から確実に消す (上の clear_tracked)。
-  local res = store.save(current.session)
-  if not res.ok then
-    notify_warn(res.error)
-  end
+  -- save は persist 経由 (全 save 経路の唯一の出口。捕捉済み current を明示 =
+  -- ここは既に active=nil 化済み)。一覧表示中は status=open のまま追随する。
+  persist(current.session)
   vim.notify(
     'review.nvim: レビュー tab を閉じました (セッションは保存済み・`:Review` で開き直し可)',
     vim.log.levels.INFO
@@ -1153,14 +1185,61 @@ end
 -- 差分取得の下準備 (開始 / 復元 共通)
 -- ============================================================================
 
---- args = { repo, id, mode, base, head, record? } -> cb(result)。
---- 成功 result.data = { files, worktree, degraded }。
---- branch: head 解決 -> 解に一致した引数形で diff (通常 = 単引数 `git diff
---- <base>` の作業ツリー基準 / 縮退 = `<base> <head>`) -> worktree 判断 (branch は
---- 作らないので created_by_us 名残の掃除のみ)。pr: worktree を作ってから
---- cwd=worktree の単引数 diff (pr-worktree「PR 解決」3)。
---- 失敗は結果型で返す (E_REF / E_WORKTREE / E_CANCELLED)。通知は呼び出し側
---- (開始と復元で E_REF 翻訳後の扱いが同じなので rules は fetch_and_begin 側で統一)。
+-- begin / resume に progressed しなかった作りたて / 再利用の created_by_us
+-- worktree の掃除 (0 差分 / 差分取得失敗の共通 body)。close / delete と同じ
+-- 直列化 lock 下で remove し、失敗時は二段目 prune + 自前 dir 削除
+-- (pr-worktree.md「0 差分・差分取得失敗時の掃除」「worktree 登録操作の直列化」)。
+-- fail_msg は remove 失敗 WARN の整形文言 ('%s')。on_swept は掃除完遂後の
+-- 追加処理 (記録再利用分の nil 化 save など)。fire-and-forget (通知側は待たない)。
+-- 掃除 body は finish_close と同形: dir を消す全経路の E211 契約 (remove の spawn
+-- より先に worktree 配下 loaded バッファを同期破棄)。再利用分では以前のレビュー
+-- tab が開いたバッファが残り得るため、作成分だけでなく無条件で必要。
+local function sweep_worktree_unused(repo, wt, fail_msg, recoverable, on_swept)
+  wt_buffers.destroy(wt.path)
+  wt_with_lock(wt.path, function()
+    git_worktree.remove({ repo = repo, path = wt.path }, function(rres)
+      if not rres.ok then
+        notify_warn(fail_msg:format(rres.error))
+        prune_and_rm_dir(repo, wt.path, recoverable, function()
+          wt_unlock(wt.path)
+        end)
+        return
+      end
+      wt_unlock(wt.path)
+      if on_swept ~= nil then
+        on_swept(wt)
+      end
+    end)
+  end)
+end
+
+-- 既存保存セッションの記録を再利用 (または旧記録と同じ path を再作成) していた
+-- 場合、worktree を消した後に JSON が実在しない dir を指した記録のまま残らない
+-- よう nil 化して save する (comments / refs / status はそのまま。開始で開かない =
+-- 新規 save はしない)。自前記録のみが対象 (self_owned_at。他者/legacy の同 path
+-- 記録を黙って消さない)。掃除が完遂できなかった側は created_by_us 記録を残し、
+-- 起動 scan が回収できる状態を保つ (delete の「dir を消せなければ JSON を残す」
+-- と同方針)。
+function M.nullify_inherited_record(existing, wt)
+  if existing == nil or not self_owned_at(worktree_of(existing), wt.path) then
+    return
+  end
+  -- save 直前の存在再確認: remove (重い git I/O) の窓で :Review delete の JSON
+  -- 削除が完了していたら、無条件 save は削除済みファイルを復活させる
+  -- (pr-worktree «closed の掃除は書き戻さない» と同じ hazard。persistence-restore
+  -- «存在再確認» の二重ガードと同形)。
+  if store.load(existing.repo, existing.id).data == nil then
+    return
+  end
+  existing.worktree = vim.NIL
+  local sres = store.save(existing)
+  if not sres.ok then
+    notify_warn(sres.error)
+  end
+end
+
+--- fetch_prepared の args.on_worktree_swept: 差分取得失敗で begin/resume に
+--- progressed しないときの記録後片付け (呼び出し側が session 表を保っている)。
 function M.fetch_prepared(args, cb)
   if args.mode == 'pr' then
     M.resolve_worktree({
@@ -1176,6 +1255,20 @@ function M.fetch_prepared(args, cb)
       end
       git_diff.fetch({ base = args.base, cwd = wres.data.path }, function(res)
         if not res.ok then
+          -- diff 失敗で開始 / 復元へ進まないときも作りたての自前 worktree を
+          -- 孤児にしない (0 差分掃除と同形。記録再利用か否かで二段目 WARN の
+          -- 回収可否を判定 — 記録なしの孤児 dir を scan は触れない INV-3)。
+          local wt = wres.data
+          if type(wt) == 'table' and wt.created_by_us == true then
+            local reuse = self_owned_at(args.record, wt.path)
+            sweep_worktree_unused(
+              args.repo,
+              wt,
+              'worktree の差分取得に失敗し、掃除も失敗しました: %s',
+              reuse,
+              reuse and args.on_worktree_swept or nil
+            )
+          end
           cb(res)
           return
         end
@@ -1219,6 +1312,9 @@ local function fetch_and_begin(args, existing)
     base = args.base,
     head = args.head,
     record = existing ~= nil and worktree_of(existing) or nil,
+    on_worktree_swept = function(wt)
+      M.nullify_inherited_record(existing, wt)
+    end,
   }, function(res)
     if not res.ok then
       -- E_CANCELLED はユーザー自身の中断なので通知しない (close の確認と同じ)。
@@ -1242,43 +1338,19 @@ local function fetch_and_begin(args, existing)
       )
       -- 開始は開かない = save しない。pr は作成が diff に先行するので、作りたての
       -- 自前 worktree をそのまま孤児にしない (記録が無いと起動 scan も拾えない)。
+      -- lock 直列化と二段目掃除は差分取得失敗側と共通 (sweep_worktree_unused)。
       local wt = res.data.worktree
       if type(wt) == 'table' and wt.created_by_us == true then
-        -- remove / prune も worktree 登録変更なので resolve_worktree と同じ
-        -- wt_with_lock(path) 下で走らせる (finish_close と同形、全終了経路で
-        -- 解除)。remove 最中の concurrent add は二重登録 (main--x + main--x1) の
-        -- 源で、この掃除が lock 外だと窓を reopen する (pr-worktree.md
-        -- 「worktree 登録操作の直列化」)。
-        wt_with_lock(wt.path, function()
-          git_worktree.remove({ repo = args.repo, path = wt.path }, function(rres)
-            if not rres.ok then
-              notify_warn(
-                ('0 差分セッションの worktree 掃除に失敗しました: %s'):format(
-                  rres.error
-                )
-              )
-              prune_and_rm_dir(args.repo, wt.path, function()
-                wt_unlock(wt.path)
-              end)
-              return
-            end
-            wt_unlock(wt.path)
-            -- 既存保存セッションの記録を再利用 (または旧記録と同じ path を
-            -- 再作成) していた場合、worktree を消した後に JSON が実在しない
-            -- dir を指したまま残らないよう記録を nil 化して save する
-            -- (comments / refs / status はそのまま。開始で開かない = 新規 save はしない)。
-            -- 掃除が完遂できなかった側は created_by_us 記録を残し、起動 scan が
-            -- 回収できる状態を保つ (delete の「dir を消せなければ JSON を残す」と同方針)。
-            local existing_wt = existing ~= nil and worktree_of(existing) or nil
-            if existing_wt ~= nil and existing_wt.path == wt.path then
-              existing.worktree = vim.NIL
-              local sres = store.save(existing)
-              if not sres.ok then
-                notify_warn(sres.error)
-              end
-            end
-          end)
-        end)
+        local reuse = self_owned_at(worktree_of(existing), wt.path)
+        sweep_worktree_unused(
+          args.repo,
+          wt,
+          '0 差分セッションの worktree 掃除に失敗しました: %s',
+          reuse,
+          function(swept)
+            M.nullify_inherited_record(existing, swept)
+          end
+        )
       end
       return
     end
@@ -1539,7 +1611,11 @@ function M.delete(id)
         -- closed の作成分残骸 (close の掃除失敗経路): status -> remove ->
         -- 失敗時 prune + dir 再帰削除。全部失敗したら孤児 dir を残さないため中止。
         git_worktree.status({ repo = repo, path = wt.path }, function(sres)
-          local dirty = sres.ok and sres.data.dirty
+          -- dirty 判定は git status (ディスク) に加えて worktree 配下の modified
+          -- バッファも見る (close_with_worktree と同一契約。未保存編集を黙って
+          -- force wipe しない)
+          local n_modified = wt_buffers.count_modified(wt.path)
+          local dirty = (sres.ok and sres.data.dirty) or n_modified > 0
           local function with_remove(force)
             wt_buffers.destroy(wt.path)
             wt_with_lock(wt.path, function()
@@ -1557,7 +1633,7 @@ function M.delete(id)
             end)
           end
           if dirty then
-            confirm(force_prompt(wt.path), function(approved)
+            confirm(force_prompt(wt.path, n_modified), function(approved)
               if approved then
                 with_remove(true)
               end

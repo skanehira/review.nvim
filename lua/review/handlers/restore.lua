@@ -40,6 +40,13 @@ local function fetch_and_resume(session)
     base = session.base,
     head = session.head,
     record = session.worktree,
+    -- 復元経路も開始と同じ後片付け (pr-worktree.md「0 差分・差分取得失敗時の掃除」):
+    -- 作りたて / 再利用の自前 worktree を掃除されたら、実在しない dir を指した
+    -- 記録を nil 化して save する (save 前の delete 競合ガード込み、session 側と
+    -- 共通ヘルパー)。
+    on_worktree_swept = function(wt)
+      session_handler.nullify_inherited_record(session, wt)
+    end,
   }, function(res)
     if not res.ok then
       -- E_CANCELLED はユーザー自身の中断なので通知しない (開始と同じ)。

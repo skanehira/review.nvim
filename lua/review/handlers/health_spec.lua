@@ -252,6 +252,28 @@ describe('health.sweep closed + created_by_us 残骸', function()
   )
 
   it(
+    'closed 残骸掃除は dir 配下の loaded バッファを remove より先に破棄する (E211 契約)',
+    function()
+      local dir = mkdir_dir()
+      local file = vim.fs.joinpath(dir, 'a.lua')
+      vim.fn.writefile({ 'local a = 1' }, file)
+      local buf = vim.fn.bufadd(file)
+      vim.fn.bufload(buf)
+      assert.is_true(vim.api.nvim_buf_is_valid(buf))
+
+      save_session { status = 'closed', worktree = { path = dir, created_by_us = true } }
+      health.sweep(REPO_TOP, function() end)
+
+      -- dir を消す全経路の契約: remove/spawn より先に同期で worktree 配下の
+      -- 実ファイルバッファを破棄する (pr-worktree.md「E211 対策」。fs watcher が
+      -- dir 消滅を捉えて E211 を出す前に)
+      assert.equals(false, vim.api.nvim_buf_is_valid(buf))
+      assert.is_true(vim.uv.fs_stat(dir) == nil)
+      pcall(vim.api.nvim_buf_delete, buf, { force = true })
+    end
+  )
+
+  it(
     'INV-3: closed でも created_by_us=false の dir は掃除しない (同 scan の作成分残骸は掃除される)',
     function()
       local user_dir = mkdir_dir()

@@ -25,7 +25,7 @@
 
 作成失敗 (パス衝突) は既存同名ディレクトリを `git worktree prune` で回収試行 → 改善しなければ `E_WORKTREE` 通知で開始を中断。**衝突した残骸が自分の作成分 (`created_by_us=true` の記録あり) でない限り自動削除しない** (INV-3)。
 
-**0 差分時の掃除 (開始)**: pr 開始で差分 0 ファイルなら «変更なし» INFO で開かず save しないが、作成は diff に先行するので作りたて／再利用の自前 worktree を `git worktree remove` で掃除する (**close / delete と同じ直列化 lock 下**。失敗は WARN で記録は残し、起動 scan が回収できる状態を保つ)。既存保存セッションの記録を再利用 (旧記録と同じ path の作成分を含む) していた場合は、掃除成功後にそのセッション JSON の worktree 記録を nil 化して save する (実在しない dir を指した記録を残さない。comments / refs / status はそのまま)。
+**0 差分・差分取得失敗時の掃除 (開始 / 復元)**: pr 開始で差分 0 ファイルなら «変更なし» INFO で開かず save しないが、作成は diff に先行するので作りたて／再利用の自前 worktree を `git worktree remove` で掃除する (**close / delete と同じ直列化 lock 下**。失敗は WARN で記録は残し、起動 scan が回収できる状態を保つ)。既存保存セッションの記録を再利用 (旧記録と同じ path の作成分を含む) していた場合は、掃除成功後にそのセッション JSON の worktree 記録を nil 化して save する (実在しない dir を指した記録を残さない。comments / refs / status はそのまま。nil 化 save は直前にディスク上の JSON 存在を再確認し、掃除の窓中に :Review delete が完了していたら復活させない — persistence-restore「存在再確認」)。nil 化の対象も自前記録のみ (`created_by_us=true` かつ同 path。legacy の非自前記録を黙って消さない)。**diff 取得が失敗した場合も同じ掃除を走る** (開始 / 復元どちらの経路も `fetch_prepared` の diff 失敗分岐。放置すると作りたて worktree が記録なしの孤児になる)。掃除が remove・prune+dir 削除とも失敗したとき、その dir を指す created_by_us 記録が JSON に残らない場合は「起動 scan が回収」ではなく**手动削除を案内する WARN を出す** (INV-3: 記録のない dir を scan は触れないため、回収を約束しない)。
 
 **head 窓と実ファイル (`o`)**:
 
@@ -44,12 +44,12 @@
 
 **worktree 登録操作の直列化**: 同じ dir path に対する `git worktree remove` (close / delete / 開始時の 0 差分掃除、掃除失敗時の prune 二段目を含む) と `git worktree add` (start / resume の作成判断〜作成) は、セッション内で 1 本ずつ直列に実行する。remove は管理登録の解除 + ツリー削除の重い git I/O で、その最中に同じ path へ add すると remove の中間状態を跨いで再登録となり、git が衝突しない管理名 (`main--issue-4` + `main--issue-41` の形) で同一 dir を二重登録することがある (以後の remove が "does not point back" で失敗し続け、close するたびに WARN が出る実測状態)。add 側は読み取り (diff 取得など) を待たず、**登録を作る経路 (resolve_worktree の判断〜作成〜完了、remove 連鎖の完了) だけが待機する**
 
-**セッションの削除 (`:Review delete <id>`)**: 入力時に確認 (`コメント N 件を削除します`)。active と同じ id なら close の 1〜3 を先に実行してから、セッション JSON ファイルを削除し、このセッション用に作った `review-nvim/pr-<n>` ref があれば消す。closed でも `created_by_us=true` の worktree 残骸 (close の掃除失敗経路で発生しうる) があれば close の 3〜4 と同等の掃除を行ってからファイルを削除する (孤児 dir を残さない)。削除は不可逆で、undo は提供しない。
+**セッションの削除 (`:Review delete <id>`)**: 入力時に確認 (`コメント N 件を削除します`)。active と同じ id なら close の 1〜3 を先に実行してから、セッション JSON ファイルを削除し、このセッション用に作った `review-nvim/pr-<n>` ref があれば消す。closed でも `created_by_us=true` の worktree 残骸 (close の掃除失敗経路で発生しうる) があれば close と同じ dirty 判定 (git status に加えて worktree 配下の modified バッファも見る。いずれかで `--force` 確認。キャンセル = delete 中止・JSON 保持) を行い、close の 3〜4 と同等の掃除をしてからファイルを削除する (孤児 dir を残さない)。削除は不可逆で、undo は提供しない。
 
 **異常終了からの回復 (起動 scan、persistence-restore の scan を利用)**:
 
 - 記録上 open のセッションについて worktree path の実在を確認。実在して repo の `git worktree list` に載っていればそのまま復元で再利用する (crash 後でも worktree は使える)。記録にあるのにディレクトリが消えていれば worktree=null にして save し、復元時の作成判断 (persistence-restore「復元手順」) で作り直す
-- `created_by_us=true` の worktree のうち、セッション側が closed なのにディレクトリが残っている残骸を「掃除してよい残骸」として通知し、`git worktree prune` + ディレクトリ削除で回収する。**closed の掃除ではセッションファイルを書き戻さない** (dir 消滅後の記録は以後 scan に出ないため放置で無害。書き戻しは `:Review delete` の JSON 削除と競合してファイルを復活させ得る)
+- `created_by_us=true` の worktree のうち、セッション側が closed なのにディレクトリが残っている残骸を「掃除してよい残骸」として通知し、`git worktree prune` + ディレクトリ削除で回収する。dir を消す全経路の契約どおり、dir 削除より先に worktree 配下を指す loaded バッファを `nvim_buf_delete(force)` で破棄する (ユーザーが `:edit` 等で見ている分も含む — E211 対策)。**closed の掃除ではセッションファイルを書き戻さない** (dir 消滅後の記録は以後 scan に出ないため放置で無害。書き戻しは `:Review delete` の JSON 削除と競合してファイルを復活させ得る)
 
 ## 実装の配置
 

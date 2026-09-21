@@ -9,6 +9,7 @@
 -- 処理は slug 昇順の逐次チェーン (掃除の完了を待ってから次。cb は全処理後 1 回)。
 local git_worktree = require 'review.git.worktree'
 local store = require 'review.store.session'
+local wt_buffers = require 'review.handlers.worktree_buffers'
 
 local M = {}
 
@@ -41,6 +42,10 @@ end
 -- classify==skip なのでそのまま残して無害。
 local function sweep_dir(session, on_done, null_record)
   local path = session.worktree.path
+  -- dir を消す全経路の契約: remove/spawn より先に worktree 配下の実ファイル
+  -- バッファを同期破棄する (E211 対策。ユーザーが :edit していた分も here 拾う —
+  -- close の finish_close / delete の sweep_or_abort と同一ヘルパー)。
+  wt_buffers.destroy(path)
   if not git_worktree.remove_dir(path) then
     notify_warn(
       ('worktree dir を削除できませんでした (%s): %s'):format(session.id, path)
