@@ -1,18 +1,20 @@
 # review.nvim
 
-GitHub の Files changed 風に、ブランチ (git ref) 間の差分と PR の差分を Neovim 内でレビューし、コメントを蓄積して **AI エージェントに渡すプロンプト**として出力するプラグイン。
+**English** · [日本語](README_ja.md)
 
-差分は専有 tabpage の 3 窓 (file panel │ base │ head) で開き、head 窓は実ファイルなので編集も LSP も効いたままレビューできる。コメントは自動的にディスクへ永続化され、Neovim を再起動しても `:Review` 1 操作で復元する。ランタイム依存ゼロ (Neovim 標準 API のみ)。
+A Neovim plugin to review branch (git ref) and PR diffs the way GitHub's Files changed page does — collect comments and export them as a **prompt for your AI agent**.
 
-## 必要要件
+Diffs open in a dedicated tabpage with three windows (file panel │ base │ head). The head window is the real file, so editing and LSP keep working while you review. Comments are persisted to disk automatically and a Neovim restart is recovered with one `:Review`. Zero runtime dependencies (Neovim core API only).
 
-| 要件              | 対象              |
-| ----------------- | ----------------- |
-| Neovim >= 0.10    | 共通              |
-| git               | 共通              |
-| GitHub CLI (`gh`) | `:Review pr` のみ |
+## Requirements
 
-## インストール
+| Requirement       | Scope                    |
+| ----------------- | ------------------------ |
+| Neovim >= 0.10    | everything               |
+| git               | everything               |
+| GitHub CLI (`gh`) | `:Review pr` only        |
+
+## Install
 
 ```lua
 {
@@ -22,102 +24,103 @@ GitHub の Files changed 風に、ブランチ (git ref) 間の差分と PR の�
 }
 ```
 
-`setup()` は省略可能 (既定値でそのまま動く)。キーや見た目を変えたいときだけ追加する。設定項目は `:h review-setup`。
+`setup()` is optional (it works as-is with the defaults). Add it only to change keys or appearance. Available options: `:h review-setup`.
 
-マネージャを使わず `rtp` に足す場合は `:helptags <repo>/doc` を 1 回実行すると `:h review` が引ける。
+If you add the repo to `rtp` without a plugin manager, run `:helptags <repo>/doc` once to make `:h review` available.
 
-## 使ってみる
+## Try it
 
-`main` を基準に、現在のブランチをレビューするまでを 4 手順で示す:
+Four steps from zero to reviewing the current branch against `main`:
 
-**1. 差分を開く**
+**1. Open the diff**
 
 ```vim
 :Review start main
 ```
 
-`main..現在のブランチ` の差分が 3 窓で開く。対象は現在のチェックアウトの作業ツリーなので、未コミット変更もレビューに含まれる。head を明示する場合は `:Review start main feature` (main に対して feature をレビュー)。PR は `:Review pr 42`。
+The `main..current branch` diff opens in three windows. The review target is the working tree of the current checkout, so uncommitted changes are included. To state the head explicitly use `:Review start main feature` (review `feature` against `main`). For a PR: `:Review pr 42`.
 
-**2. コメントを書く**
+**2. Write comments**
 
-`<Tab>` / `<S-Tab>` でファイルを移動し、変更行で `c` を押して本文を入力する (visual-line で行を選択すれば範囲コメント)。確定したコメントは対象行の下にスレッド箱として表示され、`e` で編集、`d` の二重押しで削除する。コメントは確定のたびに保存される。
+Move between files with `<Tab>` / `<S-Tab>` and press `c` on a changed line to enter the body (select lines in visual-line for a range comment). Confirmed comments show as a thread box under the line; edit with `e`, delete with a confirmation double-press of `d`. Every comment is saved when confirmed.
 
-head 窓で `:w` すると差分が再取得され、±カウント・コメント位置・プロンプトが保存済みの内容に更新される。
+`:w` in the head window refetches the diff and updates the ±counts, comment positions and the prompt against the saved content.
 
-**3. プロンプトを取り出して AI に渡す**
+**3. Export the prompt to your AI agent**
 
-`:Review prompt` で集めたコメントが整形され、クリップボードにコピーされる (クリップボードが使えない環境では `"0` レジスタ)。コピーが成功すると «N 件のコメントをクリップボードにコピーしました» とメッセージが出る (`y` でも同じ):
+`:Review prompt` formats the collected comments and copies them to the clipboard (falls back to the `"0` register without a clipboard provider). A successful copy shows «copied %d comments to the clipboard» (`y` does the same per line):
 
 ```text
 Review the changes in main..feature. Please address the comments below.
 
 @lua/review/diff.lua#L42-L48
-この行番号計算は core/diff の変換ロジックを使って
+route this line calculation through the conversion logic in core/diff
 
 @lua/review/init.lua#L10
-setup は冪等にしたい
+setup should be idempotent
 ```
 
-これをそのまま AI エージェントに貼り付ける。`@path#L<行>` はレビュー中の実ファイルを指すので、エージェントはパスを辿って該当箇所を読める。1 件だけコピーしたい場合はレビュー窓でそのコメントの行に移動して `y`、特定ファイルだけなら `:Review prompt lua/foo.lua`。outdated のコメント (差分の揺れで位置を特定できなくなったもの) は既定の出力から除外される (`:h review-sessions`)。
+Paste it straight into your AI agent. `@path#L<line>` points at the real file under review, so the agent can follow the path and read the code. To copy a single comment, go to its line in the review window and press `y`; for one file only, `:Review prompt lua/foo.lua`. outdated comments (positions no longer resolvable after diff drift) are excluded from the default output (`:h review-sessions`).
 
-コピー後に不要になったコメントは `:Review clear` (またはレビュー窓 / コメント一覧で `D` 2 回) で全件削除できる。AI に渡した後の残骸掃除用で、outdated も含めて全部消える。コピー後の自動削除はしない — ミスコピ時に再度コピーできる余地を残すためで、削除は常に明示操作 + 確認 (コマンドは `[y/N]`、キーは arming 二重押し) を挟む。二重押しの途中取消は `<Esc>` でもよい (2 秒待ち不要)。
+Comments you no longer need after copying can be removed with `:Review clear` (or pressing `D` twice in the review window / comments list): a cleanup pass for the leftovers after handing the prompt to the AI — everything disappears, outdated included. Nothing is deleted automatically after a copy — that would leave you stranded after a mis-copy — so deletion always goes through an explicit action plus confirmation (`[y/N]` for the command, an arming double-press for the key). The double-press can also be aborted with `<Esc>` (no 2s wait).
 
-**4. 閉じる**
+**4. Close**
 
-`q` (または `:Review close`) でコメントを保存して閉じる。`:Review pr` で展開した worktree も同時に掃除される。
+`q` (or `:Review close`) saves the comments and closes. Worktrees created by `:Review pr` are cleaned up at the same time.
 
-## キーマップ
+## Keymaps
 
-上記の流れで触る最小限だけ:
+The minimum touched by the flow above:
 
-| 場所       | キー                      | 動作                                                  |
-| ---------- | ------------------------- | ----------------------------------------------------- |
-| レビュー窓 | `c` (visual-line で範囲)  | コメント作成 (head 窓のみ)                            |
-| レビュー窓 | `e` / `d`                 | 編集 / 削除 (d は確認の二重押し)                      |
-| レビュー窓 | `D`                       | 全コメント一括削除 (二重押し。`:Review clear` と同じ) |
-| レビュー窓 | `<Esc>`                   | d / D の二重押し (arming) を解除            |
-| レビュー窓 | `<Tab>` / `<S-Tab>`       | 次 / 前のファイル                                     |
-| レビュー窓 | `<leader>e` / `<leader>b` | file panel へ移動 / 表示トグル                        |
-| レビュー窓 | `<leader>c`               | 全ファイル横断のコメント一覧                          |
-| レビュー窓 | `q`                       | 保存してセッションを閉じる                            |
-| レビュー窓 | `<F1>` / `g?`             | その窓で効くキーの help float                         |
+| Where          | Key                       | Action                                                       |
+| -------------- | ------------------------- | ------------------------------------------------------------ |
+| review window  | `c` (visual-line = range) | add a comment (head window only)                             |
+| review window  | `e` / `d`                 | edit / delete (d is a confirmation double-press)             |
+| review window  | `D`                       | delete all comments (double-press; same as `:Review clear`)  |
+| review window  | `<Esc>`                   | cancel the d / D arming                                      |
+| review window  | `<Tab>` / `<S-Tab>`       | next / previous file                                         |
+| review window  | `<leader>e` / `<leader>b` | go to the file panel / toggle it                             |
+| review window  | `<leader>c`               | cross-file comments list                                     |
+| review window  | `q`                       | save and close the session                                   |
+| review window  | `<F1>` / `g?`             | help float listing the keys available in that window         |
 
-すべてのキーは buffer-local で、窓によって効くキーが違う。各窓の完全な一覧と既定値は `:h review-keymaps` (レビュー中に `<F1>` / `g?` と押すと、その窓で効くキーの一覧が help float に出る)。既定値の変更は `setup` の `keymaps` から:
+All keys are buffer-local and which keys are live depends on the window. The full list and defaults per window: `:h review-keymaps` (during a review, `<F1>` / `g?` opens the help float for that window). Override defaults via `keymaps` in `setup`:
 
 ```lua
 require('review').setup({ keymaps = { diff = { add_comment = 'gc' } } })
 ```
 
-hunk 間の移動 `[c` / `]c` と fold (`za` / `zo` / `zR`) は Neovim 標準のキーのままで、レビュー側からはマップしていない。レビュー窓のキーマップはキーを押した時点の窓の role を照合して発火するため、自分の窓で同じ実ファイルを見ていてもレビュー操作は誤発火しない。
+hunk movement `[c` / `]c` and folds (`za` / `zo` / `zR`) stay Neovim defaults — the plugin maps nothing there. Review-window keymaps fire only when the window role matches at press time, so the same real file opened in your own window never mis-fires.
 
-## コマンド
+## Commands
 
-| コマンド                        | 動作                                                        |
-| ------------------------------- | ----------------------------------------------------------- |
-| `:Review start {base} [{head}]` | ブランチレビュー開始 (head 省略 = 現在のブランチを自動採用) |
-| `:Review pr {番号\|URL}`        | PR レビュー開始 (head を worktree に展開)                   |
-| `:Review`                       | 続きのセッションを復元 (open 状態のみ)                      |
-| `:Review list`                  | 保存済みセッション一覧から開く                              |
-| `:Review comments`              | コメント横断一覧を開く (`<leader>c` と同じ)                 |
-| `:Review close`                 | 保存して閉じる                                              |
-| `:Review delete {id}`           | 保存済みセッションを削除 (worktree 掃除含む)                |
-| `:Review prompt [file]`         | プロンプトをクリップボードへ (ファイル指定可)               |
-| `:Review clear`                 | コメントを全件削除 ([y/N] 確認。`D` 2 回と同じ)             |
+| Command                         | Action                                                       |
+| ------------------------------- | ------------------------------------------------------------ |
+| `:Review start {base} [{head}]` | start a branch review (head omitted = current branch)        |
+| `:Review pr {number\|URL}`      | start a PR review (head expanded in a worktree)              |
+| `:Review`                       | resume a saved session (open status only)                    |
+| `:Review list`                  | open from the saved-session list                             |
+| `:Review comments`              | open the cross-file comments list (same as `<leader>c`)      |
+| `:Review close`                 | save and close                                               |
+| `:Review delete {id}`           | delete a saved session (includes worktree cleanup)           |
+| `:Review prompt [file]`         | copy the prompt to the clipboard (optionally one file)       |
+| `:Review clear`                 | delete all comments ([y/N] confirm; same as `D` twice)       |
 
-`start` の ref 名、`pr` の番号、`delete` の id は `<Tab>` で補完できる。Neovim の異常終了時の復旧や `q` と `:tabclose` の挙動の違いなど、セッション管理の詳細は `:h review-sessions`。
+The ref for `start`, the number for `pr` and the id for `delete` are `<Tab>`-completable. Recovery after an abnormal Neovim exit, the difference between `q` and `:tabclose`, and other session-management details: `:h review-sessions`.
 
-## 設計上のふるまい (抜粋)
+## Design behaviors (selected)
 
-- 明示した head が現在の checkout と違うコミットを指す場合、確認付きでそのブランチへの `git switch` を提案する。拒否された場合や switch できない場合は、読み取り専用レビューに縮退する (`:h review-usage`)
-- 差分の揺れで位置を特定できなくなったコメントは outdated として可視化される (スレッドの id 接頭辞が警告色、head 窓 1 行目に集約表示) (`:h review-sessions`)
-- winbar に `base..head · path · +a -d · N comments` を表示し、行番号は既定で隠す。どちらも `setup` の `winbar` / `number` で切り替えられる (`:h review-display`)
+- When an explicit head points at a commit other than the current checkout, the plugin offers `git switch` to that branch with a confirmation; on refusal or failure it degrades to a read-only review (`:h review-usage`)
+- Comments whose position is no longer resolvable after diff drift are surfaced as outdated (outdated id prefixes in warning color, aggregated at line 1 of the head window) (`:h review-sessions`)
+- The winbar shows `base..head · path · +a -d · N comments`; line numbers are hidden by default. Both can be toggled via `winbar` / `number` in `setup` (`:h review-display`)
+- Runtime messages (notifications, [y/N] prompts, help float) are English only — there is no message-locale option
 
-## ドキュメント
+## Documentation
 
-- ヘルプの目次: `:h review` (Usage / API / Setup / Keymaps / Sessions / Display)
-- 公開 Lua API: `:h review-api`
-- 設計: [docs/design/DESIGN.md](docs/design/DESIGN.md) と [docs/design/features/](docs/design/features/)
-- 開発・検証: `make check` (test / lint / format / plugin-check) と `make e2e` (実 headless nvim + 実 git のゴールデンパス)。テストに plenary.nvim が必要 (`PLENARY_PATH` で指定)
+- Help contents: `:h review` (Usage / API / Setup / Keymaps / Sessions / Display)
+- Public Lua API: `:h review-api`
+- Design: [docs/design/DESIGN.md](docs/design/DESIGN.md) and [docs/design/features/](docs/design/features/)
+- Development / verification: `make check` (test / lint / format / plugin-check) and `make e2e` (real headless nvim + real git golden path). Tests need plenary.nvim (set via `PLENARY_PATH`)
 
 ## License
 
