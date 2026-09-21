@@ -225,7 +225,7 @@ describe('core/diff rename', function()
   )
 
   it(
-    '純 rename (内容変更なし = ---/+++ 行が出ない) でも rename from 行から old_path を保持する',
+    '純 rename (内容No changes = ---/+++ 行が出ない) でも rename from 行から old_path を保持する',
     function()
       local raw = table.concat({
         'diff --git a/old.txt b/new.txt',

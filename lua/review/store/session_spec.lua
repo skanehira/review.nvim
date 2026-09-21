@@ -192,7 +192,7 @@ describe('save 失敗は E_STORE', function()
       assert.same({
         __class = 'review.Result',
         ok = false,
-        error = 'セッションファイルの差し替えに失敗しました: '
+        error = 'failed to rename the session file: '
           .. file
           .. ' (EPERM: operation not permitted)',
         code = 'E_STORE',
@@ -251,9 +251,7 @@ describe('load: 不在・破損退避・version 不一致', function()
       assert.same({ __class = 'review.Result', ok = true }, session.load(REPO, 'main--feature'))
       assert.same({
         {
-          msg = 'review.nvim: セッションファイル '
-            .. file
-            .. ' が読み取れません。「存在しない」として扱います',
+          msg = 'review.nvim: session file ' .. file .. ' is unreadable; treating it as missing',
           level = vim.log.levels.WARN,
         },
       }, state.notices)
@@ -268,15 +266,11 @@ describe('load: 不在・破損退避・version 不一致', function()
       assert.same({ 'SECRET' }, vim.fn.readfile(file))
       assert.same({
         {
-          msg = 'review.nvim: セッションファイル '
-            .. file
-            .. ' が読み取れません。「存在しない」として扱います',
+          msg = 'review.nvim: session file ' .. file .. ' is unreadable; treating it as missing',
           level = vim.log.levels.WARN,
         },
         {
-          msg = 'review.nvim: セッションファイル '
-            .. file
-            .. ' が読み取れません。「存在しない」として扱います',
+          msg = 'review.nvim: session file ' .. file .. ' is unreadable; treating it as missing',
           level = vim.log.levels.WARN,
         },
       }, state.notices)
@@ -284,7 +278,7 @@ describe('load: 不在・破損退避・version 不一致', function()
   )
 
   it(
-    '破損 JSON は load 時に .corrupt へ退避され「存在しない」扱い + WARN',
+    'corrupt JSON は load 時に .corrupt へ退避され「存在しない」扱い + WARN',
     function()
       local file = session_file_of(state.dir, 'main--feature')
       vim.fn.mkdir(repo_dir_of(state.dir), 'p')
@@ -293,11 +287,11 @@ describe('load: 不在・破損退避・version 不一致', function()
       assert.same({ __class = 'review.Result', ok = true }, session.load(REPO, 'main--feature'))
       assert.same({ '{ this is not JSON' }, vim.fn.readfile(file .. '.corrupt'))
       local expected_note = {
-        msg = 'review.nvim: 破損 JSON のセッションファイル '
+        msg = 'review.nvim: moved corrupt JSON session file '
           .. file
-          .. ' を '
+          .. ' aside to '
           .. file
-          .. '.corrupt に退避しました',
+          .. '.corrupt',
         level = vim.log.levels.WARN,
       }
       assert.same({ expected_note }, state.notices)
@@ -339,11 +333,11 @@ describe('load: 不在・破損退避・version 不一致', function()
       assert.same({ future_json }, vim.fn.readfile(file .. '.corrupt'))
       assert.same({
         {
-          msg = 'review.nvim: schema version 不一致 (version=2) のセッションファイル '
+          msg = 'review.nvim: moved schema version mismatch (version=2) session file '
             .. file
-            .. ' を '
+            .. ' aside to '
             .. file
-            .. '.corrupt に退避しました',
+            .. '.corrupt',
           level = vim.log.levels.WARN,
         },
       }, state.notices)

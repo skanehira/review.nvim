@@ -53,10 +53,7 @@ end
 function M.open()
   local session = session_handler.active()
   if session == nil then
-    return result.err(
-      'review.nvim: アクティブなセッションがありません',
-      result.codes.E_NOT_ACTIVE
-    )
+    return result.err('review.nvim: no active session', result.codes.E_NOT_ACTIVE)
   end
   local existing = commentlist.find_window(session.id)
   if existing ~= nil then
@@ -90,21 +87,21 @@ function M.jump_current()
   local session = session_handler.active()
   local st = ui_windows.state()
   if session == nil or st == nil then
-    notify_warn 'アクティブなセッションがありません'
+    notify_warn 'no active session'
     return
   end
   local file = session_handler.file_of(c.file)
   if file == nil then
-    notify_warn 'このファイルは現在の差分に無いため移動できません'
+    notify_warn 'cannot jump: the file is not in the current diff'
     return
   end
   if file.binary == true or file.status == 'D' then
-    notify_warn 'binary / 削除の告知表示のため移動できません'
+    notify_warn 'cannot jump: binary / deleted-file notice'
     return
   end
   if c.state == 'outdated' then
     vim.notify(
-      'review.nvim: コメントは outdated です。記録された行へ移動します',
+      'review.nvim: comment is outdated; jumping to the recorded line',
       vim.log.levels.INFO
     )
   end
@@ -145,7 +142,7 @@ local function target_comment()
   end
   local session = session_handler.active()
   if session == nil then
-    notify_warn 'アクティブなセッションがありません'
+    notify_warn 'no active session'
     return nil
   end
   return c, session
@@ -177,17 +174,15 @@ function M.delete_current()
       return
     end
     session_handler.commit_comment_change()
-    vim.notify(
-      ('review.nvim: コメント %s を削除しました'):format(removed.id),
-      vim.log.levels.INFO
-    )
+    vim.notify(('review.nvim: deleted comment %s'):format(removed.id), vim.log.levels.INFO)
     return
   end
   delete_armed = { id = c.id, at = t }
   notify_warn(
-    ('コメント %s を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)'):format(
-      c.id
-    )
+    (
+      'to delete comment %s press d again on this line (cancel: move '
+      .. 'to another line / wait 2s / press <Esc>)'
+    ):format(c.id)
   )
 end
 
@@ -234,11 +229,11 @@ local delete_all_armed = nil
 function M.delete_all_current()
   local session = session_handler.active()
   if session == nil then
-    notify_warn 'アクティブなセッションがありません'
+    notify_warn 'no active session'
     return
   end
   if #session.comments == 0 then
-    vim.notify('review.nvim: コメントがありません', vim.log.levels.INFO)
+    vim.notify('review.nvim: No comments', vim.log.levels.INFO)
     return
   end
   local n = #session.comments
@@ -252,17 +247,15 @@ function M.delete_all_current()
     delete_armed = nil
     comment_model.remove_all(session.comments)
     session_handler.commit_comment_change()
-    vim.notify(
-      ('review.nvim: コメント全 %d 件を削除しました'):format(n),
-      vim.log.levels.INFO
-    )
+    vim.notify(('review.nvim: deleted all %d comments'):format(n), vim.log.levels.INFO)
     return
   end
   delete_all_armed = { n = n, at = t }
   notify_warn(
-    ('コメント全 %d 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)'):format(
-      n
-    )
+    (
+      'to delete all %d comments press again (cancel: wait 2s / '
+      .. 'comment count change / press <Esc>)'
+    ):format(n)
   )
 end
 
@@ -276,7 +269,7 @@ function M.cancel_arming()
   if not had then
     return false
   end
-  vim.notify('review.nvim: 削除の arming を解除しました', vim.log.levels.INFO)
+  vim.notify('review.nvim: delete arming cancelled', vim.log.levels.INFO)
   return true
 end
 

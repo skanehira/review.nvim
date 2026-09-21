@@ -38,7 +38,7 @@ end
 local MAX_THREAD_LINES = 10
 
 -- 行末コメント表示と、head バッファに解けない outdated を集約する mark の hl。
-local OUTDATED_HEAD_FMT = ' %d outdated (prompt 除外中)'
+local OUTDATED_HEAD_FMT = ' %d outdated (excluded from prompt)'
 local COMMENT_HEAD_HL = 'ReviewPanelComment'
 local OUTDATED_HEAD_HL = 'ReviewCommentOutdated'
 local BODY_HL = 'ReviewCommentBody'
@@ -164,7 +164,7 @@ local function comment_lines(c, inner)
   if truncated then
     -- 打ち切り導線: pad は本文色、文言のみ警告色 (id 接頭辞と同じ扱い)。
     -- 文言も箱の中身行なので内側幅で折り返す (右辺からはみ出さない)
-    for _, line in ipairs(side_lines('… (i で全文)', pad, budget2, prefix_hl)) do
+    for _, line in ipairs(side_lines('… (press i for full text)', pad, budget2, prefix_hl)) do
       out[#out + 1] = line
     end
   end

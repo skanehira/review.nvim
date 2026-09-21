@@ -69,11 +69,8 @@ end
 function M.start(target)
   local number = M.extract_number(target)
   if number == nil then
-    notify_warn 'PR 番号または URL を認識できません: :Review pr <number|url> の形式で指定してください'
-    return result.err(
-      'review.nvim: PR 番号または URL を認識できません',
-      result.codes.E_PR
-    )
+    notify_warn 'cannot recognize the PR number or URL. use the form :Review pr <number|url>'
+    return result.err('review.nvim: cannot recognize the PR number or URL', result.codes.E_PR)
   end
   git_ref.top_level({ cwd = vim.fn.getcwd() }, function(tres)
     if not tres.ok then
@@ -98,8 +95,8 @@ function M.start(target)
         git_ref.remotes({ cwd = repo }, function(rr)
           if not rr.ok or #rr.data == 0 then
             notify_warn(
-              'git remote が解決できません。PR のターゲットリポジトリ内で実行するか、'
-                .. ':Review pr <URL> でリポジトリを特定してください'
+              'cannot resolve the git remote; run inside the PR target repository, '
+                .. 'or identify the repository with :Review pr <URL>'
             )
             return
           end

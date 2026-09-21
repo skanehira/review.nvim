@@ -101,7 +101,7 @@ function M.open_current()
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local sess = ui_list.row_session(buf, row)
   if sess == nil then
-    notify_warn 'そのセッションは repo path が存在しないため開けません'
+    notify_warn 'cannot open the session: its repo path no longer exists'
     return
   end
   -- 防御: 行データは render 時点の写し。削除済み (d 完了後の旧行や別インスタンス
@@ -110,7 +110,7 @@ function M.open_current()
   -- の間に削除された場合の二重ガード)。
   local loaded = store.load(sess.repo, sess.id).data
   if loaded == nil then
-    notify_warn(('セッション %s は削除済みのため開けません'):format(sess.id))
+    notify_warn(('cannot open session %s: it was already deleted'):format(sess.id))
     return
   end
   restore.resume_session(loaded)
@@ -130,7 +130,10 @@ function M.delete_current()
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local sess = ui_list.row_session(buf, row)
   if sess == nil then
-    notify_warn 'その行はセッションではないため削除できません (repo path 消失行は :Review delete <id> を直接)'
+    notify_warn(
+      'not a session row; cannot delete (for a row with a missing '
+        .. 'repo path use :Review delete <id> directly)'
+    )
     return
   end
   local session_handler = require 'review.handlers.session'

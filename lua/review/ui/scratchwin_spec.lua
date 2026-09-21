@@ -103,7 +103,7 @@ describe('scratchwin.set_content / detect_filetype', function()
 
   it('deleted / binary 告知窓の確定文言 (1 行)', function()
     assert.same(
-      { '■ deleted (head に存在しません — base 側は左窓)' },
+      { '■ deleted (absent from head — base side is in the left window)' },
       scratchwin.NOTIFY.deleted
     )
     assert.same({ 'Binary files differ' }, scratchwin.NOTIFY.binary)

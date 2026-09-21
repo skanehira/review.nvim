@@ -132,7 +132,7 @@ usage: git diff [<options>] [<commit>]
         __class = 'review.Result',
         ok = false,
         data = { stdout = '', code = 1 },
-        error = 'git が終了コード 1 で失敗しました',
+        error = 'git returned exit code 1 (failure)',
         code = 'E_GIT',
       }, received)
     end
@@ -178,7 +178,7 @@ usage: git diff [<options>] [<commit>]
       __class = 'review.Result',
       ok = false,
       data = { stdout = '', code = 0 },
-      error = 'git の起動に失敗しました',
+      error = 'git failed to launch',
       code = 'E_GIT',
     }, received)
   end)
@@ -203,7 +203,7 @@ usage: git diff [<options>] [<commit>]
       assert.same({
         __class = 'review.Result',
         ok = false,
-        error = 'git の起動に失敗しました',
+        error = 'git failed to launch',
         code = 'E_GIT',
       }, received)
     end
@@ -226,7 +226,7 @@ usage: git diff [<options>] [<commit>]
       assert.same({
         __class = 'review.Result',
         ok = false,
-        error = 'git が見つかりません',
+        error = 'git not found',
         code = 'E_GIT',
       }, received)
       assert.equals(nil, captured.calls)
@@ -420,10 +420,7 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
       assert.equals(false, res.ok)
       assert.equals(30, captured.timeout)
       assert.is_true(captured.killed ~= nil)
-      assert.equals(
-        'git が同期実行の待ち時間内に完了しませんでした',
-        res.error
-      )
+      assert.equals('git did not finish within the sync-run timeout', res.error)
     end
   )
 

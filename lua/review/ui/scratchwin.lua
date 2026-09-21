@@ -8,7 +8,7 @@
 local M = {}
 
 M.NOTIFY = {
-  deleted = { '■ deleted (head に存在しません — base 側は左窓)' },
+  deleted = { '■ deleted (absent from head — base side is in the left window)' },
   binary = { 'Binary files differ' },
 }
 

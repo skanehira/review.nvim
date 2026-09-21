@@ -49,7 +49,7 @@ function M.open(opts)
     -- 場所に置く — README / doc/review.txt / <F1> help も同一契約)。
     title = ' Comment '
       .. (opts.hint ~= nil and ('[' .. opts.hint .. '] ') or '')
-      .. ' <CR> 確定  q 閉じる ',
+      .. ' <CR> confirm  q close ',
   })
 
   -- 解決済みフラグ。窓クローズ経路 (確定 / q / :q 等) と二重発火しないための境界。
@@ -112,7 +112,7 @@ function M.open(opts)
     end
     armed = { at = now, body = body }
     vim.notify(
-      'review.nvim: 本文があります。確定は Normal <CR>、入力を破棄するには q をもう一度',
+      'review.nvim: body has text; <CR> in Normal confirms, press q again to discard',
       vim.log.levels.WARN
     )
   end

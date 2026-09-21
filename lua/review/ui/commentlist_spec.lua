@@ -100,10 +100,8 @@ describe('commentlist.render 行整形', function()
           },
         },
       }
-      local buf = commentlist.render(
-        session,
-        { order = { 'a.lua', 'b.lua' }, head_display = '作業ツリー' }
-      )
+      local buf =
+        commentlist.render(session, { order = { 'a.lua', 'b.lua' }, head_display = 'working tree' })
       assert.equals(BUF_NAME, vim.api.nvim_buf_get_name(buf))
       assert.equals('review-list', vim.bo[buf].filetype)
       assert.same({ kind = 'commentlist', session_id = SLUG }, vim.b[buf].review_meta)
@@ -135,15 +133,12 @@ describe('commentlist.render 行整形', function()
     end
   )
 
-  it(
-    'コメント 0 件は «コメントはありません» 1 行 (空でも開ける)',
-    function()
-      local session = session_stub { files = { ['a.lua'] = { viewed = false } } }
-      local buf = commentlist.render(session, { order = { 'a.lua' } })
-      assert.same({ 'コメントはありません' }, lines_of(buf))
-      assert.is_nil(commentlist.row_comment(buf, 1))
-    end
-  )
+  it('コメント 0 件は «No comments» 1 行 (空でも開ける)', function()
+    local session = session_stub { files = { ['a.lua'] = { viewed = false } } }
+    local buf = commentlist.render(session, { order = { 'a.lua' } })
+    assert.same({ 'No comments' }, lines_of(buf))
+    assert.is_nil(commentlist.row_comment(buf, 1))
+  end)
 
   it('同一 buffer への再構成 (名前一致で再利用し内容は置換)', function()
     local session = session_stub {
@@ -249,16 +244,16 @@ describe('commentlist.winbar', function()
         comment { id = 'c3', state = 'outdated' },
       }
       assert.equals(
-        'main..作業ツリー · 3 comments · ⚠2',
-        commentlist.winbar(session, shown, { head_display = '作業ツリー' })
+        'main..working tree · 3 comments · ⚠2',
+        commentlist.winbar(session, shown, { head_display = 'working tree' })
       )
       assert.equals(
-        'main..作業ツリー · 1 comment',
-        commentlist.winbar(session, { comment { id = 'c1' } }, { head_display = '作業ツリー' })
+        'main..working tree · 1 comment',
+        commentlist.winbar(session, { comment { id = 'c1' } }, { head_display = 'working tree' })
       )
       assert.equals(
-        'main..作業ツリー · 0 comments',
-        commentlist.winbar(session, {}, { head_display = '作業ツリー' })
+        'main..working tree · 0 comments',
+        commentlist.winbar(session, {}, { head_display = 'working tree' })
       )
     end
   )

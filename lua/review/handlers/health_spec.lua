@@ -153,8 +153,8 @@ describe('health.sweep open セッションの実在確認 (異常終了回復)'
       health.sweep(REPO_TOP, function() end)
 
       assert.same({
-        msg = 'review.nvim: pr-7 の worktree ディレクトリが消滅しています。'
-          .. '記録から worktree を外しました (復元時に作成判断で再生成します)',
+        msg = 'review.nvim: the worktree dir of pr-7 has disappeared;'
+          .. ' the worktree record was cleared (it will be recreated at start)',
         level = vim.log.levels.INFO,
       }, state.notifications[1])
       assert.equals(1, #state.notifications)
@@ -188,7 +188,7 @@ describe('health.sweep open セッションの実在確認 (異常終了回復)'
       -- 走査は動いた: pr-7 (自前分・未登録) が掃除され通知が出た
       assert.equals(1, #state.notifications)
       assert.equals(
-        ('review.nvim: worktree 残骸を掃除しました pr-7: %s (git 未登録)'):format(
+        ('review.nvim: cleaned up worktree leftovers pr-7: %s (not registered in git)'):format(
           our_dir
         ),
         state.notifications[1].msg
@@ -201,7 +201,7 @@ describe('health.sweep open セッションの実在確認 (異常終了回復)'
   )
 
   it(
-    'open + dir 実在 + git 未登録 (作成分の孤児) -> WARN 通知 + dir 削除 + prune + 記録回収',
+    'open + dir 実在 + not registered in git (作成分の孤児) -> WARN 通知 + dir 削除 + prune + 記録回収',
     function()
       local dir = mkdir_dir()
       state.registered = {} -- list に載らない
@@ -209,10 +209,10 @@ describe('health.sweep open セッションの実在確認 (異常終了回復)'
 
       health.sweep(REPO_TOP, function() end)
 
+      local cleaned = 'review.nvim: cleaned up worktree leftovers pr-7: %s (not registered in git)'
+      local cleaned_note = cleaned:format(dir)
       assert.same({
-        msg = ('review.nvim: worktree 残骸を掃除しました pr-7: %s (git 未登録)'):format(
-          dir
-        ),
+        msg = cleaned_note,
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       assert.is_true(vim.uv.fs_stat(dir) == nil)
@@ -236,9 +236,10 @@ describe('health.sweep closed + created_by_us 残骸', function()
       health.sweep(REPO_TOP, function() end)
 
       assert.same({
-        msg = ('review.nvim: worktree 残骸を掃除しました pr-7: %s (close 掃除の失敗残骸)'):format(
-          dir
-        ),
+        msg = (
+          'review.nvim: cleaned up worktree leftovers pr-7: %s (leftovers '
+          .. 'from a failed close cleanup)'
+        ):format(dir),
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       assert.equals(1, #state.notifications)
@@ -290,9 +291,10 @@ describe('health.sweep closed + created_by_us 残骸', function()
 
       assert.equals(1, #state.notifications)
       assert.equals(
-        ('review.nvim: worktree 残骸を掃除しました pr-7: %s (close 掃除の失敗残骸)'):format(
-          our_dir
-        ),
+        (
+          'review.nvim: cleaned up worktree leftovers pr-7: %s (leftovers '
+          .. 'from a failed close cleanup)'
+        ):format(our_dir),
         state.notifications[1].msg
       )
       assert.is_true(vim.uv.fs_stat(our_dir) == nil)
@@ -356,19 +358,21 @@ describe('health.sweep closed + created_by_us 残骸', function()
       -- pr-1: 掃除 WARN -> prune 失敗 WARN、pr-2: 掃除 WARN (順序は slug 昇順)
       assert.equals(3, #state.notifications)
       assert.equals(
-        ('review.nvim: worktree 残骸を掃除しました pr-1: %s (close 掃除の失敗残骸)'):format(
-          dir
-        ),
+        (
+          'review.nvim: cleaned up worktree leftovers pr-1: %s (leftovers '
+          .. 'from a failed close cleanup)'
+        ):format(dir),
         state.notifications[1].msg
       )
       assert.equals(
-        'review.nvim: worktree prune に失敗しました (pr-1): fatal: prune boom',
+        'review.nvim: worktree prune failed (pr-1): fatal: prune boom',
         state.notifications[2].msg
       )
       assert.equals(
-        ('review.nvim: worktree 残骸を掃除しました pr-2: %s (close 掃除の失敗残骸)'):format(
-          dir2
-        ),
+        (
+          'review.nvim: cleaned up worktree leftovers pr-2: %s (leftovers '
+          .. 'from a failed close cleanup)'
+        ):format(dir2),
         state.notifications[3].msg
       )
       assert.is_true(vim.uv.fs_stat(dir) == nil)

@@ -77,7 +77,7 @@ end
 local function copy_text(text)
   vim.fn.setreg('0', text)
   if not (M.has_provider() or clipboard_writable(text)) then
-    notify_warn 'クリップボード provider がありません。"0 レジスタにのみコピーしました'
+    notify_warn 'no clipboard provider; copied to the "0 register only'
     return false
   end
   -- nvim 0.13-nightly 実機: setreg の第 1 引数 List は E730 (既知の制約)。個別に書く。
@@ -114,33 +114,27 @@ local function emit(session, comments, opts, header, info_msg)
     return result.ok { text = '', count = 0 }
   end
   if excluded > 0 then
-    notify_info(('%d 件を除外しました (outdated)'):format(excluded))
+    notify_info(('excluded %d comments (outdated)'):format(excluded))
   end
   local ctx = ctx_for(session)
   local text = header and core_prompt.build(comments, ctx) or core_prompt.body(comments, ctx)
   if opts == nil or opts.copy ~= false then
     if copy_text(text) then
-      notify_info(
-        ('%d 件のコメントをクリップボードにコピーしました'):format(#included)
-      )
+      notify_info(('copied %d comments to the clipboard'):format(#included))
     end
   end
   return result.ok { text = text, count = #included }
 end
 
 local function not_active()
-  notify_warn 'レビュー進行中セッションがありません'
-  return result.err(
-    'review.nvim: レビュー進行中セッションがありません',
-    result.codes.E_NOT_ACTIVE
-  )
+  notify_warn 'no active review session'
+  return result.err('review.nvim: no active review session', result.codes.E_NOT_ACTIVE)
 end
 
 -- 空候補時のメッセージ使い分け (ai-prompt.md エッジケース): 本文 0 件 =
 -- 「コメントがありません」、全件 outdated (候補あり active 0) = 「有効なコメントがありません」。
 local function empty_msg(total)
-  return total == 0 and 'コメントがありません'
-    or '有効なコメントがありません'
+  return total == 0 and 'No comments' or 'No active comments'
 end
 
 --- :Review prompt (全コメント)。opts = { copy? }。
@@ -159,7 +153,7 @@ function M.for_file(path, opts)
     return not_active()
   end
   if session.files == nil or session.files[path] == nil then
-    notify_info 'そのファイルはレビュー対象の diff にありません'
+    notify_info 'that file is not part of the reviewed diff'
     return result.ok { text = '', count = 0 }
   end
   local scoped = {}
@@ -175,7 +169,7 @@ end
 --- が「その行のコメントはありません」までは WARN 済み。
 function M.for_line(session, found, opts)
   return emit(session, found, opts, false, function()
-    return 'outdated のためプロンプトに含めませんでした'
+    return 'not included in the prompt (outdated)'
   end)
 end
 

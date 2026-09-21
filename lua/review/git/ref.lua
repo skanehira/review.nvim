@@ -125,12 +125,7 @@ end
 function M.is_local_branch(opts, cb)
   run({ 'show-ref', '--verify', '--quiet', ('refs/heads/%s'):format(opts.ref) }, opts, function(res)
     if not res.ok then
-      cb(
-        result.err(
-          ('%s はローカルブランチではありません'):format(opts.ref),
-          result.codes.E_REF
-        )
-      )
+      cb(result.err(('%s is not a local branch'):format(opts.ref), result.codes.E_REF))
       return
     end
     cb(result.ok(true))

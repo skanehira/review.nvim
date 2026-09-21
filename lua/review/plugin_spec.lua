@@ -147,7 +147,7 @@ describe('plugin/review.lua VimEnter 起動スキャン', function()
         modeline = false,
       })
       assert.same({
-        msg = 'review.nvim: main--feature のレビューが続けられます (:Review で復元)',
+        msg = 'review.nvim: you can resume the review of main--feature (:Review to restore)',
         level = vim.log.levels.INFO,
       }, hook_notifications[1])
     end

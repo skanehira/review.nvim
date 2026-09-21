@@ -27,14 +27,14 @@ end
 
 function M.cmd_start(args)
   if args[2] == nil or args[2] == '' then
-    return usage ':Review start <base> [head] の形式で指定してください'
+    return usage 'use the form :Review start <base> [head]'
   end
   return require('review.handlers.session').start { base = args[2], head = args[3] }
 end
 
 function M.cmd_pr(args)
   if args[2] == nil or args[2] == '' then
-    return usage ':Review pr <number|url> の形式で指定してください'
+    return usage 'use the form :Review pr <number|url>'
   end
   return require('review.handlers.pr').start(args[2])
 end
@@ -70,7 +70,7 @@ end
 
 function M.cmd_delete(args)
   if args[2] == nil or args[2] == '' then
-    return usage ':Review delete <id> の形式で指定してください'
+    return usage 'use the form :Review delete <id>'
   end
   return require('review.handlers.session').delete(args[2])
 end

@@ -320,7 +320,7 @@ describe('comments_list.open', function()
       assert.equals('review-list', vim.bo[buf].filetype)
       assert.same({ kind = 'commentlist', session_id = SLUG }, vim.b[buf].review_meta)
       assert.same({ 'a.lua:2  [c1]  use map' }, list_lines())
-      assert.equals('main..作業ツリー · 1 comment', vim.w[w].review_winbar)
+      assert.equals('main..working tree · 1 comment', vim.w[w].review_winbar)
     end
   )
 
@@ -369,7 +369,7 @@ describe('comments_list.open', function()
     assert.same({
       __class = 'review.Result',
       ok = false,
-      error = 'review.nvim: アクティブなセッションがありません',
+      error = 'review.nvim: no active session',
       code = 'E_NOT_ACTIVE',
     }, res)
     assert.equals(1, #vim.api.nvim_tabpage_list_wins(state.tab))
@@ -414,7 +414,7 @@ describe('comments_list.open', function()
       comments_list.open()
 
       assert.same({ 'src/deep/new.lua:1  [c2]  D' }, list_lines())
-      assert.equals('main..作業ツリー · 1 comment', vim.w[list_win()].review_winbar)
+      assert.equals('main..working tree · 1 comment', vim.w[list_win()].review_winbar)
     end
   )
 end)
@@ -596,7 +596,7 @@ describe('comments_list.jump_current', function()
 
       assert.same({
         {
-          msg = 'review.nvim: コメントは outdated です。記録された行へ移動します',
+          msg = 'review.nvim: comment is outdated; jumping to the recorded line',
           level = vim.log.levels.INFO,
         },
       }, state.notifications)
@@ -617,7 +617,7 @@ describe('comments_list.jump_current', function()
       comments_list.jump_current()
       assert.same({
         {
-          msg = 'review.nvim: binary / 削除の告知表示のため移動できません',
+          msg = 'review.nvim: cannot jump: binary / deleted-file notice',
           level = vim.log.levels.WARN,
         },
       }, state.notifications)
@@ -626,11 +626,11 @@ describe('comments_list.jump_current', function()
       comments_list.jump_current()
       assert.same({
         {
-          msg = 'review.nvim: binary / 削除の告知表示のため移動できません',
+          msg = 'review.nvim: cannot jump: binary / deleted-file notice',
           level = vim.log.levels.WARN,
         },
         {
-          msg = 'review.nvim: binary / 削除の告知表示のため移動できません',
+          msg = 'review.nvim: cannot jump: binary / deleted-file notice',
           level = vim.log.levels.WARN,
         },
       }, state.notifications)
@@ -651,7 +651,7 @@ describe('comments_list.jump_current', function()
 
       assert.same({
         {
-          msg = 'review.nvim: このファイルは現在の差分に無いため移動できません',
+          msg = 'review.nvim: cannot jump: the file is not in the current diff',
           level = vim.log.levels.WARN,
         },
       }, state.notifications)
@@ -659,34 +659,31 @@ describe('comments_list.jump_current', function()
     end
   )
 
-  it(
-    '<CR>: active セッション不在は WARN «アクティブなセッションがありません»',
-    function()
-      -- active を立てずに一覧だけ描く (session close 後の残骸窓を模す)
-      local session = {
-        id = SLUG,
-        base = 'main',
-        head = 'feature',
-        files = { ['a.lua'] = { viewed = false } },
-        comments = {
-          comment_stub { id = 'c1', file = 'a.lua', line = 1, body = 'x' },
-        },
-      }
-      local buf = commentlist.render(session, { order = { 'a.lua' } })
-      local win = vim.api.nvim_get_current_win()
-      vim.api.nvim_win_set_buf(win, buf)
-      vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  it('<CR>: active セッション不在は WARN «no active session»', function()
+    -- active を立てずに一覧だけ描く (session close 後の残骸窓を模す)
+    local session = {
+      id = SLUG,
+      base = 'main',
+      head = 'feature',
+      files = { ['a.lua'] = { viewed = false } },
+      comments = {
+        comment_stub { id = 'c1', file = 'a.lua', line = 1, body = 'x' },
+      },
+    }
+    local buf = commentlist.render(session, { order = { 'a.lua' } })
+    local win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(win, buf)
+    vim.api.nvim_win_set_cursor(win, { 1, 0 })
 
-      comments_list.jump_current()
+    comments_list.jump_current()
 
-      assert.same({
-        {
-          msg = 'review.nvim: アクティブなセッションがありません',
-          level = vim.log.levels.WARN,
-        },
-      }, state.notifications)
-    end
-  )
+    assert.same({
+      {
+        msg = 'review.nvim: no active session',
+        level = vim.log.levels.WARN,
+      },
+    }, state.notifications)
+  end)
 end)
 
 describe('comments_list の閉じ方と窓の掃除', function()
@@ -798,7 +795,8 @@ describe('comments_list.delete_current (一覧専用 arming)', function()
 
       assert.same({
         {
-          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)',
+          msg = 'review.nvim: to delete comment c1 press d again on this '
+            .. 'line (cancel: move to another line / wait 2s / press <Esc>)',
           level = vim.log.levels.WARN,
         },
       }, state.notifications)
@@ -809,10 +807,11 @@ describe('comments_list.delete_current (一覧専用 arming)', function()
 
       assert.same({
         {
-          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)',
+          msg = 'review.nvim: to delete comment c1 press d again on this '
+            .. 'line (cancel: move to another line / wait 2s / press <Esc>)',
           level = vim.log.levels.WARN,
         },
-        { msg = 'review.nvim: コメント c1 を削除しました', level = vim.log.levels.INFO },
+        { msg = 'review.nvim: deleted comment c1', level = vim.log.levels.INFO },
       }, state.notifications)
       assert.same({ 'a.lua:2  [c2]  two' }, list_lines())
       -- INV-4: ディスクの session JSON を読んで判定する (メモリ状態は見ない)
@@ -859,11 +858,13 @@ describe('comments_list.delete_current (一覧専用 arming)', function()
       -- diff 側の arming WARN + 一覧側の arming WARN (削除は起きていない)
       assert.same({
         {
-          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)',
+          msg = 'review.nvim: to delete comment c1 press d again on this '
+            .. 'line (cancel: move to another line / wait 2s / press <Esc>)',
           level = vim.log.levels.WARN,
         },
         {
-          msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)',
+          msg = 'review.nvim: to delete comment c1 press d again on this '
+            .. 'line (cancel: move to another line / wait 2s / press <Esc>)',
           level = vim.log.levels.WARN,
         },
       }, state.notifications)
@@ -902,7 +903,7 @@ describe('comments_list.delete_current (一覧専用 arming)', function()
       comments_list.delete_current()
       comments_list.delete_current()
       assert.same({ 1, 0 }, vim.api.nvim_win_get_cursor(list_win()))
-      assert.same({ 'コメントはありません' }, list_lines())
+      assert.same({ 'No comments' }, list_lines())
     end
   )
 end)
@@ -919,14 +920,15 @@ describe('comments_list.delete_all_current (一覧専用の一括 arming)', func
   end
 
   it(
-    'D: 1 回目は arming の WARN で消さず、2 回目で全件削除 + save + «コメントはありません»',
+    'D: 1 回目は arming の WARN で消さず、2 回目で全件削除 + save + «No comments»',
     function()
       seed_open()
 
       comments_list.delete_all_current()
       assert.same({
         {
-          msg = 'review.nvim: コメント全 2 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)',
+          msg = 'review.nvim: to delete all 2 comments press again '
+            .. '(cancel: wait 2s / comment count change / press <Esc>)',
           level = vim.log.levels.WARN,
         },
       }, state.notifications)
@@ -935,15 +937,16 @@ describe('comments_list.delete_all_current (一覧専用の一括 arming)', func
       comments_list.delete_all_current()
       assert.same({
         {
-          msg = 'review.nvim: コメント全 2 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)',
+          msg = 'review.nvim: to delete all 2 comments press again '
+            .. '(cancel: wait 2s / comment count change / press <Esc>)',
           level = vim.log.levels.WARN,
         },
         {
-          msg = 'review.nvim: コメント全 2 件を削除しました',
+          msg = 'review.nvim: deleted all 2 comments',
           level = vim.log.levels.INFO,
         },
       }, state.notifications)
-      assert.same({ 'コメントはありません' }, list_lines())
+      assert.same({ 'No comments' }, list_lines())
       -- INV-4: ディスクの session JSON が空
       assert.equals(0, #store.load(state.repo, SLUG).data.comments)
     end
@@ -971,7 +974,7 @@ describe('comments_list.delete_all_current (一覧専用の一括 arming)', func
     end
   )
 
-  it('D: 0 件は INFO «コメントがありません» で一覧は変わらない', function()
+  it('D: 0 件は INFO «No comments» で一覧は変わらない', function()
     start_done()
     comments_list.open()
     state.notifications = {}
@@ -979,9 +982,9 @@ describe('comments_list.delete_all_current (一覧専用の一括 arming)', func
     comments_list.delete_all_current()
 
     assert.same({
-      { msg = 'review.nvim: コメントがありません', level = vim.log.levels.INFO },
+      { msg = 'review.nvim: No comments', level = vim.log.levels.INFO },
     }, state.notifications)
-    assert.same({ 'コメントはありません' }, list_lines())
+    assert.same({ 'No comments' }, list_lines())
   end)
 end)
 
@@ -1008,7 +1011,7 @@ describe('comments_list.<Esc> cancel_arming (一覧 arming の解除)', function
       assert.is_true(comments_list.cancel_arming())
       assert.same({
         {
-          msg = 'review.nvim: 削除の arming を解除しました',
+          msg = 'review.nvim: delete arming cancelled',
           level = vim.log.levels.INFO,
         },
       }, state.notifications)
@@ -1042,7 +1045,7 @@ describe('comments_list.edit_current / yank_current', function()
 
       -- 編集 float: 現在 body が事前入力され、title に対象行が出る
       assert.same({ 'orig' }, vim.api.nvim_buf_get_lines(0, 0, -1, false))
-      assert.equals(' Comment [a.lua:2]  <CR> 確定  q 閉じる ', title_text())
+      assert.equals(' Comment [a.lua:2]  <CR> confirm  q close ', title_text())
       type_into_float 'edited'
 
       -- INV-4: ディスクの session JSON を読んで body 更新を確認する
@@ -1083,26 +1086,23 @@ describe('comments_list.edit_current / yank_current', function()
     assert.equals('@a.lua#L1\nyank me', vim.fn.getreg '0')
   end)
 
-  it(
-    'y: outdated 行はコピーせず INFO «outdated のためプロンプトに含めませんでした»',
-    function()
-      start_done()
-      add_comment { file = 'a.lua', line = 1, body = 'old', state = 'outdated' }
-      comments_list.open()
-      focus_list_row(1)
-      vim.fn.setreg('0', 'sentinel')
+  it('y: outdated 行はコピーせず INFO «not included in the prompt (outdated)»', function()
+    start_done()
+    add_comment { file = 'a.lua', line = 1, body = 'old', state = 'outdated' }
+    comments_list.open()
+    focus_list_row(1)
+    vim.fn.setreg('0', 'sentinel')
 
-      comments_list.yank_current()
+    comments_list.yank_current()
 
-      assert.same({
-        {
-          msg = 'review.nvim: outdated のためプロンプトに含めませんでした',
-          level = vim.log.levels.INFO,
-        },
-      }, state.notifications)
-      assert.equals('sentinel', vim.fn.getreg '0')
-    end
-  )
+    assert.same({
+      {
+        msg = 'review.nvim: not included in the prompt (outdated)',
+        level = vim.log.levels.INFO,
+      },
+    }, state.notifications)
+    assert.equals('sentinel', vim.fn.getreg '0')
+  end)
 end)
 
 describe('comments_list の追随 (再 render)', function()
@@ -1143,7 +1143,7 @@ describe('comments_list の追随 (再 render)', function()
     session_handler.refresh()
 
     assert.same({ 'a.lua:1  [c1]  one ⚠ outdated' }, list_lines())
-    assert.equals('main..作業ツリー · 1 comment · ⚠1', vim.w[list_win()].review_winbar)
+    assert.equals('main..working tree · 1 comment · ⚠1', vim.w[list_win()].review_winbar)
   end)
 
   it('絞り込み (/) の適用に追随して一覧の対象集合が変わる', function()

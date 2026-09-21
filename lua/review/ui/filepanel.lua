@@ -273,7 +273,7 @@ function M.winbar(session, files, opts)
   if opts.filter ~= nil and opts.filter ~= '' then
     -- 一致 0 なら「閉じた?」と誤解されないよう解除手順をその場に出す
     bar = bar
-      .. (' · filter=%s%s'):format(opts.filter, #files == 0 and ' (空入力で解除)' or '')
+      .. (' · filter=%s%s'):format(opts.filter, #files == 0 and ' (empty input clears)' or '')
   end
   if opts.hidden_outdated ~= nil and opts.hidden_outdated > 0 then
     bar = bar .. (' · ⚠%d'):format(opts.hidden_outdated)

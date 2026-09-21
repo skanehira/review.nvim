@@ -422,7 +422,7 @@ describe('commentmarks.apply: 罫線の箱', function()
     end
   )
 
-  it('折り返しを含めて 11 行目で … (i で全文) に打ち切る', function()
+  it('折り返しを含めて 11 行目で … (press i for full text) に打ち切る', function()
     local buf = mk_buf({ 'line1', 'line2', 'line3' }, 'commentmarks-spec/box3.lua')
     -- 14 字の本文 6 行 = 各 2 表示行 (13 + 1) = 12 表示行 -> 10 行で打ち切り
     local body = {}
@@ -437,15 +437,20 @@ describe('commentmarks.apply: 罫線の箱', function()
     )
     local vl = head_virt_lines(buf)
     assert.equals(
-      13,
+      14,
       #vl,
-      '上罫線 + 10 行 + 打ち切り + 下罫線でない: ' .. tostring(#vl)
+      '上罫線 + 10 行 + 打ち切り 2 行 + 下罫線でない: ' .. tostring(#vl)
     )
     -- 10 表示行目 = 5 本文行目の折り返し残り (pad + 1 文字)
     assert.same({ { string.rep(' ', 7) .. 'b', 'ReviewCommentBody' } }, inner_chunks(vl[11]))
+    -- 打ち切り導線は英語文言 (表示幅 25) が内側幅 20 で 2 行に折り返される
     assert.same(
-      { { string.rep(' ', 7) .. '… (i で全文)', 'ReviewCommentBody' } },
+      { { string.rep(' ', 7) .. '… (press i fo', 'ReviewCommentBody' } },
       inner_chunks(vl[12])
+    )
+    assert.same(
+      { { string.rep(' ', 7) .. 'r full text)', 'ReviewCommentBody' } },
+      inner_chunks(vl[13])
     )
   end)
 
@@ -463,18 +468,20 @@ describe('commentmarks.apply: 罫線の箱', function()
         'a.lua'
       )
       local vl = head_virt_lines(buf)
-      assert.same({ { '┌' .. string.rep('─', 21) .. '┐', 'ReviewCommentBorder' } }, vl[1])
+      -- 打ち切り導線 (表示幅 25) が 1 行で収まる自然幅 36 へ拡大 (旧 «… (i で全
+      -- 文)» の 23 から語長変化で変わる — 右辺揃えの契約は不変)
+      assert.same({ { '┌' .. string.rep('─', 34) .. '┐', 'ReviewCommentBorder' } }, vl[1])
       assert.same({
         { '│ ', 'ReviewCommentBorder' },
         { '  [c1] ', 'ReviewCommentOutdated' },
         { 'line1', 'ReviewCommentBody' },
-        { string.rep(' ', 7), 'ReviewCommentBody' },
+        { string.rep(' ', 20), 'ReviewCommentBody' },
         { ' │', 'ReviewCommentBorder' },
       }, vl[2])
       assert.same({
         { '│ ', 'ReviewCommentBorder' },
         { '       ', 'ReviewCommentBody' },
-        { '… (i で全文)', 'ReviewCommentOutdated' },
+        { '… (press i for full text)', 'ReviewCommentOutdated' },
         { '', 'ReviewCommentBody' },
         { ' │', 'ReviewCommentBorder' },
       }, vl[12])
@@ -495,7 +502,7 @@ describe('commentmarks.apply: 罫線の箱', function()
           line[#line][2],
           ('%d 行目の末尾 chunk が Border 色でない'):format(i)
         )
-        assert.equals(23, row_width(line), ('%d 行目の表示幅が揃っていない'):format(i))
+        assert.equals(36, row_width(line), ('%d 行目の表示幅が揃っていない'):format(i))
       end
     end
   )
@@ -517,12 +524,13 @@ describe('commentmarks.apply: 罫線の箱', function()
       local vl = head_virt_lines(buf)
       -- 上限 20 で内側幅 16。打ち切り文言 (表示幅 12 + pad 7 = 19) も折り返される
       assert.equals(
-        14,
+        15,
         #vl,
-        '上罫線 + 10 行 + 打ち切り 2 行 + 下罫線でない: ' .. tostring(#vl)
+        '上罫線 + 10 行 + 打ち切り 3 行 + 下罫線でない: ' .. tostring(#vl)
       )
-      assert.equals('       … (i で全', line_text(inner_chunks(vl[12])))
-      assert.equals('       文)', line_text(inner_chunks(vl[13])))
+      assert.equals('       … (press ', line_text(inner_chunks(vl[12])))
+      assert.equals('       i for ful', line_text(inner_chunks(vl[13])))
+      assert.equals('       l text)', line_text(inner_chunks(vl[14])))
       for i, line in ipairs(vl) do
         assert.equals(
           20,
@@ -559,7 +567,7 @@ describe('commentmarks.apply: 罫線の箱', function()
       -- 見出しも箱の中身行: id 接頭辞幅の pad (本文色) + 見出し文言 (警告色)
       assert.same({
         { '       ', 'ReviewCommentBody' },
-        { ' 2 outdated (prompt 除外中)', 'ReviewCommentOutdated' },
+        { ' 2 outdated (excluded from prompt)', 'ReviewCommentOutdated' },
       }, inner_chunks(vl[2]))
       assert.same({
         { '  [c1] ', 'ReviewCommentOutdated' },
@@ -576,7 +584,7 @@ describe('commentmarks.apply: 罫線の箱', function()
       assert.equals('ReviewCommentBorder', vl[6][1][2], '集約の末行が下罫線でない')
       for i, line in ipairs(vl) do
         assert.equals(
-          38,
+          45,
           row_width(line),
           ('集約の箱の %d 行目が右辺で揃っていない'):format(i)
         )
@@ -632,12 +640,12 @@ describe('commentmarks.apply: 罫線の箱', function()
       end
       assert.is_not_nil(above, 'virt_lines_above の集約 mark が無い')
       local vl = above[4].virt_lines or {}
-      -- 外幅 20 = 内側幅 16。見出し (表示幅 27 + pad 7 = 34) は budget 9 で
-      -- 3 行に折り返される (単語境界は考慮しない)
+      -- 外幅 20 = 内側幅 16。見出し (« 2 outdated (excluded from prompt)» 表示幅
+      -- 36 + pad 7 = 43) は budget 9 で 4 行に折り返される (単語境界は考慮しない)
       assert.equals(
-        8,
+        9,
         #vl,
-        '上罫線 + 見出し 3 行 + c1 + 区切り + c2 + 下罫線でない: '
+        '上罫線 + 見出し 4 行 + c1 + 区切り + c2 + 下罫線でない: '
           .. vim.inspect(vl)
       )
       assert.same(
@@ -645,23 +653,27 @@ describe('commentmarks.apply: 罫線の箱', function()
         inner_chunks(vl[2])
       )
       assert.same(
-        { { '       ', 'ReviewCommentBody' }, { 'ed (promp', 'ReviewCommentOutdated' } },
+        { { '       ', 'ReviewCommentBody' }, { 'ed (exclu', 'ReviewCommentOutdated' } },
         inner_chunks(vl[3])
       )
       assert.same(
-        { { '       ', 'ReviewCommentBody' }, { 't 除外中)', 'ReviewCommentOutdated' } },
+        { { '       ', 'ReviewCommentBody' }, { 'ded from ', 'ReviewCommentOutdated' } },
         inner_chunks(vl[4])
+      )
+      assert.same(
+        { { '       ', 'ReviewCommentBody' }, { 'prompt)', 'ReviewCommentOutdated' } },
+        inner_chunks(vl[5])
       )
       assert.same({
         { '  [c1] ', 'ReviewCommentOutdated' },
         { 'gone', 'ReviewCommentBody' },
-      }, inner_chunks(vl[5]))
-      assert.is_true(line_text(vl[6]):find('├', 1, true) ~= nil, '区切り罫線が無い')
+      }, inner_chunks(vl[6]))
+      assert.is_true(line_text(vl[7]):find('├', 1, true) ~= nil, '区切り罫線が無い')
       assert.same({
         { '  [c2] ', 'ReviewCommentOutdated' },
         { 'also gone', 'ReviewCommentBody' },
-      }, inner_chunks(vl[7]))
-      assert.equals('ReviewCommentBorder', vl[8][1][2], '集約の末行が下罫線でない')
+      }, inner_chunks(vl[8]))
+      assert.equals('ReviewCommentBorder', vl[9][1][2], '集約の末行が下罫線でない')
       for i, line in ipairs(vl) do
         assert.equals(
           20,
@@ -679,7 +691,7 @@ describe('commentmarks.apply: outdated 集約', function()
   it(
     'no-changes placeholder path では全 outdated を問わない file で 1 行目に集約',
     function()
-      local buf = mk_buf({ '変更なし' }, 'commentmarks-spec/f0.lua')
+      local buf = mk_buf({ 'No changes' }, 'commentmarks-spec/f0.lua')
       commentmarks.apply(
         session_of {
           comment { file = 'a.lua', line = 5, state = 'outdated', body = 'was here' },
@@ -704,7 +716,7 @@ describe('commentmarks.apply: outdated 集約', function()
       )
       assert.same({
         { '       ', 'ReviewCommentBody' },
-        { ' 2 outdated (prompt 除外中)', 'ReviewCommentOutdated' },
+        { ' 2 outdated (excluded from prompt)', 'ReviewCommentOutdated' },
       }, inner_chunks(above[4].virt_lines[2]))
     end
   )
@@ -731,7 +743,7 @@ describe('commentmarks.apply: outdated 集約', function()
     local vl = above[4].virt_lines or {}
     assert.equals('ReviewCommentBorder', vl[1][1][2], '集約の 1 行目が上罫線でない')
     -- 見出し行 = id 接頭辞幅の pad chunk + 見出し文言 chunk
-    assert.equals(' 2 outdated (prompt 除外中)', inner_chunks(vl[2])[2][1])
+    assert.equals(' 2 outdated (excluded from prompt)', inner_chunks(vl[2])[2][1])
     local joined = {}
     for i = 3, #vl - 1 do
       joined[#joined + 1] = line_text(vl[i])
@@ -784,7 +796,7 @@ describe(
         )
         assert.equals('  [c1] line1', line_text(inner_chunks(vl[2])))
         assert.equals('       line10', line_text(inner_chunks(vl[11])))
-        assert.equals('       … (i で全文)', line_text(inner_chunks(vl[12])))
+        assert.equals('       … (press i for full text)', line_text(inner_chunks(vl[12])))
       end
     )
 
@@ -851,10 +863,10 @@ describe(
           'a.lua'
         )
         local vl = head_virt_lines(buf)
-        assert.same(
-          { { '       ', 'ReviewCommentBody' }, { '… (i で全文)', 'ReviewCommentOutdated' } },
-          inner_chunks(vl[12])
-        )
+        assert.same({
+          { '       ', 'ReviewCommentBody' },
+          { '… (press i for full text)', 'ReviewCommentOutdated' },
+        }, inner_chunks(vl[12]))
       end
     )
 

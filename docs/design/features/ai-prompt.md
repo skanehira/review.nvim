@@ -31,9 +31,9 @@ setup 側で config を deep merge したい
 
 | 経路 | 挙動 |
 | --- | --- |
-| `:Review prompt [file]` | 全コメント (file 指定時はそのファイルのみ) を 1 文字列に整形。クリップボード provider (`+`/`*` レジスタ) があれば両方に、常に `"0` へも入れる。本文 0 件なら「コメントがありません」INFO。クリップボードへのコピー成功時は件数を INFO « N 件のコメントをクリップボードにコピーしました » (全経路共通。無し退路は WARN のみで INFO を重ねない。`copy=false` は無通知) |
-| キーマップ `y` (head 窓) | カーソル行 range に含まれるコメントのみ同上 (outdated の既定除外も同じルール。カーソル行のコメントがすべて outdated の場合はコピーせず INFO「outdated のためプロンプトに含めませんでした」) |
-| キーマップ `y` (コメント一覧) | カーソル行 1 件のコメントのみ同上 (単一 range と同じ規則。outdated 行はコピーせず INFO「outdated のためプロンプトに含めませんでした」) |
+| `:Review prompt [file]` | 全コメント (file 指定時はそのファイルのみ) を 1 文字列に整形。クリップボード provider (`+`/`*` レジスタ) があれば両方に、常に `"0` へも入れる。本文 0 件なら«No comments» INFO。クリップボードへのコピー成功時は件数を INFO «copied %d comments to the clipboard» (全経路共通。無し退路は WARN のみで INFO を重ねない。`copy=false` は無通知) |
+| キーマップ `y` (head 窓) | カーソル行 range に含まれるコメントのみ同上 (outdated の既定除外も同じルール。カーソル行のコメントがすべて outdated の場合はコピーせず INFO「not included in the prompt (outdated)」) |
+| キーマップ `y` (コメント一覧) | カーソル行 1 件のコメントのみ同上 (単一 range と同じ規則。outdated 行はコピーせず INFO「not included in the prompt (outdated)」) |
 | Lua API | `require("review").prompt_all(opts)` / `prompt_for_file(path, opts)` が結果型 `{ok, data={text, count}}` を返し、copy を opts (`copy=false` 可) で制御 (テストフック) |
 
 整形は純粋関数 `core/prompt.lua` (build(comments, ctx) → string) に置き、UI 層はクリップボード書込のみ担う。
@@ -43,7 +43,7 @@ setup 側で config を deep merge したい
 AI に渡した後の残骸を消す維持操作。prompt のコピー成功後に続けて使う前提だが、**コピー後の自動削除はしない** — ミスコピ時に再度コピーできる余地をユーザーに残すため、削除は常に明示操作 + 確認を挟む:
 
 - 対象は active セッションの**全 comments** (state 無関係 = 二度と prompt に載らない outdated も一緒に消す。`:Review clear` の確認文と help に outdated を含む旨を出す)
-- キー (`D`、diff 窓 / コメント一覧): arming 二重押し (1 回目 WARN、2 秒内にもう一度で確定)。arming は「コメント件数の変化」と `<Esc>` で無効化 (二度押しの間に加筆・削除で対象集合が変わったら 1 目やり直し。`<Esc>` は 2 秒待ち不要の明示解除 — 誤爆した d / D の取り消しは待機ではなく解除キーで行う)。窓ごとの別状態 (diff / 一覧で共有しない — 単一削除 `d` の arming とも別)。0 件は INFO «コメントがありません» で arming しない
+- キー (`D`、diff 窓 / コメント一覧): arming 二重押し (1 回目 WARN、2 秒内にもう一度で確定)。arming は「コメント件数の変化」と `<Esc>` で無効化 (二度押しの間に加筆・削除で対象集合が変わったら 1 目やり直し。`<Esc>` は 2 秒待ち不要の明示解除 — 誤爆した d / D の取り消しは待機ではなく解除キーで行う)。窓ごとの別状態 (diff / 一覧で共有しない — 単一削除 `d` の arming とも別)。0 件は INFO «No comments» で arming しない
 - コマンド (`:Review clear`): `vim.ui.input` の [y/N] (件数入りプロンプト。応答後 cmdline クリア — DESIGN「UI」)。キャンセルは無通知・無変更 (close の確認と同型)。0 件は確認せず INFO
 - 削除本体は `core/comment.remove_all` (in-place で空にし件数を返す純関数) 1 回 + `commit_comment_change()` 1 回で save / extmark 再構成 / winbar / 一覧追随をまとめる
 
@@ -63,11 +63,11 @@ AI に渡した後の残骸を消す維持操作。prompt のコピー成功後�
 
 ## エッジケースの決定
 
-- active セッションが無い状態の `:Review prompt` / `prompt_*`: `E_NOT_ACTIVE` を同期で返す DESIGN.md「API 一覧」の契約どおり、WARN「レビュー進行中セッションがありません」を出す (クリップボードは触れない)
+- active セッションが無い状態の `:Review prompt` / `prompt_*`: `E_NOT_ACTIVE` を同期で返す DESIGN.md「API 一覧」の契約どおり、WARN「no active review session」を出す (クリップボードは触れない)
 - クリップボードへの実効性判定は 2 段: (1) 定義済み provider 4 系統 (`g:clipboard` / `clipboard#copy` / `provider#clipboard#Call` / `clipboard.provider()`)、(2) 実書込→読み戻し probe (`+` に書いて `getreg('+')` で確認)。Neovim の provider autoload は**初回 register 操作で遅延ロード**されるため (1) だけでは初回を取りこぼす (実測。macOS の初回 yank 誤 WARN の残因)。(1)(2) とも不成立 (tools 無し headless 等) は WARN を出し `"0` には入れる (失敗で止めない。E2E はこのレジスタで検証する)
-- file 引数に diff に存在しないパス: 「そのファイルはレビュー対象の diff にありません」INFO。曖昧パスの補完 (`<Tab>` customlist = 対象ファイル一覧) を付ける
+- file 引数に diff に存在しないパス: 「that file is not part of the reviewed diff」INFO。曖昧パスの補完 (`<Tab>` customlist = 対象ファイル一覧) を付ける
 - body が空のコメントは作成時点で入力 float が拒否 (1 文字以上必須)
-- 全コメントが outdated のセッション: 見出し + 除外 INFO のみで本文なしのプロンプトは生成しない (「有効なコメントがありません」で終了)
+- 全コメントが outdated のセッション: 見出し + 除外 INFO のみで本文なしのプロンプトは生成しない (「No active comments」で終了)
 - scratch 縮退セッションの prompt/y: `@<相対 path>#L` は現在のチェックアウトの内容を指し、レビュー時の head 内容と一致する保証がない — プロンプトの定型見出しは変更せず、生成・コピー時に INFO « scratch レビューのため @path は現在の作業ツリーを指します (レビュー時内容と違う場合があります)» を添える (エージェントへ暗黙に誤った前提を置かせない)
 - 巨大コメント数 (100 件超): 連結文字列の生成はループ 1 回。性能上の分割は不要と判断 (クリップボード自体の上限は対象外)
 

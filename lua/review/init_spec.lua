@@ -157,7 +157,7 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
     local res = review.command { 'start' }
     assert.equals(false, res.ok)
     assert.same({
-      msg = 'review.nvim: :Review start <base> [head] の形式で指定してください',
+      msg = 'review.nvim: use the form :Review start <base> [head]',
       level = vim.log.levels.WARN,
     }, notifications[1])
   end)
@@ -166,7 +166,7 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
     local res = review.command { 'pr' }
     assert.equals(false, res.ok)
     assert.same({
-      msg = 'review.nvim: :Review pr <number|url> の形式で指定してください',
+      msg = 'review.nvim: use the form :Review pr <number|url>',
       level = vim.log.levels.WARN,
     }, notifications[1])
   end)
@@ -191,7 +191,7 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
     assert.same({
       __class = 'review.Result',
       ok = false,
-      error = 'review.nvim: アクティブなセッションがありません',
+      error = 'review.nvim: no active session',
       code = 'E_NOT_ACTIVE',
     }, res)
   end)
@@ -203,11 +203,11 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
     assert.same({
       __class = 'review.Result',
       ok = false,
-      error = 'review.nvim: アクティブなセッションがありません',
+      error = 'review.nvim: no active session',
       code = 'E_NOT_ACTIVE',
     }, res)
     assert.same({
-      msg = 'review.nvim: アクティブなセッションがありません',
+      msg = 'review.nvim: no active session',
       level = vim.log.levels.WARN,
     }, notifications[1])
   end)
@@ -218,11 +218,11 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
     assert.same({
       __class = 'review.Result',
       ok = false,
-      error = 'review.nvim: アクティブなセッションがありません',
+      error = 'review.nvim: no active session',
       code = 'E_NOT_ACTIVE',
     }, res)
     assert.same({
-      msg = 'review.nvim: アクティブなセッションがありません',
+      msg = 'review.nvim: no active session',
       level = vim.log.levels.WARN,
     }, notifications[1])
   end)
@@ -369,7 +369,7 @@ describe('Lua API resume({id}) 直接復元 (DESIGN.md「API 一覧」)', functi
       assert.equals(true, review.resume({ id = 'no--pe' }).ok) -- ディスパッチ受理
 
       assert.same({
-        msg = 'review.nvim: セッション no--pe が見つかりません',
+        msg = 'review.nvim: session no--pe not found',
         level = vim.log.levels.WARN,
       }, notifications[1])
       assert.is_nil(session_handler.active())
@@ -498,13 +498,13 @@ describe(
         assert.same({
           __class = 'review.Result',
           ok = false,
-          error = 'review.nvim: レビュー進行中セッションがありません',
+          error = 'review.nvim: no active review session',
           code = 'E_NOT_ACTIVE',
         }, review.prompt_all())
         assert.same({
           __class = 'review.Result',
           ok = false,
-          error = 'review.nvim: レビュー進行中セッションがありません',
+          error = 'review.nvim: no active review session',
           code = 'E_NOT_ACTIVE',
         }, review.prompt_for_file('a.lua', { copy = false }))
       end

@@ -13,129 +13,132 @@ local M = {}
 -- file panel / sessionlist の全キーを載せる (説明も「head 窓のみ」等の窓条件まで)。
 local SECTIONS = {
   {
-    title = 'レビュー窓 (head / base)',
+    title = 'review windows (head / base)',
     keymap = 'diff',
     rows = {
-      { 'add_comment', '作成コメント (visual-line で範囲指定・head 窓のみ)' },
-      { 'edit_comment', 'カーソル行のコメントを編集 (head 窓のみ)' },
+      { 'add_comment', 'create a comment (visual-line for range; head window only)' },
+      { 'edit_comment', 'edit the comment on the cursor line (head window only)' },
       {
         'delete_comment',
-        'カーソル行のコメントを削除 (arming: 同じ行でもう一度 d)',
+        'delete the comment on the cursor line (arming: press d again on the same line)',
       },
       {
         'delete_all',
-        '全コメントを一括削除 (arming: もう一度押す。:Review clear と同じ)',
+        'delete all comments at once (arming: press again; same as :Review clear)',
       },
       {
         'cancel_arming',
-        'd / D の arming 解除 (arming 中でないときは built-in の <Esc>)',
+        'cancel d / D arming (falls back to built-in <Esc> when not armed)',
       },
-      { 'yank_prompt', 'カーソル行のコメントのプロンプトを yank' },
-      { 'close', 'セッションを閉じる (レビュー tab を閉じる)' },
-      { 'help', 'このヘルプ (g? でも開く)' },
-      { 'next_file', '次のファイルへ (端では無動作)' },
-      { 'prev_file', '前のファイルへ (端では無動作)' },
-      { 'first_file', '最初のファイルへ' },
-      { 'last_file', '最後のファイルへ' },
-      { 'refresh', '差分を再取得 (リフレッシュ)' },
-      { 'focus_panel', 'file panel (変更ファイル一覧) へ移動' },
+      { 'yank_prompt', 'yank the prompt of the comment on the cursor line' },
+      { 'close', 'close the session (closes the review tab)' },
+      { 'help', 'this help (also opens with g?)' },
+      { 'next_file', 'next file (no-op at the edges)' },
+      { 'prev_file', 'previous file (no-op at the edges)' },
+      { 'first_file', 'first file' },
+      { 'last_file', 'last file' },
+      { 'refresh', 'refresh the diff' },
+      { 'focus_panel', 'go to the file panel (changed files)' },
       {
         'toggle_panel',
-        'file panel の表示トグル (閉じても tab とレビュー窓は残る)',
+        'toggle the file panel (closing keeps the tab and review windows)',
       },
       {
         'comments_list',
-        'コメント一覧 (横断) をレビュー tab の最下部に全幅で開く (:Review comments と同じ。既に開いていればその窓へ focus)',
+        'open the comments list (cross-file) full-width at the bottom '
+          .. 'of the review tab (same as :Review comments; focuses the '
+          .. 'window if already open)',
       },
-      { 'view_comments', 'カーソル行のコメントを閲覧 (read-only)' },
+      { 'view_comments', 'view the comment on the cursor line (read-only)' },
     },
   },
   {
-    title = 'file panel (変更ファイル一覧)',
+    title = 'file panel (changed files)',
     keymap = 'sidebar',
     rows = {
       {
         'open_diff',
-        'そのファイルを head/base 窓に開く (カーソルは file panel に残る。dir 行では折り畳み)',
+        'open the file in the head/base windows (cursor stays in the panel; dir rows toggle fold)',
       },
-      { 'open_file', '<CR> と同じ (file panel の o = entry を開く)' },
-      { 'open_entry', '<CR> と同じ (entry を開く)' },
+      { 'open_file', 'same as <CR> (panel o opens the entry)' },
+      { 'open_entry', 'same as <CR> (open the entry)' },
       -- 移動系・refresh の文案は doc/review.txt sidebar 節と同文。diff 節と同一文に
       -- すると help_spec の has_line 完全一致が節を区別できず (検出能力ゼロ)、
       -- 節の行数が減ってもテストが緑になる。文言を一意化している。
       {
         'next_file',
-        '次のファイル (file panel の表示順 = <CR> と同一処理。focus も panel に残る。端は無動作)',
+        'next file (panel display order = same handling as <CR>; focus '
+          .. 'stays in panel; no-op at edges)',
       },
-      { 'prev_file', '前のファイル (上記と同じ規則)' },
-      { 'first_file', '最初のファイル (上記と同じ規則)' },
-      { 'last_file', '最後のファイル (上記と同じ規則)' },
-      { 'refresh', '差分を再取得 (レビュー窓の R と同一)' },
-      { 'toggle_style', 'list 表示 (フルパス 1 行) ⇄ tree 表示を切替' },
-      { 'toggle_viewed', 'レビュー完了マーク [✓] 切替 (open では付かない)' },
-      { 'filter', '一覧を絞り込む (空入力で解除)' },
-      { 'help', 'このヘルプ (file panel でも g? で開く)' },
-      { 'close', 'セッションを閉じる' },
-      { 'comments_list', 'コメント一覧 (横断) を開く (diff 窓と同じ)' },
+      { 'prev_file', 'previous file (same rule as above)' },
+      { 'first_file', 'first file (same rule as above)' },
+      { 'last_file', 'last file (same rule as above)' },
+      { 'refresh', 'refresh the diff (same as R in review windows)' },
+      { 'toggle_style', 'toggle list view (full path 1 line) / tree view' },
+      { 'toggle_viewed', 'toggle review-done mark [✓] (open never sets it)' },
+      { 'filter', 'filter the list (empty input clears)' },
+      { 'help', 'this help (g? also works in the panel)' },
+      { 'close', 'close the session' },
+      { 'comments_list', 'open the comments list (same as the diff windows)' },
     },
   },
   {
-    title = 'コメント一覧 (横断)',
+    title = 'comments list (cross-file)',
     keymap = 'commentlist',
     rows = {
-      { 'jump', 'カーソル行のコメント位置へジャンプ' },
+      { 'jump', 'jump to the comment on the cursor line' },
       {
         'delete',
-        'カーソル行のコメントを削除 (一覧専用 arming: 同じ行でもう一度 d)',
+        'delete the comment on the cursor line (list-only arming: press d again on the same line)',
       },
       {
         'delete_all',
-        '全コメントを一括削除 (一覧専用 arming: もう一度押す。:Review clear と同じ)',
+        'delete all comments at once (list-only arming: press again; same as :Review clear)',
       },
       {
         'cancel_arming',
-        'd / D の一覧 arming を解除 (解除物が無ければ無動作)',
+        'cancel list d / D arming (no-op when nothing is armed)',
       },
-      { 'edit', 'カーソル行のコメントを編集' },
-      { 'yank', 'カーソル行のコメントのプロンプトを yank' },
-      { 'close', '一覧を閉じる (セッション状態は変えない)' },
+      { 'edit', 'edit the comment on the cursor line' },
+      { 'yank', 'yank the prompt of the comment on the cursor line' },
+      { 'close', 'close the list (leaves the session state unchanged)' },
     },
   },
   {
-    title = 'セッション一覧 (:Review list)',
+    title = 'sessions list (:Review list)',
     keymap = 'sessionlist',
     rows = {
-      { 'open', '選択セッションを開く' },
-      { 'close', '一覧を閉じる (セッション状態は変えない)' },
-      { 'delete', '選択セッションを削除 (:Review delete と同じ確認)' },
+      { 'open', 'open the selected session' },
+      { 'close', 'close the list (leaves the session state unchanged)' },
+      { 'delete', 'delete the selected session (same confirm as :Review delete)' },
     },
   },
   {
     -- コメント入力 float のキーは config.keymaps 対象外 (固定)。確定/閉じるの
     -- 操作は discoverability の中心なので help に載せる (窓 title にも常時表示)。
-    title = 'コメント入力 (c/e で開く)',
+    title = 'comment input (opened by c/e)',
     keymap = nil,
     rows = {
-      { '<CR>', '確定 (Normal)。insert 中の <CR> は改行' },
+      { '<CR>', 'confirm (Normal). <CR> in insert is a newline' },
       {
         'q',
-        '閉じる。本文なし=キャンセル / 本文ありは閉じず、続けて q で破棄',
+        'close. empty body cancels; with body it stays open, press q again to discard',
       },
-      { '<C-y>', '確定 (insert)' },
-      { '<Esc>', 'Normal へ戻るだけ (窓は閉じない)' },
+      { '<C-y>', 'confirm (insert)' },
+      { '<Esc>', 'return to Normal only (does not close)' },
     },
   },
   {
     -- DESIGN 決定表 «gate 不成立窓では 1 キーストロークが built-in になる副作用
     -- は user doc (help) に明記» の help float 側文案 (doc/review.txt と同文)。
-    title = '注記',
+    title = 'note',
     keymap = nil,
     rows = {
       {
-        '注:',
-        'レビュー窓のキーは buffer-local + 押下時点の窓 role gate。gate を通らない窓 '
-          .. '(ユーザーが自分の窓で開いた同じ実ファイルなど) では 1 キーストロークが '
-          .. 'built-in 動作に戻る',
+        'note:',
+        'review keys are buffer-local with a window role gate at press time. windows that fail '
+          .. 'the gate (e.g. the same real file opened in your own window) fall back 1 keystroke '
+          .. 'to built-in behavior',
       },
     },
   },
@@ -144,7 +147,7 @@ local SECTIONS = {
 function M.open()
   local keymaps = config.get().keymaps
   -- markdown ソース (## 見出し + `- **キー** 説明`)。キーは config の現在値。
-  local lines = { '# review.nvim キーバインド', '' }
+  local lines = { '# review.nvim keymap', '' }
   for _, section in ipairs(SECTIONS) do
     table.insert(lines, '## ' .. section.title)
     for _, row in ipairs(section.rows) do

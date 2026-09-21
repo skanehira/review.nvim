@@ -69,7 +69,7 @@ end
 
 function M.open(opts)
   if st ~= nil then
-    error('windows.open: review tab が既に開いています (先に close すること)', 2)
+    error('windows.open: review tab already open (close it first)', 2)
   end
   vim.cmd 'tabnew'
   local tab = vim.api.nvim_get_current_tabpage()
@@ -256,7 +256,7 @@ end
 --- gate が「窓変数 + 今の表示内容」の同時一致でしか通らないことを保つ。
 function M.bind(base_buf, head_buf, opts)
   if st == nil then
-    error('windows.bind: レビュー tab が開いていません', 2)
+    error('windows.bind: review tab not open', 2)
   end
   opts = opts or {}
   ensure_pair()
@@ -381,7 +381,7 @@ end
 --- 呼び出し元の tab に依らず review tab へ切替えてから分割する。
 function M.open_comment_list()
   if st == nil then
-    error('windows.open_comment_list: レビュー tab が開いていません', 2)
+    error('windows.open_comment_list: review tab not open', 2)
   end
   if vim.api.nvim_get_current_tabpage() ~= st.tab then
     vim.api.nvim_set_current_tabpage(st.tab)

@@ -72,7 +72,7 @@ describe('git/diff fetch 引数組み立て', function()
   restore_after_each()
 
   it(
-    'head 省略 (通常経路) は作業ツリー基準の単引数形 git diff <base>、cwd は vim.system へ渡る',
+    'head 省略 (通常経路) はworking tree基準の単引数形 git diff <base>、cwd は vim.system へ渡る',
     function()
       local captured = {}
       cli._set_system(stub_system(captured))
@@ -237,7 +237,7 @@ describe('git/diff fetch 実 git', function()
   )
 
   it(
-    '実リポジトリ + head 省略の単引数形 (作業ツリー基準) も同一の parse 結果を返す',
+    '実リポジトリ + head 省略の単引数形 (working tree基準) も同一の parse 結果を返す',
     function()
       local dir = vim.fn.tempname()
       vim.fn.mkdir(dir, 'p')

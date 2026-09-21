@@ -83,10 +83,7 @@ function M.fire(op, fallback)
     return vim.api.nvim_replace_termcodes(fallback or '', true, false, true)
   end
   if gate == 'warn-comment' then
-    vim.notify(
-      'review.nvim: この窓にはコメントを付けられません',
-      vim.log.levels.WARN
-    )
+    vim.notify('review.nvim: comments are not available in this window', vim.log.levels.WARN)
     return '' -- キーストロークを消費 (built-in 化すると誤発火する)
   end
   -- <Esc> (arming 解除) は schedule なしの同期判定: 解除物が無い押下はキーを

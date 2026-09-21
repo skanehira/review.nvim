@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | 状態の読み書き・git 実行・フロー調停 | `handlers/<feature>.lua` + 同所的 `*_spec.lua` | リフレッシュ = `session.lua` 末尾 (15) |
 | 画面の組み立て (窓・buffer・hl) | `ui/<name>.lua` (新規 module として分離可) | 3 窓 = `ui/windows.lua` / 純ロジック = `ui/treelist.lua` (16/17) |
-| ユーザーへ出す文言 | handlers の直 notify ではなく文言を spec に全文 pin | 縮退 INFO «head の状態はチェックアウトされていません…» (14) |
+| ユーザーへ出す文言 (英語) | handlers の直 notify ではなく文言を spec に全文 pin | 縮退 INFO «the head state is not checked out…» (14) |
 
 純ロジック (tree 組み立て、path 判定、行生成) は `ui/` に置いても **vim API を触らない
 module に分離する** と unit test が速く安定する (`ui/treelist.lua` 276 行 → spec 14 件、

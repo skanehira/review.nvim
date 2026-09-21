@@ -646,14 +646,14 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
   )
 
   it(
-    'base 窓では移動系が発火し c 系は WARN («この窓にはコメントを付けられません»)',
+    'base 窓では移動系が発火し c 系は WARN («comments are not available in this window»)',
     function()
       windows.bind(base_buf, head_buf, { head_kind = 'real' })
       state.notifications = {}
       local res = press(base_buf, 'c', windows.win 'base')
       assert.equals(1, #state.notifications)
       assert.same({
-        msg = 'review.nvim: この窓にはコメントを付けられません',
+        msg = 'review.nvim: comments are not available in this window',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       assert.equals('', res, 'WARN でキーストロークは消費 (built-in 化しない)')
@@ -675,7 +675,7 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       press(deleted, 'c', windows.win 'head')
       assert.equals(1, #state.notifications)
       assert.same({
-        msg = 'review.nvim: この窓にはコメントを付けられません',
+        msg = 'review.nvim: comments are not available in this window',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       -- head 縮退 scratch (deleted/binary でない方) はコメント可 -> 入力 float 経路。
@@ -684,11 +684,11 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       windows.bind(base_buf, head_scratch)
       state.notifications = {}
       local out = press(head_scratch, 'c', windows.win 'head')
-      wait_msg 'アクティブなセッションがありません'
+      wait_msg 'no active session'
       assert.is_not.equals('c', out)
       for _, n in ipairs(state.notifications) do
         assert.is_true(
-          n.msg:find('この窓にはコメントを付けられません', 1, true) == nil,
+          n.msg:find('comments are not available in this window', 1, true) == nil,
           '縮退 head scratch が WARN 扱い: ' .. n.msg
         )
       end

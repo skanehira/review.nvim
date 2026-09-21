@@ -264,13 +264,13 @@ describe('comments c (作成 / head バッファ恒等行)', function()
   end)
 
   it(
-    'base 窓の c はコメントを作らず確定 WARN («この窓にはコメントを付けられません»)',
+    'base 窓の c はコメントを作らず確定 WARN («comments are not available in this window»)',
     function()
       vim.api.nvim_set_current_win(ui_windows.win 'base')
       state.notifications = {}
       comments_handler.add_normal()
       assert.same({
-        msg = 'review.nvim: この窓にはコメントを付けられません',
+        msg = 'review.nvim: comments are not available in this window',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       assert.equals(1, #state.notifications)
@@ -283,7 +283,7 @@ describe('comments c (作成 / head バッファ恒等行)', function()
     state.notifications = {}
     comments_handler.add_normal()
     assert.same({
-      msg = 'review.nvim: アクティブなセッションがありません',
+      msg = 'review.nvim: no active session',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
     assert.equals(1, #state.notifications)
@@ -354,7 +354,7 @@ describe('comments e / d (編集・削除 arming)', function()
     state.notifications = {}
     comments_handler.edit_current()
     assert.same({
-      msg = 'review.nvim: その行のコメントはありません',
+      msg = 'review.nvim: no comments on this line',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
   end)
@@ -392,7 +392,8 @@ describe('comments e / d (編集・削除 arming)', function()
     focus_head_row(2)
     comments_handler.delete_current() -- arming 1 回目
     assert.same({
-      msg = 'review.nvim: コメント c1 を削除するには、この行で d をもう一度 (取り消しは他行へ移動 / 2 秒待機 / <Esc> 押下)',
+      msg = 'review.nvim: to delete comment c1 press d again on this '
+        .. 'line (cancel: move to another line / wait 2s / press <Esc>)',
       level = vim.log.levels.WARN,
     }, state.notifications[#state.notifications])
     assert.equals(2, #saved().comments)
@@ -425,7 +426,8 @@ describe('comments D / clear_by_command (一括削除)', function()
 
     comments_handler.delete_all_arming()
     assert.same({
-      msg = 'review.nvim: コメント全 2 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)',
+      msg = 'review.nvim: to delete all 2 comments press again '
+        .. '(cancel: wait 2s / comment count change / press <Esc>)',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
     assert.equals(1, #state.notifications)
@@ -433,7 +435,7 @@ describe('comments D / clear_by_command (一括削除)', function()
 
     comments_handler.delete_all_arming()
     assert.same({
-      msg = 'review.nvim: コメント全 2 件を削除しました',
+      msg = 'review.nvim: deleted all 2 comments',
       level = vim.log.levels.INFO,
     }, state.notifications[2])
     -- INV-4: ディスクの JSON が空になる
@@ -468,15 +470,16 @@ describe('comments D / clear_by_command (一括削除)', function()
     comments_handler.delete_all_arming() -- 1 目扱い (n=3)
     assert.equals(3, #saved().comments)
     assert.same({
-      msg = 'review.nvim: コメント全 3 件を削除するには、もう一度押してください (取り消しは 2 秒待機 / コメントの増減 / <Esc> 押下)',
+      msg = 'review.nvim: to delete all 3 comments press again '
+        .. '(cancel: wait 2s / comment count change / press <Esc>)',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
   end)
 
-  it('D: 0 件は INFO «コメントがありません» で arming しない', function()
+  it('D: 0 件は INFO «No comments» で arming しない', function()
     comments_handler.delete_all_arming()
     assert.same({
-      msg = 'review.nvim: コメントがありません',
+      msg = 'review.nvim: No comments',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
     assert.equals(1, #state.notifications)
@@ -493,12 +496,12 @@ describe('comments D / clear_by_command (一括削除)', function()
 
     assert.equals(true, res.ok)
     assert.equals(
-      'review.nvim: コメント全 2 件を削除しますか？ (outdated も含む・削除は取り消せません) [y/N]: ',
+      'review.nvim: delete all 2 comments? (includes outdated; deletion cannot be undone) [y/N]: ',
       state.confirm_prompt
     )
     assert.equals(0, #saved().comments)
     assert.same({
-      msg = 'review.nvim: コメント全 2 件を削除しました',
+      msg = 'review.nvim: deleted all 2 comments',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
   end)
@@ -519,7 +522,7 @@ describe('comments D / clear_by_command (一括削除)', function()
     end
   )
 
-  it('clear_by_command: 0 件は確認せず INFO «コメントがありません»', function()
+  it('clear_by_command: 0 件は確認せず INFO «No comments»', function()
     local confirmed = false
     vim.ui.input = function(_, cb)
       confirmed = true
@@ -531,7 +534,7 @@ describe('comments D / clear_by_command (一括削除)', function()
     assert.equals(true, res.ok)
     assert.equals(false, confirmed)
     assert.same({
-      msg = 'review.nvim: コメントがありません',
+      msg = 'review.nvim: No comments',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
   end)
@@ -542,7 +545,7 @@ describe('comments D / clear_by_command (一括削除)', function()
     assert.same({
       __class = 'review.Result',
       ok = false,
-      error = 'review.nvim: アクティブなセッションがありません',
+      error = 'review.nvim: no active session',
       code = 'E_NOT_ACTIVE',
     }, res)
   end)
@@ -570,7 +573,7 @@ describe('comments <Esc> cancel_arming (arming 解除)', function()
 
     assert.is_true(comments_handler.cancel_arming())
     assert.same({
-      msg = 'review.nvim: 削除の arming を解除しました',
+      msg = 'review.nvim: delete arming cancelled',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
     assert.equals(1, #state.notifications)
@@ -589,7 +592,7 @@ describe('comments <Esc> cancel_arming (arming 解除)', function()
 
     assert.is_true(comments_handler.cancel_arming())
     assert.same({
-      msg = 'review.nvim: 削除の arming を解除しました',
+      msg = 'review.nvim: delete arming cancelled',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
 
@@ -669,6 +672,6 @@ describe('comments y / i', function()
     focus_head_row(2)
     comments_handler.view_current()
     local lines = vim.api.nvim_buf_get_lines(vim.api.nvim_get_current_buf(), 0, -1, false)
-    assert.same({ '[1] c1  a.lua:2  ! outdated (prompt 除外中)', '  drifted' }, lines)
+    assert.same({ '[1] c1  a.lua:2  ! outdated (excluded from prompt)', '  drifted' }, lines)
   end)
 end)

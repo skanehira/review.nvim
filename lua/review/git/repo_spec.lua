@@ -130,7 +130,7 @@ describe('git/repo switch 実行不能 (bin 不在)', function()
 
     assert.equals(false, res.ok)
     assert.equals('E_GIT', res.code)
-    assert.equals('git が見つかりません', res.error)
+    assert.equals('git not found', res.error)
     assert.is_false(spawned)
   end)
 end)

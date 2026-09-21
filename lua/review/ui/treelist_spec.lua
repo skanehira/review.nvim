@@ -18,7 +18,7 @@ local function f(path, status, added, deleted, viewed, comment)
 end
 
 local function tree_opts(overrides)
-  local opts = { mode = 'tree', base = 'main', head_display = '作業ツリー' }
+  local opts = { mode = 'tree', base = 'main', head_display = 'working tree' }
   for k, v in pairs(overrides or {}) do
     opts[k] = v
   end
@@ -43,7 +43,7 @@ describe('treelist.build tree モード', function()
       }, tree_opts())
       assert.same({
         'Changes (2)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         '[✓] M a.lua +2 -2',
         'A b.lua +2 -1',
       }, texts(rows))
@@ -66,7 +66,7 @@ describe('treelist.build tree モード', function()
     }, tree_opts())
     assert.same({
       'Changes (2)',
-      'Showing changes for: main..作業ツリー',
+      'Showing changes for: main..working tree',
       'A src/deep/',
       '    A new.lua +1 -0',
       'M a.lua +2 -2',
@@ -85,7 +85,7 @@ describe('treelist.build tree モード', function()
     -- lib の子は dir y と file x に分裂するので連結しない。混在 -> *
     assert.same({
       'Changes (2)',
-      'Showing changes for: main..作業ツリー',
+      'Showing changes for: main..working tree',
       '* lib/',
       '  A y/',
       '    A r.go +3 -0',
@@ -104,7 +104,7 @@ describe('treelist.build tree モード', function()
     }, tree_opts { base = 'main' })
     assert.same({
       'Changes (4)',
-      'Showing changes for: main..作業ツリー',
+      'Showing changes for: main..working tree',
       'M cmd/',
       '  M run.go +1 -0',
       'A docs/',
@@ -123,7 +123,7 @@ describe('treelist.build tree モード', function()
       }, tree_opts())
       assert.same({
         'Changes (2)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         'A cmd/',
         '  A main.go +2 -0',
         'M cmd +1 -0',
@@ -146,7 +146,7 @@ describe('treelist.build tree モード', function()
       }, tree_opts { collapsed = { ['src/deep'] = true } })
       assert.same({
         'Changes (3)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         'A src/',
         '  ▸ A deep/',
         '  A top.lua +1 -1',
@@ -171,7 +171,7 @@ describe('treelist.build tree モード', function()
     )
     assert.same({
       'Changes (3)',
-      'Showing changes for: main..作業ツリー',
+      'Showing changes for: main..working tree',
       'A src/',
       '  A L n.lua +1 -0',
       'M L a.lua +1 -0',
@@ -238,7 +238,7 @@ describe('treelist.build tree モード', function()
       }, tree_opts())
       assert.same({
         'Changes (2)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         'M \u{EA6B} a.lua +1 -1',
         'A b.lua +1 -0',
       }, texts(rows))

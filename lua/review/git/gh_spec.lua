@@ -96,7 +96,7 @@ describe('git/gh pr_view 結果型分岐 (E_GH / E_PR)', function()
   use_env()
 
   it(
-    'gh 不在 (実行不能) は E_GH「gh が見つかりません」で cb に返す (system を起動しない)',
+    'gh 不在 (実行不能) は E_GH「gh not found」で cb に返す (system を起動しない)',
     function()
       cli._set_executable(function()
         return 0
@@ -115,7 +115,7 @@ describe('git/gh pr_view 結果型分岐 (E_GH / E_PR)', function()
       assert.same({
         __class = 'review.Result',
         ok = false,
-        error = 'gh が見つかりません',
+        error = 'gh not found',
         code = 'E_GH',
       }, received)
     end
@@ -139,7 +139,7 @@ describe('git/gh pr_view 結果型分岐 (E_GH / E_PR)', function()
         __class = 'review.Result',
         ok = false,
         data = { stdout = '', code = 1 },
-        error = 'gh 未ログインです。`gh auth login` を実行してください',
+        error = 'gh is not logged in; run `gh auth login`',
         code = 'E_GH',
       }, received)
     end
@@ -178,7 +178,7 @@ describe('git/gh pr_view 結果型分岐 (E_GH / E_PR)', function()
       assert.same({
         __class = 'review.Result',
         ok = false,
-        error = 'gh pr view の出力を解析できませんでした',
+        error = 'failed to parse the output of gh pr view',
         code = 'E_GH',
       }, received)
     end

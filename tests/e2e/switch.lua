@@ -57,8 +57,8 @@ local run = function()
   if #offers ~= 1 then
     fail('switch 提案の回数が ' .. #offers .. ' (期待 1): ' .. vim.inspect(offers))
   end
-  local want_offer = 'review.nvim: head feature は現在のチェックアウトと別のコミットです。'
-    .. 'git switch で feature に切り替えてレビューしますか? [y/N]: '
+  local want_offer = 'review.nvim: head feature is a different commit than the current checkout. '
+    .. 'switch to feature with git switch and review? [y/N]: '
   if offers[1] ~= want_offer then
     fail('switch 提案の文言が不一致: ' .. tostring(offers[1]))
   end
@@ -100,7 +100,7 @@ local run = function()
     fail('tcd が REPO2 でない: ' .. vim.fn.getcwd(-1, tabnr))
   end
   local sb = vim.api.nvim_buf_get_lines(vim.fn.bufnr 'review://sidebar/main--feature', 0, -1, false)
-  if sb[2] ~= 'Showing changes for: main..作業ツリー' then
+  if sb[2] ~= 'Showing changes for: main..working tree' then
     fail(
       'switch 承諾後の panel ヘッダが通常経路表示名でない: ' .. tostring(sb[2])
     )

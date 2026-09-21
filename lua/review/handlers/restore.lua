@@ -71,7 +71,7 @@ function M.resume_session(session)
   local current = session_handler.active()
   if current ~= nil and current.id ~= session.id then
     vim.ui.input({
-      prompt = ('review.nvim: %s が開いています。閉じて %s を再開しますか？ [y/N]: '):format(
+      prompt = ('review.nvim: %s is open. close it and resume %s? [y/N]: '):format(
         current.id,
         session.id
       ),
@@ -87,10 +87,7 @@ function M.resume_session(session)
     return
   end
   if current ~= nil and current.id == session.id then
-    vim.notify(
-      ('review.nvim: %s は既に開いています'):format(session.id),
-      vim.log.levels.INFO
-    )
+    vim.notify(('review.nvim: %s is already open'):format(session.id), vim.log.levels.INFO)
     return
   end
   fetch_and_resume(session)
@@ -101,7 +98,7 @@ end
 function M.resume_or_select()
   local function guide()
     vim.notify(
-      'review.nvim: 復元できるセッションがありません。:Review start で開始してください',
+      'review.nvim: no session to restore; start one with :Review start',
       vim.log.levels.INFO
     )
   end
@@ -120,7 +117,7 @@ function M.resume_or_select()
       return
     end
     vim.ui.select(open, {
-      prompt = '復元するセッション:',
+      prompt = 'Session to restore:',
       format_item = function(s)
         return ('%s (%s..%s, %d comments)'):format(s.id, s.base, s.head, #(s.comments or {}))
       end,
@@ -137,10 +134,7 @@ end
 --- 見つからない / repo 外は WARN 通知で開始しない。戻り値はディスパッチ受理。
 function M.resume_by_id(id)
   if type(id) ~= 'string' or id == '' then
-    return result.err(
-      'review.nvim: 復元するセッションの id が必要です',
-      result.codes.E_REF
-    )
+    return result.err('review.nvim: resume needs a session id', result.codes.E_REF)
   end
   git_ref.top_level({ cwd = vim.fn.getcwd() }, function(res)
     local sess = nil
@@ -148,7 +142,7 @@ function M.resume_by_id(id)
       sess = store.load(res.data, id).data
     end
     if sess == nil then
-      notify_warn(('セッション %s が見つかりません'):format(id))
+      notify_warn(('session %s not found'):format(id))
       return
     end
     M.resume_session(sess)
@@ -181,14 +175,12 @@ function M.notify_open_sessions()
     local open = sort_by_slug(scan.open_sessions(res.data).data)
     if #open == 1 then
       vim.notify(
-        ('review.nvim: %s のレビューが続けられます (:Review で復元)'):format(
-          open[1].id
-        ),
+        ('review.nvim: you can resume the review of %s (:Review to restore)'):format(open[1].id),
         vim.log.levels.INFO
       )
     elseif #open > 1 then
       vim.notify(
-        ('review.nvim: %d 件のレビューが続けられます (例: %s)。:Review で復元'):format(
+        ('review.nvim: %d reviews can be resumed (e.g. %s). :Review to restore'):format(
           #open,
           open[1].id
         ),

@@ -36,7 +36,7 @@ local function f(path, status, added, deleted)
   return { path = path, status = status, added = added, deleted = deleted, hunks = {} }
 end
 
-local TREE_OPTS = { base = 'main', head_display = '作業ツリー' }
+local TREE_OPTS = { base = 'main', head_display = 'working tree' }
 
 local state = {}
 
@@ -96,7 +96,7 @@ describe('filepanel.render tree (既定)', function()
       assert.same({ kind = 'sidebar', session_id = SLUG }, vim.b[buf].review_meta)
       assert.same({
         'Changes (2)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         'A src/deep/',
         '    A new.lua +2 -0',
         'M a.lua +1 -0',
@@ -108,7 +108,7 @@ describe('filepanel.render tree (既定)', function()
       assert.equals(buf, buf2)
       assert.same({
         'Changes (2)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         'A src/deep/',
         '    A new.lua +2 -0',
         '[✓] M a.lua +1 -0',
@@ -124,7 +124,7 @@ describe('filepanel.render tree (既定)', function()
         filepanel.render(session, { f('a.lua', 'M', 1, 0), f('b.lua', 'A', 1, 0) }, TREE_OPTS)
       assert.same({
         'Changes (2)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         'M \u{EA6B} a.lua +1 -0',
         'A b.lua +1 -0',
       }, panel_lines(buf))
@@ -236,7 +236,7 @@ describe('filepanel.render list モード', function()
     local buf = filepanel.render(
       session,
       { f('b.lua', 'M', 2, 1), f('src/x.lua', 'A', 1, 0) },
-      { mode = 'list', base = 'main', head_display = '作業ツリー' }
+      { mode = 'list', base = 'main', head_display = 'working tree' }
     )
     assert.same({ '[✓] M b.lua +2 -1', 'A src/x.lua +1 -0' }, panel_lines(buf))
   end)
@@ -316,7 +316,7 @@ describe('filepanel カーソル追従・折込 contract', function()
     local buf = show(filepanel.render(session_stub(), files3(), TREE_OPTS))
     filepanel.render(session_stub(), files3(), {
       base = 'main',
-      head_display = '作業ツリー',
+      head_display = 'working tree',
       cursor = { kind = 'file', path = 'src/deep/other.lua' },
     })
     assert.same({ 5, 0 }, vim.api.nvim_win_get_cursor(state.win))
@@ -343,7 +343,7 @@ describe('filepanel カーソル追従・折込 contract', function()
     vim.api.nvim_win_set_cursor(state.win, { 5, 0 }) -- src/deep/other.lua
     filepanel.render(session, files3(), {
       base = 'main',
-      head_display = '作業ツリー',
+      head_display = 'working tree',
       collapsed = { ['src/deep'] = true },
     })
     local row = vim.api.nvim_win_get_cursor(state.win)[1]
@@ -358,7 +358,7 @@ describe('filepanel カーソル追従・折込 contract', function()
       vim.api.nvim_win_set_cursor(state.win, { 3, 0 }) -- * src/deep/ dir 行
       filepanel.render(session, files3(), {
         base = 'main',
-        head_display = '作業ツリー',
+        head_display = 'working tree',
         collapsed = { ['src/deep'] = true },
       })
       assert.same({ 3, 0 }, vim.api.nvim_win_get_cursor(state.win))
@@ -379,7 +379,7 @@ describe('filepanel icon (devicons 自動検出)', function()
       filepanel.render(session_stub(), { f('x.m', 'M', 1, 0), f('y.lua', 'A', 1, 0) }, TREE_OPTS)
     assert.same({
       'Changes (2)',
-      'Showing changes for: main..作業ツリー',
+      'Showing changes for: main..working tree',
       'M C x.m +1 -0',
       'A y.lua +1 -0',
     }, panel_lines(buf))
@@ -431,7 +431,7 @@ describe('filepanel icon (devicons 自動検出)', function()
       local buf = filepanel.render(
         session_stub(),
         { f('src/a.lua', 'M', 1, 0) },
-        { mode = 'list', base = 'main', head_display = '作業ツリー' }
+        { mode = 'list', base = 'main', head_display = 'working tree' }
       )
       local lines = panel_lines(buf)
       assert.equals('M src/a.lua +1 -0', lines[1])
@@ -487,7 +487,8 @@ describe('filepanel キー割り当て', function()
       for _, l in ipairs(flines) do
         if
           l
-          == '- **<CR>** そのファイルを head/base 窓に開く (カーソルは file panel に残る。dir 行では折り畳み)'
+          == '- **<CR>** open the file in the head/base windows '
+            .. '(cursor stays in the panel; dir rows toggle fold)'
         then
           found = true
         end
@@ -694,7 +695,7 @@ describe('filepanel 実 FS 正誤表 (temp repo + 実 git)', function()
 
       assert.same({
         'Changes (6)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         -- dir 先行 (名前のバイト順: cmd < src) -> root file 昇順 (a.lua < cmd < top.md)
         'A cmd/',
         '  A helper.go +1 -0',
@@ -718,13 +719,13 @@ describe('filepanel 実 FS 正誤表 (temp repo + 実 git)', function()
       -- collapsed: dir 先行の先頭 dir と連結 chain の dir を同時に畳む
       local buf2 = filepanel.render(session, files, {
         base = 'main',
-        head_display = '作業ツリー',
+        head_display = 'working tree',
         collapsed = { ['cmd'] = true, ['src/deep/mid'] = true },
       })
       assert.equals(buf, buf2)
       assert.same({
         'Changes (6)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         '▸ A cmd/',
         '▸ A src/deep/mid/',
         '[✓] M a.lua +1 -1',
@@ -737,7 +738,7 @@ describe('filepanel 実 FS 正誤表 (temp repo + 実 git)', function()
         filepanel.render(session, require('review.ui.treelist').visible(files, 'mid'), TREE_OPTS)
       assert.same({
         'Changes (1)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         'A src/deep/mid/',
         '      A fin.lua +1 -0',
       }, panel_lines(buf3))

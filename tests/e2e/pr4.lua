@@ -64,7 +64,7 @@ vim.defer_fn(function()
       return #inputs >= 1
     end, 'force confirm prompt')
     assert(
-      inputs[1]:find('未コミットの変更', 1, true) ~= nil,
+      inputs[1]:find('has uncommitted changes', 1, true) ~= nil,
       'force プロンプト不一致: ' .. inputs[1]
     )
     if vim.uv.fs_stat(wt_root) == nil then

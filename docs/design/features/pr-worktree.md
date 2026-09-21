@@ -25,7 +25,7 @@
 
 作成失敗 (パス衝突) は既存同名ディレクトリを `git worktree prune` で回収試行 → 改善しなければ `E_WORKTREE` 通知で開始を中断。**衝突した残骸が自分の作成分 (`created_by_us=true` の記録あり) でない限り自動削除しない** (INV-3)。
 
-**0 差分・差分取得失敗時の掃除 (開始 / 復元)**: pr 開始で差分 0 ファイルなら «変更なし» INFO で開かず save しないが、作成は diff に先行するので作りたて／再利用の自前 worktree を `git worktree remove` で掃除する (**close / delete と同じ直列化 lock 下**。失敗は WARN で記録は残し、起動 scan が回収できる状態を保つ)。既存保存セッションの記録を再利用 (旧記録と同じ path の作成分を含む) していた場合は、掃除成功後にそのセッション JSON の worktree 記録を nil 化して save する (実在しない dir を指した記録を残さない。comments / refs / status はそのまま。nil 化 save は直前にディスク上の JSON 存在を再確認し、掃除の窓中に :Review delete が完了していたら復活させない — persistence-restore「存在再確認」)。nil 化の対象も自前記録のみ (`created_by_us=true` かつ同 path。legacy の非自前記録を黙って消さない)。**diff 取得が失敗した場合も同じ掃除を走る** (開始 / 復元どちらの経路も `fetch_prepared` の diff 失敗分岐。放置すると作りたて worktree が記録なしの孤児になる)。掃除が remove・prune+dir 削除とも失敗したとき、その dir を指す created_by_us 記録が JSON に残らない場合は「起動 scan が回収」ではなく**手动削除を案内する WARN を出す** (INV-3: 記録のない dir を scan は触れないため、回収を約束しない)。
+**0 差分・差分取得失敗時の掃除 (開始 / 復元)**: pr 開始で差分 0 ファイルなら «No changes» INFO で開かず save しないが、作成は diff に先行するので作りたて／再利用の自前 worktree を `git worktree remove` で掃除する (**close / delete と同じ直列化 lock 下**。失敗は WARN で記録は残し、起動 scan が回収できる状態を保つ)。既存保存セッションの記録を再利用 (旧記録と同じ path の作成分を含む) していた場合は、掃除成功後にそのセッション JSON の worktree 記録を nil 化して save する (実在しない dir を指した記録を残さない。comments / refs / status はそのまま。nil 化 save は直前にディスク上の JSON 存在を再確認し、掃除の窓中に :Review delete が完了していたら復活させない — persistence-restore「存在再確認」)。nil 化の対象も自前記録のみ (`created_by_us=true` かつ同 path。legacy の非自前記録を黙って消さない)。**diff 取得が失敗した場合も同じ掃除を走る** (開始 / 復元どちらの経路も `fetch_prepared` の diff 失敗分岐。放置すると作りたて worktree が記録なしの孤児になる)。掃除が remove・prune+dir 削除とも失敗したとき、その dir を指す created_by_us 記録が JSON に残らない場合は「起動 scan が回収」ではなく**手动削除を案内する WARN を出す** (INV-3: 記録のない dir を scan は触れないため、回収を約束しない)。
 
 **head 窓と実ファイル (`o`)**:
 
@@ -36,7 +36,7 @@
 
 **セッションとレビューの終了 (`:Review close` / `q`)** — 順序の原則: ユーザーデータを失いうる操作の判定と確認を、状態変更より前に行う (`q` と `:Review close` は同一経路):
 
-0. comments > 0 なら «コメント N 件あります。レビューを終了しますか?» [y/N] (キャンセル = 終了を最初から中止)。0 件なら確認しない
+0. comments > 0 なら «close the session with N comments (%s)?» [y/N] (キャンセル = 終了を最初から中止)。0 件なら確認しない
 1. worktree 作成済みなら `git -C <worktree-path> status --porcelain` で未コミット変更を検知し、worktree 配下に modified (未保存) なバッファがあることも併せて dirty 判定する (バッファ上の未保存編集はディスクに無い)。dirty なら `--force` で削除してよいか確認 (キャンセル = **close を最初から中止**。セッション・UI・保存状態は何も変わらない)。clean なら確認不要で続行
 2. 現セッションを save して status=closed、active を解除、**レビュー専有 tab を閉じる**。閉じる前に、このセッションが張った全バッファ (head 実ファイル・scratch) の extmark namespace を明示 clear (残骸 0)。repo 本体の実ファイルバッファはユーザーの所有物なので編集途中 (modified) を含め消さずに窓だけ閉じる。`created_by_us=true` の worktree を持つセッションでは、worktree 配下の実ファイルバッファ (`nvim_list_bufs()` を worktree path で走査・両側 `fs_realpath` 比較) を `nvim_buf_delete(force)` で**手順 3 の remove より先に破棄する** (Neovim 0.13 は loaded 全バッファに fs watcher を張るため、dir 消滅が先だと E211 が出る)
 3. worktree を `git worktree remove <path>` (1 で force 承認済みなら `--force`) で削除。**自前 ref (`review-nvim/pr-<n>`) は close では消さない** (再開時に fetch を省略して再利用するため)

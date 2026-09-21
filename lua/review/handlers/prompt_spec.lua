@@ -244,11 +244,11 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
       assert.same({
         __class = 'review.Result',
         ok = false,
-        error = 'review.nvim: レビュー進行中セッションがありません',
+        error = 'review.nvim: no active review session',
         code = 'E_NOT_ACTIVE',
       }, res)
       assert.same({
-        msg = 'review.nvim: レビュー進行中セッションがありません',
+        msg = 'review.nvim: no active review session',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       assert.equals(1, #state.notifications)
@@ -317,7 +317,7 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
     },
   }
   it(
-    'provider 検出元 4 系統 (g:clipboard / clipboard#copy / provider#clipboard#Call /'
+    'provider 検出元 4 系統 (g:clipboard / clipboard#copy / provider#clipboard#Call  '
       .. ' provider()) なら +/* 書写成功、無しは "0 のみ + WARN',
     function()
       local expected = full_prompt { '@a.lua#L2-L3', 'use map' }
@@ -353,7 +353,7 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
           -- provider が有りと誤検出されれば WARN 0 件になりこの assert が落ちる)。
           assert.equals(expected, vim.fn.getreg '0', case.name .. ': "0 にコピー')
           assert.same({
-            msg = 'review.nvim: クリップボード provider がありません。"0 レジスタにのみコピーしました',
+            msg = 'review.nvim: no clipboard provider; copied to the "0 register only',
             level = vim.log.levels.WARN,
           }, state.notifications[1], case.name .. ': WARN')
           assert.equals(1, #state.notifications, case.name .. ': 通知は WARN のみ')
@@ -367,7 +367,7 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
           -- 分かれる (実測)。setreg('+') 自体は Neovim 標準動作であり、実環境での
           -- クリップボード載りは e2e / 手動確認の担当 (ai-prompt.md 検証方針)。
           assert.same({
-            msg = 'review.nvim: 1 件のコメントをクリップボードにコピーしました',
+            msg = 'review.nvim: copied 1 comments to the clipboard',
             level = vim.log.levels.INFO,
           }, state.notifications[1], case.name .. ': コピー成功 INFO')
           assert.equals(1, #state.notifications, case.name .. ': 通知はコピー INFO のみ')
@@ -401,11 +401,11 @@ describe('handlers.prompt E_NOT_ACTIVE / provider 無し退路', function()
         data = { text = full_prompt { '@a.lua#L2', 'keep' }, count = 1 },
       }, res)
       assert.same({
-        msg = 'review.nvim: 1 件を除外しました (outdated)',
+        msg = 'review.nvim: excluded 1 comments (outdated)',
         level = vim.log.levels.INFO,
       }, state.notifications[1], '除外 INFO が先')
       assert.same({
-        msg = 'review.nvim: 1 件のコメントをクリップボードにコピーしました',
+        msg = 'review.nvim: copied 1 comments to the clipboard',
         level = vim.log.levels.INFO,
       }, state.notifications[2], 'コピー完了 INFO が後')
       assert.equals(2, #state.notifications)
@@ -434,36 +434,30 @@ end)
 describe('handlers.prompt 0 件 / outdated の情報経路', function()
   use_env()
 
-  it(
-    'コメント 0 件では INFO「コメントがありません」でコピーしない',
-    function()
-      local res = prompt_handler.all()
+  it('コメント 0 件では INFO「No comments」でコピーしない', function()
+    local res = prompt_handler.all()
 
-      assert.same({
-        msg = 'review.nvim: コメントがありません',
-        level = vim.log.levels.INFO,
-      }, state.notifications[1])
-      assert.equals(1, #state.notifications)
-      assert.same({ __class = 'review.Result', ok = true, data = { text = '', count = 0 } }, res)
-      assert.equals(SENTINEL, vim.fn.getreg '0')
-    end
-  )
+    assert.same({
+      msg = 'review.nvim: No comments',
+      level = vim.log.levels.INFO,
+    }, state.notifications[1])
+    assert.equals(1, #state.notifications)
+    assert.same({ __class = 'review.Result', ok = true, data = { text = '', count = 0 } }, res)
+    assert.equals(SENTINEL, vim.fn.getreg '0')
+  end)
 
-  it(
-    '全件 outdated では「有効なコメントがありません」で終了しコピーしない',
-    function()
-      seed { comment('c1', 'a.lua', 2, nil, 'stale', 'outdated') }
+  it('全件 outdated では「No active comments」で終了しコピーしない', function()
+    seed { comment('c1', 'a.lua', 2, nil, 'stale', 'outdated') }
 
-      local res = prompt_handler.all()
+    local res = prompt_handler.all()
 
-      assert.same({
-        msg = 'review.nvim: 有効なコメントがありません',
-        level = vim.log.levels.INFO,
-      }, state.notifications[1])
-      assert.same({ __class = 'review.Result', ok = true, data = { text = '', count = 0 } }, res)
-      assert.equals(SENTINEL, vim.fn.getreg '0')
-    end
-  )
+    assert.same({
+      msg = 'review.nvim: No active comments',
+      level = vim.log.levels.INFO,
+    }, state.notifications[1])
+    assert.same({ __class = 'review.Result', ok = true, data = { text = '', count = 0 } }, res)
+    assert.equals(SENTINEL, vim.fn.getreg '0')
+  end)
 
   it('outdated 混在では active のみで構築し除外件数を INFO する', function()
     seed {
@@ -474,7 +468,7 @@ describe('handlers.prompt 0 件 / outdated の情報経路', function()
     local res = prompt_handler.all { copy = false }
 
     assert.same({
-      msg = 'review.nvim: 1 件を除外しました (outdated)',
+      msg = 'review.nvim: excluded 1 comments (outdated)',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
     assert.same({
@@ -488,21 +482,18 @@ end)
 describe('handlers.prompt for_file (スコープ解決)', function()
   use_env()
 
-  it(
-    'diff に無いパスは INFO「そのファイルはレビュー対象の diff にありません」',
-    function()
-      seed { comment('c1', 'a.lua', 2, 3, 'use map') }
+  it('diff に無いパスは INFO「that file is not part of the reviewed diff」', function()
+    seed { comment('c1', 'a.lua', 2, 3, 'use map') }
 
-      local res = prompt_handler.for_file 'nope.lua'
+    local res = prompt_handler.for_file 'nope.lua'
 
-      assert.same({
-        msg = 'review.nvim: そのファイルはレビュー対象の diff にありません',
-        level = vim.log.levels.INFO,
-      }, state.notifications[1])
-      assert.same({ __class = 'review.Result', ok = true, data = { text = '', count = 0 } }, res)
-      assert.equals(SENTINEL, vim.fn.getreg '0')
-    end
-  )
+    assert.same({
+      msg = 'review.nvim: that file is not part of the reviewed diff',
+      level = vim.log.levels.INFO,
+    }, state.notifications[1])
+    assert.same({ __class = 'review.Result', ok = true, data = { text = '', count = 0 } }, res)
+    assert.equals(SENTINEL, vim.fn.getreg '0')
+  end)
 
   it('file 指定ではそのファイルのコメントのみ + 見出しは同じ', function()
     seed {
@@ -569,7 +560,7 @@ describe('y キー (カーソル行 range のコメントを yank)', function()
     assert.equals('@a.lua#L2-L3\nuse map', vim.fn.getreg '0')
     -- provider 無し退路の WARN のみ (コピー成功を止まらない)
     assert.same({
-      msg = 'review.nvim: クリップボード provider がありません。"0 レジスタにのみコピーしました',
+      msg = 'review.nvim: no clipboard provider; copied to the "0 register only',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
   end)
@@ -581,7 +572,7 @@ describe('y キー (カーソル行 range のコメントを yank)', function()
     comments_handler.yank_current()
 
     assert.same({
-      msg = 'review.nvim: outdated のためプロンプトに含めませんでした',
+      msg = 'review.nvim: not included in the prompt (outdated)',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
     assert.equals(SENTINEL, vim.fn.getreg '0')
@@ -597,7 +588,7 @@ describe('y キー (カーソル行 range のコメントを yank)', function()
     comments_handler.yank_current()
 
     assert.same({
-      msg = 'review.nvim: 1 件を除外しました (outdated)',
+      msg = 'review.nvim: excluded 1 comments (outdated)',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
     assert.equals('@a.lua#L2-L3\nmulti', vim.fn.getreg '0')
@@ -609,7 +600,7 @@ describe('y キー (カーソル行 range のコメントを yank)', function()
     comments_handler.yank_current()
 
     assert.same({
-      msg = 'review.nvim: その行のコメントはありません',
+      msg = 'review.nvim: no comments on this line',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
     assert.equals(SENTINEL, vim.fn.getreg '0')

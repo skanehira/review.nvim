@@ -557,7 +557,7 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
       -- 開始 open ではマークを付けない (開いただけの行は素のまま)
       assert.same({
         'Changes (2)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         'M a.lua +1 -0',
         'A b.lua +1 -0',
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
@@ -672,11 +672,12 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
       assert.equals(0, #state.inputs)
       -- 生 stderr 丸出しでなく「名前 + 次の行動」を伝える (UX review F4)
       assert.same({
-        msg = "review.nvim: レビュー対象 ref が解決できません: 'nope'。存在するブランチ/コミットを"
-          .. '指定してください (start の base/head 引数は <Tab> で補完できます)',
+        msg = 'review.nvim: cannot resolve the reviewed ref: '
+          .. '"nope". specify an existing branch/commit '
+          .. '(base/head args of start are <Tab>-completable)',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
-      assert.not_equals(nil, state.notifications[1].msg:find("'nope'", 1, true))
+      assert.not_equals(nil, state.notifications[1].msg:find('"nope"', 1, true))
       assert.equals(1, #state.notifications)
       assert.is_nil(load_saved())
       assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME))
@@ -685,7 +686,7 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
   )
 
   it(
-    '差分 0 ファイルは「変更なし」通知で開始しない (エラーではない)',
+    '差分 0 ファイルは「No changes」通知で開始しない (エラーではない)',
     function()
       install_git {
         top_ok,
@@ -699,7 +700,7 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
 
       assert.equals(true, res.ok)
       assert.same({
-        msg = 'review.nvim: 変更なし (main..feature): レビュー対象がありません',
+        msg = 'review.nvim: no changes (main..feature): nothing to review',
         level = vim.log.levels.INFO,
       }, state.notifications[1])
       assert.equals(1, #state.notifications)
@@ -1099,7 +1100,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
   )
 
   it(
-    '復元時 差分まるごと消滅 + outdated comments: 3 窓を開き「変更なし」placeholder に集約',
+    '復元時 差分まるごと消滅 + outdated comments: 3 窓を開き「No changes」placeholder に集約',
     function()
       local existing = existing_stub {
         status = 'open',
@@ -1125,7 +1126,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       assert.equals(ph, base_buf_name())
       assert.equals(ph, head_buf_name())
       local head_buf = vim.fn.bufnr(ph)
-      assert.same({ '変更なし' }, vim.api.nvim_buf_get_lines(head_buf, 0, -1, false))
+      assert.same({ 'No changes' }, vim.api.nvim_buf_get_lines(head_buf, 0, -1, false))
 
       local ns = vim.api.nvim_get_namespaces().review_comment
       local above = nil
@@ -1164,7 +1165,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
           end
         end
       end
-      assert.equals(' 1 outdated (prompt 除外中)', table.concat(head_pieces))
+      assert.equals(' 1 outdated (excluded from prompt)', table.concat(head_pieces))
     end
   )
 
@@ -1335,11 +1336,11 @@ end)
 -- head 解決フロー (diff-review.md「開始」2 / DESIGN 決定表)
 -- ---------------------------------------------------------------------------
 
-local SWITCH_OFFER = 'review.nvim: head feature は現在のチェックアウトと別のコミットです。'
-  .. 'git switch で feature に切り替えてレビューしますか? [y/N]: '
+local SWITCH_OFFER = 'review.nvim: head feature is a different commit than the current checkout. '
+  .. 'switch to feature with git switch and review? [y/N]: '
 
 local DEGRADED_MSG = {
-  msg = 'review.nvim: head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします',
+  msg = 'review.nvim: the head state is not checked out; reviewing via a read-only scratch',
   level = vim.log.levels.INFO,
 }
 
@@ -1411,7 +1412,7 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
       session_handler.start { base = 'main', head = 'feature' }
 
       assert.same({
-        msg = 'review.nvim: git switch に失敗しました。読み取り専用 scratch でレビューします: '
+        msg = 'review.nvim: git switch failed; reviewing via a read-only scratch: '
           .. 'fatal: your local changes would be overwritten by checkout',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
@@ -1447,7 +1448,7 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
   )
 
   it(
-    'scratch 縮退時の panel ヘッダは «作業ツリー» でなく保存 head ref 名を出す (DESIGN 決定表)',
+    'scratch 縮退時の panel ヘッダは «working tree» でなく保存 head ref 名を出す (DESIGN 決定表)',
     function()
       install_git {
         top_ok,
@@ -1476,7 +1477,7 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
   )
 
   it(
-    '不一致 + dirty な作業ツリー -> 提案を出さない (INV-3) ので縮退 INFO + 2 引数 diff',
+    '不一致 + dirty なworking tree -> 提案を出さない (INV-3) ので縮退 INFO + 2 引数 diff',
     function()
       install_git {
         top_ok,
@@ -1544,7 +1545,7 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
   end)
 
   it(
-    'branch は作業ツリー dirty でも worktree を作らない (縮退は head 解決フローが担う)',
+    'branch はworking tree dirty でも worktree を作らない (縮退は head 解決フローが担う)',
     function()
       install_git {
         top_ok,
@@ -1622,8 +1623,9 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
       assert.is_not_nil(state.inputs[2], '名残掃除の force 確認が出ていない')
       assert.equals(
         (
-          'review.nvim: worktree %s に未コミットの変更または未保存の編集 (バッファ %d 個) があります。'
-          .. '削除して閉じますか？ (git worktree remove --force — ディスクとバッファの編集は破棄されます) [y/N]: '
+          'review.nvim: worktree %s has uncommitted changes or unsaved buffer edits (%d buffers).'
+          .. ' delete and close? (git worktree remove --force '
+          .. '— disk and buffer edits are discarded) [y/N]: '
         ):format(wt, 1),
         state.inputs[2].prompt
       )
@@ -1688,8 +1690,10 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       assert.equals(true, sess.files['a.lua'].viewed)
       assert.equals(1, #state.inputs) -- 継承確認を 1 回
       assert.equals(
-        'review.nvim: 既存セッション main--feature (main..feature, コメント 1 件) に同じ '
-          .. 'refs 組の開始です。コメント内容を継承して開きますか？ [y/N]: ',
+        'review.nvim: the existing session main--feature '
+          .. '(main..feature, 1 comments) shares the same refs as this '
+          .. 'start '
+          .. 'inherit its comments and open? [y/N]: ',
         state.inputs[1].prompt
       )
       local sb = vim.fn.bufnr(SIDEBAR_NAME)
@@ -1806,8 +1810,8 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
 
       assert.equals(1, #state.inputs) -- close+継承は 1 回の確認に統合
       assert.equals(
-        'review.nvim: active セッション main--hotfix です。閉じて main--feature を継承しますか？'
-          .. ' コメント・完了マーク内容も引き継ぎます [y/N]: ',
+        'review.nvim: main--hotfix is the active session. close it and carry on with main--feature?'
+          .. ' comments and completion marks are carried over too. [y/N]: ',
         state.inputs[1].prompt
       )
       assert.equals(SLUG, session_handler.active().id)
@@ -1858,8 +1862,8 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       start_done('a', 'b--c')
 
       assert.same({
-        msg = 'review.nvim: slug a--b--c に既存セッション (a--b..c) があります。'
-          .. ':Review delete a--b--c で削除してください',
+        msg = 'review.nvim: slug a--b--c: an existing session (a--b..c) is registered. '
+          .. 'delete it with :Review delete a--b--c',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       assert.is_nil(session_handler.active())
@@ -1875,7 +1879,7 @@ describe('session.close / session.delete (q 経路 = close と tab 消滅)', fun
     assert.same({
       __class = 'review.Result',
       ok = false,
-      error = 'review.nvim: アクティブなセッションがありません',
+      error = 'review.nvim: no active session',
       code = 'E_NOT_ACTIVE',
     }, session_handler.close())
   end)
@@ -1946,7 +1950,7 @@ describe('session.close / session.delete (q 経路 = close と tab 消滅)', fun
       assert.is_nil(session_handler.active())
       for _, n in ipairs(state.notifications) do
         assert.is_true(
-          n.msg:find('レビュー tab を閉じました', 1, true) == nil,
+          n.msg:find('closed the review tab', 1, true) == nil,
           'q 経路で tab 消滅 INFO が出た: ' .. n.msg
         )
       end
@@ -1996,7 +2000,7 @@ describe('session.close / session.delete (q 経路 = close と tab 消滅)', fun
       assert.equals(1, #saved.comments) -- save 済み (INV-4 + tab 消滅 save)
       local notify = nil
       for _, n in ipairs(state.notifications) do
-        if n.msg:find('レビュー tab を閉じました', 1, true) ~= nil then
+        if n.msg:find('closed the review tab', 1, true) ~= nil then
           notify = n
         end
       end
@@ -2280,7 +2284,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
       local sb = vim.api.nvim_win_get_buf(ui_windows.win 'panel')
       assert.same({
         'Changes (2)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         'M a.lua +1 -0',
         'A b.lua +1 -0',
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
@@ -2309,7 +2313,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     local sb = vim.api.nvim_win_get_buf(ui_windows.win 'panel')
     assert.same({
       'Changes (2)',
-      'Showing changes for: main..作業ツリー',
+      'Showing changes for: main..working tree',
       'M a.lua +1 -0',
       '[✓] A b.lua +1 -0',
     }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
@@ -2317,7 +2321,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     session_handler.toggle_viewed_current() -- 解除方向も再描画される
     assert.same({
       'Changes (2)',
-      'Showing changes for: main..作業ツリー',
+      'Showing changes for: main..working tree',
       'M a.lua +1 -0',
       'A b.lua +1 -0',
     }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
@@ -2552,8 +2556,9 @@ describe(
 
         assert.same(
           (
-            'review.nvim: worktree を作成できません: %s。'
-            .. '同名の作業ツリーが残っている場合は `git worktree remove` で掃除してから再試行してください (fatal: %s already exists)'
+            'review.nvim: cannot create the worktree: %s. if a worktree '
+            .. 'with the same name is left over, '
+            .. 'clean it up with `git worktree remove` and retry (fatal: %s already exists)'
           ):format(wt_path(), wt_path()),
           state.notifications[1].msg
         )
@@ -2639,7 +2644,7 @@ describe(
     )
 
     it(
-      '差分 0 ファイルは「変更なし」で開かず、作りたての自前 worktree を掃除して戻る (孤児化防止)',
+      '差分 0 ファイルは「No changes」で開かず、作りたての自前 worktree を掃除して戻る (孤児化防止)',
       function()
         begin_pr {
           git_ok, -- add
@@ -2650,7 +2655,7 @@ describe(
         }
 
         assert.same({
-          msg = 'review.nvim: 変更なし (main..feature): レビュー対象がありません',
+          msg = 'review.nvim: no changes (main..feature): nothing to review',
           level = vim.log.levels.INFO,
         }, state.notifications[1])
         assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[3])
@@ -2764,8 +2769,9 @@ describe(
 
         assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[3])
         assert.same({
-          msg = "review.nvim: レビュー対象 ref が解決できません: 'main'。存在するブランチ/コミットを"
-            .. '指定してください (start の base/head 引数は <Tab> で補完できます)',
+          msg = 'review.nvim: cannot resolve the reviewed ref: '
+            .. '"main". specify an existing branch/commit '
+            .. '(base/head args of start are <Tab>-completable)',
           level = vim.log.levels.WARN,
         }, state.notifications[1])
         assert.is_nil(load_saved())
@@ -2842,18 +2848,20 @@ describe(
           return nil
         end
         assert.same(
-          'review.nvim: worktree の差分取得に失敗し、掃除も失敗しました: fatal: boom remove',
-          find_msg 'worktree の差分取得に失敗し'
+          'review.nvim: failed to fetch the worktree diff and cleanup '
+            .. 'also failed: fatal: boom remove',
+          find_msg 'failed to fetch the worktree diff'
         )
         assert.same(
-          'review.nvim: worktree dir を削除できませんでした。自前記録の無い dir は起動 scan が'
-            .. '回収できませんので '
+          'review.nvim: failed to delete the worktree dir. dirs without '
+            .. 'our own record cannot be reclaimed by the '
+            .. 'startup scan; delete '
             .. wt
-            .. ' を手動で削除してください',
-          find_msg '手動で削除してください'
+            .. ' manually',
+          find_msg 'startup scan; delete '
         )
         assert.is_nil(load_saved())
-        assert.is_nil(find_msg '(起動 scan / :Review delete が回収します)')
+        assert.is_nil(find_msg 'startup scan / :Review delete')
 
         vim.fn.system { 'chmod', '755', wt }
         assert.equals(0, vim.v.shell_error)
@@ -3048,8 +3056,8 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
       assert.equals(1, #state.inputs)
       assert.equals(
         (
-          'review.nvim: worktree %s に未コミットの変更があります。削除して閉じますか？ '
-          .. '(git worktree remove --force — ディスクの編集は破棄されます) [y/N]: '
+          'review.nvim: worktree %s has uncommitted changes. delete and close? '
+          .. '(git worktree remove --force — disk edits are discarded) [y/N]: '
         ):format(wt_path()),
         state.inputs[1].prompt
       )
@@ -3099,7 +3107,8 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
       assert.equals('closed', load_saved().status)
       assert.is_nil(session_handler.active())
       assert.same({
-        msg = 'review.nvim: worktree 掃除に失敗しました (残骸は起動 scan が回収します): fatal: remove boom',
+        msg = 'review.nvim: worktree cleanup failed (the startup '
+          .. 'scan reclaims leftovers): fatal: remove boom',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       -- 孤児 dir を残さない (does not point back 系の崩れ登録は prune + dir rm が正攻)
@@ -3276,8 +3285,9 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
       assert.equals(1, #state.inputs)
       assert.equals(
         (
-          'review.nvim: worktree %s に未コミットの変更または未保存の編集 (バッファ %d 個) があります。'
-          .. '削除して閉じますか？ (git worktree remove --force — ディスクとバッファの編集は破棄されます) [y/N]: '
+          'review.nvim: worktree %s has uncommitted changes or unsaved buffer edits (%d buffers).'
+          .. ' delete and close? (git worktree remove --force '
+          .. '— disk and buffer edits are discarded) [y/N]: '
         ):format(wt_path(), 1),
         state.inputs[1].prompt
       )
@@ -3450,8 +3460,9 @@ describe('delete の worktree / ref 掃除', function()
       )
       assert.equals(
         (
-          'review.nvim: worktree %s に未コミットの変更または未保存の編集 (バッファ %d 個) があります。'
-          .. '削除して閉じますか？ (git worktree remove --force — ディスクとバッファの編集は破棄されます) [y/N]: '
+          'review.nvim: worktree %s has uncommitted changes or unsaved buffer edits (%d buffers).'
+          .. ' delete and close? (git worktree remove --force '
+          .. '— disk and buffer edits are discarded) [y/N]: '
         ):format(wt, 1),
         state.inputs[2].prompt
       )
@@ -3612,7 +3623,8 @@ describe('delete の worktree / ref 掃除', function()
       state.deferred { code = 255, stdout = '', stderr = 'fatal: remove boom\n' }
 
       assert.same({
-        msg = 'review.nvim: worktree 掃除に失敗しました (残骸は起動 scan が回収します): fatal: remove boom',
+        msg = 'review.nvim: worktree cleanup failed (the startup '
+          .. 'scan reclaims leftovers): fatal: remove boom',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       assert.same({ 'git', 'worktree', 'prune' }, state.git_calls[4])
@@ -3642,7 +3654,8 @@ describe('delete の worktree / ref 掃除', function()
 
       assert.same({ 'git', 'worktree', 'prune' }, state.git_calls[4])
       assert.same({
-        msg = 'review.nvim: worktree 掃除に失敗しました (残骸は起動 scan が回収します): fatal: remove boom',
+        msg = 'review.nvim: worktree cleanup failed (the startup '
+          .. 'scan reclaims leftovers): fatal: remove boom',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       local function has_msg(pat)
@@ -3653,8 +3666,8 @@ describe('delete の worktree / ref 掃除', function()
         end
         return false
       end
-      assert.is_true(has_msg 'worktree dir を削除できませんでした')
-      assert.is_true(has_msg '孤児 worktree dir を消去できませんでした')
+      assert.is_true(has_msg 'failed to delete the worktree dir')
+      assert.is_true(has_msg 'failed to remove the orphaned worktree dir')
       -- JSON を消さない = closed + created_by_us=true の記録が残る (起動 scan 回収可)。
       assert.is_true(vim.uv.fs_stat(json_path()) ~= nil)
       assert.equals('closed', load_saved().status)
@@ -3704,8 +3717,8 @@ describe('delete の worktree / ref 掃除', function()
       assert.equals(2, #state.inputs)
       assert.equals(
         (
-          'review.nvim: worktree %s に未コミットの変更があります。削除して閉じますか？ '
-          .. '(git worktree remove --force — ディスクの編集は破棄されます) [y/N]: '
+          'review.nvim: worktree %s has uncommitted changes. delete and close? '
+          .. '(git worktree remove --force — disk edits are discarded) [y/N]: '
         ):format(wt_path()),
         state.inputs[2].prompt
       )
@@ -3802,8 +3815,8 @@ describe('delete の worktree / ref 掃除', function()
       assert.same({ 'git', 'worktree', 'prune' }, state.git_calls[4])
       assert.equals(4, #state.git_calls)
       assert.same({
-        msg = 'review.nvim: 孤児 worktree dir を消去できませんでした。'
-          .. '孤児 dir を残さないためセッション削除は中止します: '
+        msg = 'review.nvim: failed to remove the orphaned worktree dir.'
+          .. ' refusing to delete the session rather than leave an orphaned dir: '
           .. wt,
         level = vim.log.levels.WARN,
       }, state.notifications[1])
@@ -3856,7 +3869,7 @@ describe('panel 絞り込み (`/`)', function()
     session_handler.filter_sidebar()
     assert.same({
       'Changes (1)',
-      'Showing changes for: main..作業ツリー',
+      'Showing changes for: main..working tree',
       'M a.lua +1 -0',
     }, panel_lines())
     assert.equals('main..feature · 1 file · 0 comments · filter=a.lua', panel_winbar())
@@ -3881,7 +3894,7 @@ describe('panel 絞り込み (`/`)', function()
     session_handler.filter_sidebar()
     assert.same({
       'Changes (1)',
-      'Showing changes for: main..作業ツリー',
+      'Showing changes for: main..working tree',
       'M a.lua +1 -0',
     }, panel_lines())
   end)
@@ -3918,7 +3931,7 @@ describe('panel 絞り込み (`/`)', function()
       assert.equals(1, #lines)
       assert.equals('', lines[1])
       assert.equals(
-        'main..feature · 0 files · 0 comments · filter=zzz (空入力で解除)',
+        'main..feature · 0 files · 0 comments · filter=zzz (empty input clears)',
         panel_winbar()
       )
     end
@@ -4148,7 +4161,7 @@ describe(
         -- ±カウント・panel 再適用 (a.lua はコメントあり = アイコン付き)
         assert.same({
           'Changes (2)',
-          'Showing changes for: main..作業ツリー',
+          'Showing changes for: main..working tree',
           'M \u{EA6B} a.lua +2 -0',
           'A c.lua +1 -0',
         }, panel_rows())
@@ -4197,7 +4210,7 @@ describe(
         -- 一覧からも落ちる。補正詳細は BufWritePost 側のテストで pin)。
         assert.same({
           'Changes (2)',
-          'Showing changes for: main..作業ツリー',
+          'Showing changes for: main..working tree',
           'M a.lua +2 -0',
           'A c.lua +1 -0',
         }, panel_rows())
@@ -4228,9 +4241,9 @@ describe(
         assert.same({ 'git', 'diff', 'main' }, state.git_calls[1])
         assert.equals(1, #state.git_calls) -- 失敗後は commit 比較も追い fetch も走らない
         assert.same({
-          msg = 'review.nvim: 差分の再取得に失敗しました。現在の表示とコメントを保持します: '
-            .. "レビュー対象 ref が解決できません: 'main'。存在するブランチ/コミットを"
-            .. '指定してください (start の base/head 引数は <Tab> で補完できます)',
+          msg = 'review.nvim: failed to refresh the diff; keeping the current view and comments: '
+            .. 'cannot resolve the reviewed ref: "main". specify an existing branch/commit '
+            .. '(base/head args of start are <Tab>-completable)',
           level = vim.log.levels.WARN,
         }, state.notifications[1])
         assert.equals(1, #state.notifications)
@@ -4321,7 +4334,7 @@ describe(
         assert.equals('main..feature · b.lua · +0 -0 · 0 comments · new file', head_winbar())
         assert.same({
           'Changes (2)',
-          'Showing changes for: main..作業ツリー',
+          'Showing changes for: main..working tree',
           'M a.lua +2 -0',
           'A c.lua +1 -0',
         }, panel_rows())
@@ -4414,13 +4427,13 @@ describe(
         }
         session_handler.refresh()
         assert.same({
-          msg = 'review.nvim: セッション開始時の head と現在のチェックアウトが違います',
+          msg = 'review.nvim: the head at session start is not the current checkout',
           level = vim.log.levels.INFO,
         }, state.notifications[1])
         assert.equals(1, #state.notifications)
         assert.same({
           'Changes (2)',
-          'Showing changes for: main..作業ツリー',
+          'Showing changes for: main..working tree',
           'M a.lua +2 -0',
           'A c.lua +1 -0',
         }, panel_rows())
@@ -4636,7 +4649,7 @@ describe('file panel ツリー / view state (issue-17)', function()
 
   local TREE_LINES = {
     'Changes (5)',
-    'Showing changes for: main..作業ツリー',
+    'Showing changes for: main..working tree',
     '* app/',
     '  M util/',
     '    M x.lua +1 -0',
@@ -4699,7 +4712,7 @@ describe('file panel ツリー / view state (issue-17)', function()
       local _, lines = panel_window_lines()
       assert.same({
         'Changes (5)',
-        'Showing changes for: main..作業ツリー',
+        'Showing changes for: main..working tree',
         '▸ * app/',
         'A cmd/',
         '  A main.go +1 -0',

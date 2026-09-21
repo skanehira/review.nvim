@@ -56,7 +56,7 @@ function M.run(bin, args, opts, cb)
   local err_code = opts.err_code or result.codes.E_GIT
 
   if executable(bin) ~= 1 then
-    deliver(cb, result.err(bin .. ' が見つかりません', err_code))
+    deliver(cb, result.err(bin .. ' not found', err_code))
     return
   end
 
@@ -78,7 +78,7 @@ function M.run(bin, args, opts, cb)
         __class = result.class,
         ok = false,
         data = data,
-        error = bin .. ' の起動に失敗しました',
+        error = bin .. ' failed to launch',
         code = err_code,
       })
     elseif code == 0 then
@@ -89,7 +89,7 @@ function M.run(bin, args, opts, cb)
         ok = false,
         data = data,
         error = stderr_main_line(out.stderr)
-          or (bin .. ' が終了コード ' .. code .. ' で失敗しました'),
+          or (bin .. ' returned exit code ' .. code .. ' (failure)'),
         code = err_code,
       })
     end
@@ -100,7 +100,7 @@ function M.run(bin, args, opts, cb)
   -- アダプタ境界で守るため pcall で吸収する (DESIGN.md 横断規約)。
   local spawned = pcall(system, vim.list_extend({ bin }, args or {}), sys_opts, on_exit)
   if not spawned then
-    deliver(cb, result.err(bin .. ' の起動に失敗しました', err_code))
+    deliver(cb, result.err(bin .. ' failed to launch', err_code))
   end
 end
 
@@ -114,7 +114,7 @@ function M.run_sync(bin, args, opts)
   local timeout = opts.timeout_ms or 250
 
   if executable(bin) ~= 1 then
-    return result.err(bin .. ' が見つかりません', err_code)
+    return result.err(bin .. ' not found', err_code)
   end
 
   local sys_opts = {}
@@ -127,7 +127,7 @@ function M.run_sync(bin, args, opts)
 
   local ok_spawn, handle = pcall(system, vim.list_extend({ bin }, args or {}), sys_opts)
   if not ok_spawn or handle == nil then
-    return result.err(bin .. ' の起動に失敗しました', err_code)
+    return result.err(bin .. ' failed to launch', err_code)
   end
 
   local ok_wait, out = pcall(function()
@@ -138,10 +138,7 @@ function M.run_sync(bin, args, opts)
     pcall(function()
       handle:kill(9)
     end)
-    return result.err(
-      bin .. ' が同期実行の待ち時間内に完了しませんでした',
-      err_code
-    )
+    return result.err(bin .. ' did not finish within the sync-run timeout', err_code)
   end
 
   local code = out.code or 0
@@ -151,7 +148,7 @@ function M.run_sync(bin, args, opts)
       __class = result.class,
       ok = false,
       data = data,
-      error = bin .. ' の起動に失敗しました',
+      error = bin .. ' failed to launch',
       code = err_code,
     }
   elseif code == 0 then
@@ -161,8 +158,7 @@ function M.run_sync(bin, args, opts)
     __class = result.class,
     ok = false,
     data = data,
-    error = stderr_main_line(out.stderr)
-      or (bin .. ' が終了コード ' .. code .. ' で失敗しました'),
+    error = stderr_main_line(out.stderr) or (bin .. ' returned exit code ' .. code .. ' (failure)'),
     code = err_code,
   }
 end

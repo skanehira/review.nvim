@@ -32,8 +32,7 @@ local function run()
     end
     local text = f:read '*a' or ''
     f:close()
-    return text:find('review.nvim: main--feature のレビューが続けられます', 1, true)
-      ~= nil
+    return text:find('review.nvim: you can resume the review of main--feature', 1, true) ~= nil
   end, 'VimEnter 継続 notify')
 
   -- :Review 1 操作で復元 (open 1 件 = 即復元)

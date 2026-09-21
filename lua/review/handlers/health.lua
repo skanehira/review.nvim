@@ -47,15 +47,13 @@ local function sweep_dir(session, on_done, null_record)
   -- close の finish_close / delete の sweep_or_abort と同一ヘルパー)。
   wt_buffers.destroy(path)
   if not git_worktree.remove_dir(path) then
-    notify_warn(
-      ('worktree dir を削除できませんでした (%s): %s'):format(session.id, path)
-    )
+    notify_warn(('failed to delete the worktree dir (%s): %s'):format(session.id, path))
     on_done()
     return
   end
   git_worktree.prune({ repo = session.repo }, function(res)
     if not res.ok then
-      notify_warn(('worktree prune に失敗しました (%s): %s'):format(session.id, res.error))
+      notify_warn(('worktree prune failed (%s): %s'):format(session.id, res.error))
     end
     if null_record then
       nullify(session)
@@ -124,21 +122,18 @@ function M.sweep(repo, cb)
       if action == 'reclaim-record' then
         notify_info(
           (
-            '%s の worktree ディレクトリが消滅しています。'
-            .. '記録から worktree を外しました (復元時に作成判断で再生成します)'
+            'the worktree dir of %s has disappeared;'
+            .. ' the worktree record was cleared (it will be recreated at start)'
           ):format(sess.id)
         )
         nullify(sess)
         step(i + 1)
         return
       end
-      local reason = (sess.status == 'closed') and 'close 掃除の失敗残骸' or 'git 未登録'
+      local reason = (sess.status == 'closed') and 'leftovers from a failed close cleanup'
+        or 'not registered in git'
       notify_warn(
-        ('worktree 残骸を掃除しました %s: %s (%s)'):format(
-          sess.id,
-          sess.worktree.path,
-          reason
-        )
+        ('cleaned up worktree leftovers %s: %s (%s)'):format(sess.id, sess.worktree.path, reason)
       )
       -- open の孤児は記録回収 (save) して復元時の再生成へ渡す。closed は dir を
       -- 消すだけ (save すると delete と競合して JSON を復活させ得る — 上の注記)。

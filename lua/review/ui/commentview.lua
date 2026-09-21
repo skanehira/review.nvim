@@ -26,7 +26,7 @@ function M.open(lines, opts)
     width = width,
     height = height,
     border = 'rounded',
-    title = (opts.title or ' Comments') .. '  q 閉じる ',
+    title = (opts.title or ' Comments') .. ' q close ',
   })
 
   local function close()

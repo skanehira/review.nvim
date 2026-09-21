@@ -152,7 +152,7 @@ grep -q 'E2E-TR4 fold=toggled' "$OUT1" || {
   exit 1
 }
 # provider 無し退路 (ai-prompt.md): "0 コピーは成功し WARN が出ている (= 退路を観測)
-grep -q 'クリップボード provider がありません' "$LOG" || {
+grep -q 'no clipboard provider' "$LOG" || {
   echo 'e2e: clipboard provider 無し退路の WARN がログに無い' >&2
   exit 1
 }
@@ -175,7 +175,7 @@ if ! run_nvim "$REPO_ROOT/tests/e2e/phase2.lua" >"$OUT2" 2>&1; then
 fi
 cat "$OUT2" | tee -a "$WORK/e2e-report.txt"
 # 起動時 notify がログに出ていること (grep = 陽性検出)
-grep -q 'review.nvim: main--feature のレビューが続けられます' "$LOG" || {
+grep -q 'you can resume the review of main--feature' "$LOG" || {
   echo 'e2e: VimEnter 継続 notify がログに無い' >&2
   exit 1
 }
@@ -356,7 +356,7 @@ grep -q 'E2E-SW1 switch=real' "$OUTSW" || headres_fail "$OUTSW" 'switch (E2E-SW1
   echo 'e2e: switch シナリオ後に HEAD が feature でない (git switch が走っていない)' >&2
   exit 1
 }
-if grep -q '読み取り専用 scratch でレビューします' "$WORK/headres-switch.log"; then
+if grep -q 'reviewing via a read-only scratch' "$WORK/headres-switch.log"; then
   echo 'e2e: switch 承諾経路で scratch 縮退 INFO が出た (縮退してはいけない)' >&2
   exit 1
 fi
@@ -366,7 +366,7 @@ OUTDG=$(mktemp "$WORK/headres-degrade.out.XXXXXX")
 run_headres "$REPO_ROOT/tests/e2e/degrade.lua" "$WORK/d-degrade" "$WORK/headres-degrade.log" \
   >"$OUTDG" 2>&1 || headres_fail "$OUTDG" "head 解決 縮退"
 grep -q 'E2E-DG1 scratch-pair' "$OUTDG" || headres_fail "$OUTDG" '縮退 (E2E-DG1 欠落)'
-grep -q 'head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします' \
+grep -q 'the head state is not checked out' \
   "$WORK/headres-degrade.log" || {
   echo 'e2e: 縮退 INFO 文言がログに出ない (diff-review「開始」2 の確定文言)' >&2
   exit 1
@@ -384,7 +384,7 @@ run_headres "$REPO_ROOT/tests/e2e/degrade_restart.lua" "$WORK/d-degrade-restart"
   "$WORK/headres-dr2.log" REVIEW_E2E_STEP=2 >"$OUTDR2" 2>&1 \
   || headres_fail "$OUTDR2" "縮退再開始 STEP=2"
 grep -q 'E2E-DR2 restart=degraded' "$OUTDR2" || headres_fail "$OUTDR2" '縮退再開始 STEP=2'
-grep -q 'head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします' \
+grep -q 'the head state is not checked out' \
   "$WORK/headres-dr2.log" || {
   echo 'e2e: 縮退再開始 (継承) 時の INFO 文言が 2 回目ログに出ない' >&2
   exit 1
@@ -402,7 +402,7 @@ run_headres "$REPO_ROOT/tests/e2e/restore_reeval.lua" "$WORK/d-restore-reeval" \
   "$WORK/headres-rr2.log" REVIEW_E2E_RMODE=scratch-restore >"$OUTRR2" 2>&1 \
   || headres_fail "$OUTRR2" "復元再評価 scratch-restore"
 grep -q 'E2E-RR2 mode=scratch-restore' "$OUTRR2" || headres_fail "$OUTRR2" '復元再評価 scratch-restore'
-grep -q 'head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします' \
+grep -q 'the head state is not checked out' \
   "$WORK/headres-rr2.log" || {
   echo 'e2e: 復元時の scratch 縮退 INFO 文言がログに出ない (MUST 2 証跡)' >&2
   exit 1
@@ -412,7 +412,7 @@ run_headres "$REPO_ROOT/tests/e2e/restore_reeval.lua" "$WORK/d-restore-reeval" \
   "$WORK/headres-rr3.log" REVIEW_E2E_RMODE=real-restore >"$OUTRR3" 2>&1 \
   || headres_fail "$OUTRR3" "復元再評価 real-restore"
 grep -q 'E2E-RR3 mode=real-restore' "$OUTRR3" || headres_fail "$OUTRR3" '復元再評価 real-restore'
-if grep -q '読み取り専用 scratch でレビューします' "$WORK/headres-rr3.log"; then
+if grep -q 'reviewing via a read-only scratch' "$WORK/headres-rr3.log"; then
   echo 'e2e: real-restore (checkout==head) で縮退 INFO が出た (誤縮退)' >&2
   exit 1
 fi
@@ -434,7 +434,7 @@ grep -q 'E2E-TB1 status=open extmarks=0 winbar=restored' "$OUTTB" || {
   echo 'e2e: :tabclose 後の status=open 保存 / extmark 残骸 0 が確認できない' >&2
   exit 1
 }
-grep -q 'レビュー tab を閉じました (セッションは保存済み' "$WORK/tabclose.log" || {
+grep -q 'closed the review tab (session saved' "$WORK/tabclose.log" || {
   echo 'e2e: TabClosed の INFO 文言がログに出ない' >&2
   exit 1
 }
@@ -544,7 +544,7 @@ git -C "$REPO_PR" rev-parse --verify -q review-nvim/pr-7 >/dev/null || {
 OUTP1B=$(mktemp "$WORK/pr1b.out.XXXXXX")
 run_pr "$REPO_ROOT/tests/e2e/pr1b.lua" "$D_PR1" >"$OUTP1B" 2>&1 || pr_fail "$OUTP1B" "pr phase1b"
 grep -q 'E2E-PR1B idle=1' "$OUTP1B" || pr_fail "$OUTP1B" 'pr phase1b'
-if grep -Eq '残骸|worktree' "$WORK/pr-pr1b.lua.log"; then
+if grep -Eq 'cleaned up worktree leftovers|has disappeared;' "$WORK/pr-pr1b.lua.log"; then
   echo 'e2e: 正常 close 後に worktree scan 通知が出た (誤検出)' >&2
   exit 1
 fi
@@ -561,7 +561,7 @@ rm -rf "$WT2" # 異常終了で掃除半端 -> dir 消滅状態を模擬 (scan �
 OUTP3=$(mktemp "$WORK/pr3.out.XXXXXX")
 run_pr "$REPO_ROOT/tests/e2e/pr3.lua" "$D_PR2" >"$OUTP3" 2>&1 || pr_fail "$OUTP3" "pr phase3(回復)"
 grep -q 'E2E-PR3 recreated=1' "$OUTP3" || pr_fail "$OUTP3" 'pr phase3(回復)'
-grep -q 'worktree ディレクトリが消滅しています' "$WORK/pr-pr3.lua.log" || {
+grep -q 'has disappeared;' "$WORK/pr-pr3.lua.log" || {
   echo 'e2e: 起動 scan の残骸回収通知が無い (陽性対照)' >&2
   exit 1
 }

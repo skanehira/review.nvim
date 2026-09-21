@@ -30,7 +30,7 @@ function M.pr_view(opts, cb)
         local err = res.error or ''
         if err:lower():find('gh auth login', 1, true) ~= nil then
           -- 理由文字列のみ返す (通知プレフィックスは caller 側 — 横断規約の通知形式)
-          res.error = 'gh 未ログインです。`gh auth login` を実行してください'
+          res.error = 'gh is not logged in; run `gh auth login`'
           res.code = result.codes.E_GH
           cb(res)
           return
@@ -43,7 +43,7 @@ function M.pr_view(opts, cb)
       end
       local ok_decode, meta = pcall(vim.json.decode, res.data.stdout)
       if not ok_decode or type(meta) ~= 'table' then
-        cb(result.err('gh pr view の出力を解析できませんでした', result.codes.E_GH))
+        cb(result.err('failed to parse the output of gh pr view', result.codes.E_GH))
         return
       end
       cb(result.ok(meta))

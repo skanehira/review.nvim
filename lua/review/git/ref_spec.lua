@@ -707,7 +707,7 @@ describe(
         assert.same({
           __class = 'review.Result',
           ok = false,
-          error = 'v1.0.0 はローカルブランチではありません',
+          error = 'v1.0.0 is not a local branch',
           code = 'E_REF',
         }, received)
       end

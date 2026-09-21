@@ -12,7 +12,7 @@ describe('usermsg.git_ref_error', function()
       "fatal: invalid object name 'nope'",
     } do
       local msg = usermsg.git_ref_error(raw)
-      assert.is_true(msg:find("'nope'", 1, true) ~= nil, raw .. ' -> ' .. msg)
+      assert.is_true(msg:find('"nope"', 1, true) ~= nil, raw .. ' -> ' .. msg)
       assert.is_true(msg:find('<Tab>', 1, true) ~= nil, raw .. ' -> ' .. msg)
     end
   end)
@@ -28,7 +28,7 @@ describe('usermsg.gh_error', function()
   it('no git remotes found を 日本語 + 対処へ', function()
     local msg = usermsg.gh_error 'no git remotes found'
     assert.equals(
-      'このリポジトリに git remote (origin 等) がありません。:Review pr は GitHub のリモートリポジトリでのみ利用できます',
+      'this repo has no git remote (e.g. origin); :Review pr only works against a GitHub remote',
       msg
     )
   end)
@@ -40,7 +40,7 @@ describe('usermsg.gh_error', function()
   end)
 
   it('既知パターンの gh 失敗 (未ログイン等) は原文 passthrough', function()
-    local raw = 'gh 未ログインです。`gh auth login` を実行してください'
+    local raw = 'gh is not logged in; run `gh auth login`'
     assert.equals(raw, usermsg.gh_error(raw))
   end)
 end)

@@ -140,7 +140,7 @@ describe('git/worktree status / list', function()
     end
   )
 
-  it('status 出力が空なら dirty=false (未コミット変更なし)', function()
+  it('status 出力が空なら dirty=false (未コミットNo changes)', function()
     stub_system()
     local received
     worktree.status({ repo = '/repo', path = '/wt/x' }, function(res)

@@ -44,9 +44,7 @@ local function read_lines(path)
   end
   if vim.uv.fs_stat(path) ~= nil then
     notify(
-      ('review.nvim: セッションファイル %s が読み取れません。「存在しない」として扱います'):format(
-        path
-      ),
+      ('review.nvim: session file %s is unreadable; treating it as missing'):format(path),
       vim.log.levels.WARN
     )
   end
@@ -59,11 +57,7 @@ local function quarantine(repo, slug, file, cause)
   local corrupt = paths.corrupt_file(repo, slug)
   rename(file, corrupt)
   notify(
-    ('review.nvim: %s のセッションファイル %s を %s に退避しました'):format(
-      cause,
-      file,
-      corrupt
-    ),
+    ('review.nvim: moved %s session file %s aside to %s'):format(cause, file, corrupt),
     vim.log.levels.WARN
   )
 end
@@ -80,11 +74,11 @@ local function read_session(repo, slug)
 
   local ok_decode, decoded = pcall(vim.json.decode, table.concat(lines, '\n'))
   if not ok_decode or type(decoded) ~= 'table' then
-    quarantine(repo, slug, file, '破損 JSON')
+    quarantine(repo, slug, file, 'corrupt JSON')
     return nil
   end
   if decoded.version ~= SCHEMA_VERSION then
-    local cause = ('schema version 不一致 (version=%s)'):format(tostring(decoded.version))
+    local cause = ('schema version mismatch (version=%s)'):format(tostring(decoded.version))
     quarantine(repo, slug, file, cause)
     return nil
   end
@@ -99,10 +93,7 @@ end
 function M.save(sess)
   local dir = paths.repo_dir(sess.repo)
   if vim.fn.mkdir(dir, 'p') == 0 then
-    return result.err(
-      'セッションディレクトリを作成できません: ' .. dir,
-      result.codes.E_STORE
-    )
+    return result.err('cannot create the session directory: ' .. dir, result.codes.E_STORE)
   end
 
   local file = paths.session_file(sess.repo, sess.id)
@@ -113,19 +104,13 @@ function M.save(sess)
 
   local f = io.open(tmp, 'wb')
   if f == nil then
-    return result.err(
-      'セッションファイルを書けません: ' .. tmp,
-      result.codes.E_STORE
-    )
+    return result.err('cannot write the session file: ' .. tmp, result.codes.E_STORE)
   end
   local written, write_err = f:write(vim.json.encode(payload))
   f:close()
   if written == nil then
     return result.err(
-      ('セッションファイルの書き込みに失敗しました: %s (%s)'):format(
-        tmp,
-        tostring(write_err)
-      ),
+      ('failed to write the session file: %s (%s)'):format(tmp, tostring(write_err)),
       result.codes.E_STORE
     )
   end
@@ -133,10 +118,7 @@ function M.save(sess)
   local renamed, rename_err = rename(tmp, file)
   if not renamed then
     return result.err(
-      ('セッションファイルの差し替えに失敗しました: %s (%s)'):format(
-        file,
-        tostring(rename_err)
-      ),
+      ('failed to rename the session file: %s (%s)'):format(file, tostring(rename_err)),
       result.codes.E_STORE
     )
   end
@@ -182,10 +164,7 @@ function M.delete(repo, id)
     -- ENOENT は成功として扱う (errno 文字列の判定は環境非依存な接頭辞で行う)
     if not tostring(err):match 'No such file' then
       return result.err(
-        ('セッションファイルの削除に失敗しました: %s (%s)'):format(
-          file,
-          tostring(err)
-        ),
+        ('failed to delete the session file: %s (%s)'):format(file, tostring(err)),
         result.codes.E_STORE
       )
     end

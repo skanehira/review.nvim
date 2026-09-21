@@ -155,15 +155,17 @@ local function prune_and_rm_dir(repo, path, recoverable, done)
     if not git_worktree.remove_dir(path) then
       if recoverable then
         notify_warn(
-          ('worktree dir を削除できませんでした (起動 scan / :Review delete が回収します): %s'):format(
-            path
-          )
+          (
+            'failed to delete the worktree dir (startup scan / :Review '
+            .. 'delete will reclaim it): %s'
+          ):format(path)
         )
       else
         notify_warn(
           (
-            'worktree dir を削除できませんでした。自前記録の無い dir は起動 scan が'
-            .. '回収できませんので %s を手動で削除してください'
+            'failed to delete the worktree dir. dirs without our own record '
+            .. 'cannot be reclaimed by the '
+            .. 'startup scan; delete %s manually'
           ):format(path)
         )
       end
@@ -216,13 +218,14 @@ end
 local function force_prompt(path, n_modified)
   if n_modified ~= nil and n_modified > 0 then
     return (
-      'review.nvim: worktree %s に未コミットの変更または未保存の編集 (バッファ %d 個) があります。'
-      .. '削除して閉じますか？ (git worktree remove --force — ディスクとバッファの編集は破棄されます) [y/N]: '
+      'review.nvim: worktree %s has uncommitted changes or unsaved buffer edits (%d buffers).'
+      .. ' delete and close? (git worktree remove --force '
+      .. '— disk and buffer edits are discarded) [y/N]: '
     ):format(path, n_modified)
   end
   return (
-    'review.nvim: worktree %s に未コミットの変更があります。削除して閉じますか？ '
-    .. '(git worktree remove --force — ディスクの編集は破棄されます) [y/N]: '
+    'review.nvim: worktree %s has uncommitted changes. delete and close? '
+    .. '(git worktree remove --force — disk edits are discarded) [y/N]: '
   ):format(path)
 end
 
@@ -276,8 +279,8 @@ local function add_with_recovery(args, path, record, cb)
         cb(
           result.err(
             (
-              'worktree を作成できません: %s。同名の作業ツリーが残っている場合は '
-              .. '`git worktree remove` で掃除してから再試行してください (%s)'
+              'cannot create the worktree: %s. if a worktree with the same name is left over, '
+              .. 'clean it up with `git worktree remove` and retry (%s)'
             ):format(path, first_err.error),
             result.codes.E_WORKTREE
           )
@@ -301,9 +304,7 @@ local function cleanup_skipped_record(record, cb)
       git_worktree.remove({ repo = record.repo, path = record.path, force = force }, function(rres)
         if not rres.ok then
           notify_warn(
-            ('worktree 掃除に失敗しました (残骸は起動 scan が回収します): %s'):format(
-              rres.error
-            )
+            ('worktree cleanup failed (the startup scan reclaims leftovers): %s'):format(rres.error)
           )
           -- resolve_worktree の lock 下なので prune+dir 削除も同じ lock 内で続ける
           -- record は created_by_us=true の既存セッション記録 (JSON に残る = scan 回収可)
@@ -321,7 +322,7 @@ local function cleanup_skipped_record(record, cb)
         if yes then
           finish(true)
         else
-          cb(result.err('キャンセルされました', result.codes.E_CANCELLED))
+          cb(result.err('cancelled', result.codes.E_CANCELLED))
         end
       end)
       return
@@ -467,8 +468,8 @@ local function sweep_or_abort(repo, path, finalize)
     end
     notify_warn(
       (
-        '孤児 worktree dir を消去できませんでした。'
-        .. '孤児 dir を残さないためセッション削除は中止します: %s'
+        'failed to remove the orphaned worktree dir.'
+        .. ' refusing to delete the session rather than leave an orphaned dir: %s'
       ):format(path)
     )
   end)
@@ -520,9 +521,7 @@ local function finish_close(current, force, skip_remove, cb, after_remove)
     }, function(rres)
       if not rres.ok then
         notify_warn(
-          ('worktree 掃除に失敗しました (残骸は起動 scan が回収します): %s'):format(
-            rres.error
-          )
+          ('worktree cleanup failed (the startup scan reclaims leftovers): %s'):format(rres.error)
         )
         -- current.session は closed + created_by_us 記録済みで save 済み
         -- (起動 scan / delete が回収できる)
@@ -595,7 +594,7 @@ local function panel_head_display()
   if active.degraded then
     return active.session.head
   end
-  return '作業ツリー'
+  return 'working tree'
 end
 
 --- panel / コメント一覧 winbar の head 表示名 (通常経路 = 作業ツリー、scratch 縮退 =
@@ -627,7 +626,7 @@ end
 local function head_winbar_text(session, cur)
   local refs = ('%s..%s'):format(session.base or '', session.head or '')
   if cur.kind == 'no-changes' then
-    return refs .. ' · 変更なし'
+    return refs .. ' · no changes'
   end
   if cur.kind == 'binary' then
     return ('%s · %s · binary'):format(refs, cur.path)
@@ -650,7 +649,7 @@ end
 
 local function base_winbar_text(cur)
   if cur.kind == 'no-changes' then
-    return '変更なし'
+    return 'No changes'
   end
   if cur.kind == 'binary' then
     return ('base · %s (binary)'):format(cur.path)
@@ -953,7 +952,7 @@ local function resolve_and_open(path, opts)
   if path == M.NO_CHANGES then
     cur.kind = 'no-changes'
     local buf = ui_scratchwin.buffer { kind = 'base', session_id = session.id, path = path }
-    ui_scratchwin.set_content(buf, { '変更なし' })
+    ui_scratchwin.set_content(buf, { 'No changes' })
     track_scratch(buf)
     cur.base_buf = buf
     cur.head_buf = buf
@@ -1052,7 +1051,7 @@ end
 --- 呼び出しは nil)。
 function M.open_file(path, opts)
   if active == nil then
-    notify_warn 'アクティブなセッションがありません'
+    notify_warn 'no active session'
     return
   end
   if path == nil or (active.files_by_path[path] == nil and active.session.files[path] == nil) then
@@ -1098,7 +1097,7 @@ local function on_review_tab_closed()
   -- ここは既に active=nil 化済み)。一覧表示中は status=open のまま追随する。
   persist(current.session)
   vim.notify(
-    'review.nvim: レビュー tab を閉じました (セッションは保存済み・`:Review` で開き直し可)',
+    'review.nvim: closed the review tab (session saved; reopen with `:Review`)',
     vim.log.levels.INFO
   )
 end
@@ -1109,8 +1108,7 @@ end
 -- ============================================================================
 
 -- 縮退の確定文言 (diff-review「開始」2 «…» の通り)。
-local DEGRADED_INFO =
-  'head の状態はチェックアウトされていません。読み取り専用 scratch でレビューします'
+local DEGRADED_INFO = 'the head state is not checked out; reviewing via a read-only scratch'
 
 local function degraded_notify()
   vim.notify('review.nvim: ' .. DEGRADED_INFO, vim.log.levels.INFO)
@@ -1118,8 +1116,8 @@ end
 
 local function switch_offer(head)
   return (
-    'review.nvim: head %s は現在のチェックアウトと別のコミットです。'
-    .. 'git switch で %s に切り替えてレビューしますか? [y/N]: '
+    'review.nvim: head %s is a different commit than the current checkout. '
+    .. 'switch to %s with git switch and review? [y/N]: '
   ):format(head, head)
 end
 
@@ -1160,9 +1158,7 @@ local function resolve_head(args, cb)
                 return
               end
               notify_warn(
-                ('git switch に失敗しました。読み取り専用 scratch でレビューします: %s'):format(
-                  sw.error
-                )
+                ('git switch failed; reviewing via a read-only scratch: %s'):format(sw.error)
               )
               degraded_notify()
               cb(true)
@@ -1264,7 +1260,7 @@ function M.fetch_prepared(args, cb)
             sweep_worktree_unused(
               args.repo,
               wt,
-              'worktree の差分取得に失敗し、掃除も失敗しました: %s',
+              'failed to fetch the worktree diff and cleanup also failed: %s',
               reuse,
               reuse and args.on_worktree_swept or nil
             )
@@ -1330,10 +1326,7 @@ local function fetch_and_begin(args, existing)
     end
     if #res.data.files == 0 then
       vim.notify(
-        ('review.nvim: 変更なし (%s..%s): レビュー対象がありません'):format(
-          args.base,
-          args.head
-        ),
+        ('review.nvim: no changes (%s..%s): nothing to review'):format(args.base, args.head),
         vim.log.levels.INFO
       )
       -- 開始は開かない = save しない。pr は作成が diff に先行するので、作りたての
@@ -1345,7 +1338,7 @@ local function fetch_and_begin(args, existing)
         sweep_worktree_unused(
           args.repo,
           wt,
-          '0 差分セッションの worktree 掃除に失敗しました: %s',
+          'worktree cleanup for the 0-diff session failed: %s',
           reuse,
           function(swept)
             M.nullify_inherited_record(existing, swept)
@@ -1363,21 +1356,16 @@ end
 local function proceed(args)
   local slug = args.id
   if active ~= nil and active.session.id == slug then
-    vim.notify(
-      ('review.nvim: %s のレビューは既に開いています'):format(slug),
-      vim.log.levels.INFO
-    )
+    vim.notify(('review.nvim: a review of %s is already open'):format(slug), vim.log.levels.INFO)
     return
   end
   local existing = store.load(args.repo, slug).data
   if existing ~= nil and paths.slug_conflict(existing, args.base, args.head) then
     notify_warn(
-      ('slug %s に既存セッション (%s..%s) があります。:Review delete %s で削除してください'):format(
-        slug,
-        existing.base,
-        existing.head,
-        slug
-      )
+      (
+        'slug %s: an existing session (%s..%s) is registered. delete it '
+        .. 'with :Review delete %s'
+      ):format(slug, existing.base, existing.head, slug)
     )
     return
   end
@@ -1394,8 +1382,8 @@ local function proceed(args)
     if active ~= nil then
       confirm(
         (
-          'review.nvim: active セッション %s です。閉じて %s を継承しますか？'
-          .. ' コメント・完了マーク内容も引き継ぎます [y/N]: '
+          'review.nvim: %s is the active session. close it and carry on with %s?'
+          .. ' comments and completion marks are carried over too. [y/N]: '
         ):format(active.session.id, slug),
         function(yes)
           if yes then
@@ -1410,8 +1398,9 @@ local function proceed(args)
     end
     confirm(
       (
-        'review.nvim: 既存セッション %s (%s..%s, コメント %d 件) に同じ refs 組の開始です。'
-        .. 'コメント内容を継承して開きますか？ [y/N]: '
+        'review.nvim: the existing session %s (%s..%s, %d comments) '
+        .. 'shares the same refs as this start '
+        .. 'inherit its comments and open? [y/N]: '
       ):format(slug, existing.base, existing.head, #(existing.comments or {})),
       function(yes)
         if yes then
@@ -1423,7 +1412,7 @@ local function proceed(args)
   end
   if active ~= nil then
     confirm(
-      ('review.nvim: active セッション %s です。閉じて %s を開始しますか？ [y/N]: '):format(
+      ('review.nvim: %s is the active session. close it and start %s? [y/N]: '):format(
         active.session.id,
         slug
       ),
@@ -1462,10 +1451,7 @@ end
 --- 出さない (DESIGN.md 決定表「head 省略」/ diff-review.md「開始」1)。
 function M.start(opts)
   if type(opts) ~= 'table' or opts.base == nil or opts.base == '' then
-    return result.err(
-      'review.nvim: :Review start <base> [head] の形式で指定してください',
-      nil
-    )
+    return result.err('review.nvim: use the form :Review start <base> [head]', nil)
   end
   with_repo_top(function(repo)
     local function start_with(head)
@@ -1497,15 +1483,12 @@ end
 --- worktree がある場合は状態検知 -> (必要なら) 確認 -> save/clean-up の順 (pr-worktree.md)。
 function M.close()
   if active == nil then
-    return result.err(
-      'review.nvim: アクティブなセッションがありません',
-      result.codes.E_NOT_ACTIVE
-    )
+    return result.err('review.nvim: no active session', result.codes.E_NOT_ACTIVE)
   end
   local count = #active.session.comments
   if count > 0 then
     confirm(
-      ('review.nvim: コメント %d 件のセッション %s を閉じますか？ [y/N]: '):format(
+      ('review.nvim: close the session with %d comments (%s)? [y/N]: '):format(
         count,
         active.session.id
       ),
@@ -1545,17 +1528,17 @@ end
 --- 残して中止 = closed 記録として起動 scan が回収できる)。
 function M.delete(id)
   if id == nil or id == '' then
-    notify_warn ':Review delete <id> の形式で指定してください'
+    notify_warn 'use the form :Review delete <id>'
     return result.err('missing id', result.codes.E_REF)
   end
   with_repo_top(function(repo)
     local sess = store.load(repo, id).data
     if sess == nil then
-      notify_warn(('セッション %s が見つかりません'):format(id))
+      notify_warn(('session %s not found'):format(id))
       return
     end
     confirm(
-      ('review.nvim: セッション %s (コメント %d 件) を削除しますか？ コメントも失われます [y/N]: '):format(
+      ('review.nvim: delete session %s (%d comments)? comments will be lost. [y/N]: '):format(
         id,
         #(sess.comments or {})
       ),
@@ -1800,7 +1783,7 @@ end
 --- 開始» はセッション開始時 focus の契約として残る。
 function M.open_selected_file()
   if active == nil then
-    notify_warn 'アクティブなセッションがありません'
+    notify_warn 'no active session'
     return
   end
   local win = vim.api.nvim_get_current_win()
@@ -1993,7 +1976,7 @@ end
 --- panel x: viewed 切替 -> 直後に save (INV-4)。
 function M.toggle_viewed_current()
   if active == nil then
-    notify_warn 'アクティブなセッションがありません'
+    notify_warn 'no active session'
     return
   end
   local win = vim.api.nvim_get_current_win()
@@ -2188,8 +2171,7 @@ end
 -- branch の通常経路のみ: PR は worktree を --detach するため比較が恒真で誤発火、
 -- scratch 縮退は再取得が作業ツリーを見ないので意味がない。告知済み (head_info_shown)
 -- は以後の比較を打ち切る — 同じ告知を保存ごとに繰り返さない (INFO は「1 回だけ」)。
-local HEAD_SWITCH_INFO =
-  'セッション開始時の head と現在のチェックアウトが違います'
+local HEAD_SWITCH_INFO = 'the head at session start is not the current checkout'
 
 local function notify_head_switch_once(current)
   if current.head_info_shown or current.degraded or current.session.mode ~= 'branch' then
@@ -2250,9 +2232,7 @@ function M.refresh()
       local reason = res.code == result.codes.E_REF and usermsg.git_ref_error(res.error)
         or res.error
       notify_warn(
-        ('差分の再取得に失敗しました。現在の表示とコメントを保持します: %s'):format(
-          reason
-        )
+        ('failed to refresh the diff; keeping the current view and comments: %s'):format(reason)
       )
       if follow then
         M.refresh() -- まとめられた保存分の再取得は試みる (失敗時のみ再度 WARN)
@@ -2273,7 +2253,7 @@ end
 -- 保存は何もしない = ユーザー操作への影響ゼロ。縮退 head の scratch は
 -- review:// 名のためセッション員に満たず無視)。
 vim.api.nvim_create_autocmd('BufWritePost', {
-  desc = 'review.nvim: 保存した差分の自動リフレッシュ',
+  desc = 'review.nvim: auto-refreshing the saved diff',
   callback = function(ev)
     if active == nil then
       return

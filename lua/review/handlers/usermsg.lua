@@ -16,8 +16,8 @@ function M.git_ref_error(err)
     return err
   end
   return (
-    "レビュー対象 ref が解決できません: '%s'。存在するブランチ/コミットを"
-    .. '指定してください (start の base/head 引数は <Tab> で補完できます)'
+    'cannot resolve the reviewed ref: "%s". specify an existing branch/commit '
+    .. '(base/head args of start are <Tab>-completable)'
   ):format(name)
 end
 
@@ -26,11 +26,12 @@ end
 function M.gh_error(err)
   local text = err or ''
   if text:match 'no git remote' then
-    return 'このリポジトリに git remote (origin 等) がありません。:Review pr は GitHub のリモートリポジトリでのみ利用できます'
+    return 'this repo has no git remote (e.g. origin); :Review pr only '
+      .. 'works against a GitHub remote'
   end
   local number = text:match '[Cc]ould not resolve any? pull request (%S+)'
   if number ~= nil then
-    return ('PR %s が見つかりません。番号 (または :Review pr <URL>) を gh pr list で確認できる値にしてください'):format(
+    return ('PR %s not found. use a number (or :Review pr <URL>) that gh pr list confirms'):format(
       number
     )
   end

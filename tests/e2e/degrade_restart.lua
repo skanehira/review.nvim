@@ -67,8 +67,7 @@ local run = function()
       end
       local text = f:read '*a' or ''
       f:close()
-      return text:find('review.nvim: main--feature のレビューが続けられます', 1, true)
-        ~= nil
+      return text:find('review.nvim: you can resume the review of main--feature', 1, true) ~= nil
     end, 'STEP=2 起動継続 notify')
   end
 

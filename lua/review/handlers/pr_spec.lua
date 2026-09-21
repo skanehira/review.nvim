@@ -279,8 +279,8 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
       pr_handler.start '7'
 
       assert.same({
-        msg = 'review.nvim: git remote が解決できません。PR のターゲットリポジトリ内で実行するか、'
-          .. ':Review pr <URL> でリポジトリを特定してください',
+        msg = 'review.nvim: cannot resolve the git remote; run inside the PR target repository, '
+          .. 'or identify the repository with :Review pr <URL>',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
       assert.equals(4, #state.git_calls) -- top, gh, rev-parse, remotes (fetch なし)
@@ -303,8 +303,8 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
     pr_handler.start '7'
 
     assert.same({
-      msg = 'review.nvim: このリポジトリに git remote (origin 等) がありません。'
-        .. ':Review pr は GitHub のリモートリポジトリでのみ利用できます',
+      msg = 'review.nvim: this repo has no git remote (e.g. origin); '
+        .. ':Review pr only works against a GitHub remote',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
     assert.equals(2, #state.git_calls) -- top, gh pr_view のみ
@@ -352,7 +352,7 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
     pr_handler.start '7'
 
     assert.same({
-      msg = 'review.nvim: gh 未ログインです。`gh auth login` を実行してください',
+      msg = 'review.nvim: gh is not logged in; run `gh auth login`',
       level = vim.log.levels.WARN,
     }, state.notifications[1])
     assert.equals(2, #state.git_calls)
@@ -377,7 +377,7 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
       pr_handler.start '7'
 
       assert.equals(vim.log.levels.WARN, state.notifications[1].level)
-      assert.matches('worktree を作成できません', state.notifications[1].msg)
+      assert.matches('cannot create the worktree', state.notifications[1].msg)
       -- 作成に失敗したら diff は走らない (worktree 基準の単引数形は成立しないため)
       local has_diff = false
       for _, cmd in ipairs(state.git_calls) do
@@ -457,8 +457,10 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
 
     assert.equals(1, #state.inputs)
     assert.equals(
-      'review.nvim: 既存セッション pr-7 (main..review-nvim/pr-7, コメント 1 件) に同じ '
-        .. 'refs 組の開始です。コメント内容を継承して開きますか？ [y/N]: ',
+      'review.nvim: the existing session pr-7 '
+        .. '(main..review-nvim/pr-7, 1 comments) shares the same refs as '
+        .. 'this start '
+        .. 'inherit its comments and open? [y/N]: ',
       state.inputs[1].prompt
     )
     local saved = store.load(REPO_TOP, 'pr-7').data

@@ -383,7 +383,7 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
       local ph = 'review://base/main--feature/(no-changes)'
       local pbuf = vim.fn.bufnr(ph)
       assert.not_equals(-1, pbuf)
-      assert.same({ '変更なし' }, vim.api.nvim_buf_get_lines(pbuf, 0, -1, false))
+      assert.same({ 'No changes' }, vim.api.nvim_buf_get_lines(pbuf, 0, -1, false))
       assert.equals(pbuf, vim.api.nvim_win_get_buf(ui_windows.win 'base'))
       assert.equals(pbuf, vim.api.nvim_win_get_buf(ui_windows.win 'head'))
 
@@ -403,7 +403,7 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
       assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
       -- 集約は箱で描かれ、見出しは箱 1 行目の内容行 (内側幅で折り返しされうる =
       -- 警告色 chunk の連結で完全一致を見る。本文行の位置は幅依存)
-      assert.equals(' 1 outdated (prompt 除外中)', aggregate_head_text(above, '[c1]'))
+      assert.equals(' 1 outdated (excluded from prompt)', aggregate_head_text(above, '[c1]'))
       local joined = {}
       for _, line in ipairs(above[4].virt_lines) do
         for _, chunk in ipairs(line) do
@@ -430,7 +430,7 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
   )
 
   it(
-    'comments 0: nil 参照で落ちず、「変更なし」プレースホルダの 3 窓で UI を開く',
+    'comments 0: nil 参照で落ちず、「No changes」プレースホルダの 3 窓で UI を開く',
     function()
       local sess = save_vanishing_session {}
       state.git_stdout = ''
@@ -442,7 +442,7 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
       assert.not_equals(-1, vim.fn.bufnr 'review://sidebar/main--feature')
       local placeholder = vim.fn.bufnr 'review://base/main--feature/(no-changes)'
       assert.not_equals(-1, placeholder)
-      assert.same({ '変更なし' }, vim.api.nvim_buf_get_lines(placeholder, 0, -1, false))
+      assert.same({ 'No changes' }, vim.api.nvim_buf_get_lines(placeholder, 0, -1, false))
       -- 両窓 diffoff で窓 diff から退避 (「変更なし」プレースホルダは窓 diff に
       -- 参加しない) + foldclosed()==-1 (DESIGN「既知の制約」の退避検証形。
       -- foldclosed は窓ローカルなので nvim_win_call で測る)
@@ -489,7 +489,7 @@ describe('復元時に差分がまるごと消滅 (persistence-restore.md エッ
       assert.is_not_nil(above, 'placeholder に outdated 集約が無い')
       -- 集約は箱: 上罫線 / 見出し (内側幅で折り返しされうる) / c1 / 区切り罫線 /
       -- c2 / 下罫線。本文行の位置は幅依存なので順序で見る
-      assert.equals(' 2 outdated (prompt 除外中)', aggregate_head_text(above, '[c1]'))
+      assert.equals(' 2 outdated (excluded from prompt)', aggregate_head_text(above, '[c1]'))
       local c1_row, sep_row, c2_row
       for i, line in ipairs(above[4].virt_lines) do
         local texts = {}
@@ -550,7 +550,7 @@ describe(':Review (resume_or_select) と起動時 notify', function()
   it('open 0 件: 開始ガイダンス通知', function()
     restore.resume_or_select()
     assert.same({
-      msg = 'review.nvim: 復元できるセッションがありません。:Review start で開始してください',
+      msg = 'review.nvim: no session to restore; start one with :Review start',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
     assert.is_nil(session_handler.active())
@@ -574,7 +574,7 @@ describe(':Review (resume_or_select) と起動時 notify', function()
     write_open_session('main--feature', 'main', 'feature')
     restore.notify_open_sessions()
     assert.same({
-      msg = 'review.nvim: main--feature のレビューが続けられます (:Review で復元)',
+      msg = 'review.nvim: you can resume the review of main--feature (:Review to restore)',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
     assert.equals(0, vim.fn.bufexists 'review://sidebar/main--feature')
@@ -585,7 +585,7 @@ describe(':Review (resume_or_select) と起動時 notify', function()
     write_open_session('c--d', 'c', 'd')
     restore.notify_open_sessions()
     local msg = state.notifications[1].msg
-    assert.equals(true, msg:find '2 件' ~= nil)
+    assert.equals(true, msg:find '2 reviews' ~= nil)
     assert.equals(true, msg:find 'a--b' ~= nil)
   end)
 
@@ -601,7 +601,7 @@ describe(':Review (resume_or_select) と起動時 notify', function()
     assert.equals(0, #state.notifications)
     restore.resume_or_select()
     assert.same({
-      msg = 'review.nvim: 復元できるセッションがありません。:Review start で開始してください',
+      msg = 'review.nvim: no session to restore; start one with :Review start',
       level = vim.log.levels.INFO,
     }, state.notifications[1])
   end)

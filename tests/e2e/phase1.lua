@@ -138,7 +138,7 @@ local function run()
   local tl = panel_lines()
   expect(tl[1] == 'Changes (3)', 'panel tree ヘッダ不一致: ' .. tostring(tl[1]))
   expect(
-    tl[2] == 'Showing changes for: main..作業ツリー',
+    tl[2] == 'Showing changes for: main..working tree',
     'Showing ヘッダ不一致: ' .. tostring(tl[2])
   )
   expect(panel_row('dir', 'src/deep') ~= nil, 'src/deep 連結 dir 行が無い')

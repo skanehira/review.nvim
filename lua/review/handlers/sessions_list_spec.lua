@@ -244,7 +244,7 @@ describe('sessions_list 追随 (実 delete / refresh / 複数窓 winbar)', funct
       for _, n in ipairs(state.notifications) do
         if
           n.level == vim.log.levels.WARN
-          and n.msg:find('削除済み', 1, true) ~= nil
+          and n.msg:find('it was already deleted', 1, true) ~= nil
           and n.msg:find('b--b', 1, true) ~= nil
         then
           warned = true

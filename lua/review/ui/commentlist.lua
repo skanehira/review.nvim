@@ -179,7 +179,7 @@ function M.render(session, opts)
 
   local lines, rows, spans = {}, {}, {}
   if #shown == 0 then
-    lines[1] = 'コメントはありません'
+    lines[1] = 'No comments'
   end
   for i, c in ipairs(shown) do
     local text = line_for(c)
