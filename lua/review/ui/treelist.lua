@@ -4,9 +4,10 @@
 -- highlight 適用は ui/filepanel)。FS・窓・vim API を触らないので入出力だけで判定できる。
 --
 -- 行フォーマットの決定 (docs 契約 + 設計の穴埋め):
---   file 行 `[indent][✓ ][status ][コメントアイコン ][icon ][basename] +a -d`。viewed
---     は status より前 = 行頭 [✓]、コメントありは status の後に nf-cod-comment
---     (U+EA6B) を出す (ReviewPanelComment。旧 💬 は廃止)。
+--   file 行 `[indent][status ][コメントアイコン ][icon ][basename] +a -d`。viewed
+--     は行にマークを出さない (Reviewed セクションへの移動で完了が表現される —
+--     2026-09 改訂)。コメントありは status の後に nf-cod-comment (U+EA6B) を出す
+--     (ReviewPanelComment。旧 💬 は廃止)。
 --     ±は `+n` (ReviewPanelAdd 緑) / `-n` (ReviewPanelRemove 赤) の 2 span。
 --     親パス grey サフィックスは持たない (ツリーの indent が文脈 — 2026-09 改訂)
 --   dir 行 `[indent][▸ ]status display/`。末尾 `/` が dir 識別子 (同名のファイルと
@@ -15,6 +16,11 @@
 --   単一 dir child 連鎖は連結表示 (`a/b/c/`)。連結行の path キーは deepest dir の
 --     canonical path (スラッシュ無し) = collapsed 集合のキーと row_entry の語を一致させる
 --   並びは dir 先行 -> file、各々名前昇順 (バイト順)
+-- 表示は 2 セクション構成 (2026-09): «Changes (N)» (tree のみ subtitle
+--   «Showing changes for: …» 付き) + 未レビュー (viewed=false) の行、空行
+--   (kind='separator')、«Reviewed (M)» + レビュー済み (viewed=true) の行。
+--   Reviewed は 0 件でも常に出す。viewed は行にマークを出さない (セクションで表現)。
+--   list モードも同構成だが subtitle は出さない (compact 契約)。
 local M = {}
 
 local INDENT = '  '
@@ -101,10 +107,6 @@ end
 local function file_row(entry, indent, icon, icon_hl, name)
   local l = line()
   l.add(indent)
-  if entry.viewed then
-    l.add('[✓]', 'ReviewPanelStatus')
-    l.add ' '
-  end
   l.add(entry.status, 'ReviewPanelStatus')
   l.add ' '
   if entry.comment then
@@ -206,6 +208,52 @@ local function emit_tree(node, opts, indent, out)
   end
 end
 
+--- viewed で 2 分割 (Changes セクション / Reviewed セクション)。入力を path 昇順のまま
+--- 保った上で、viewed=true の file を Reviewed 側へ移す (各セクション内は昇順維持)。
+local function split_viewed(sorted)
+  local changes, reviewed = {}, {}
+  for _, entry in ipairs(sorted) do
+    if entry.viewed then
+      reviewed[#reviewed + 1] = entry
+    else
+      changes[#changes + 1] = entry
+    end
+  end
+  return changes, reviewed
+end
+
+local function header(text)
+  return { kind = 'header', text = text, spans = {} }
+end
+
+local function separator()
+  return { kind = 'separator', text = '', spans = {} }
+end
+
+-- セクション (Changes / Reviewed) の内容行を組み立てる。mode='tree' はツリー、
+-- 'list' はフルパス 1 行のフラット形式 (subtitle は出さない — list は compact 契約)。
+-- title は見出し文字列 («Changes (N)» / «Reviewed (M)»)。
+local function emit_section_rows(section, opts, rows, title, with_subtitle)
+  rows[#rows + 1] = header(title)
+  if opts.mode ~= 'list' then
+    if with_subtitle then
+      rows[#rows + 1] =
+        header(('Showing changes for: %s..%s'):format(opts.base or '', opts.head_display or ''))
+    end
+    emit_tree(build_tree(section), opts, '', rows)
+  else
+    -- フラット形式 (フルパス 1 行)。親パスサフィックスは付けない (path 自体がフル)
+    for _, entry in ipairs(section) do
+      local icon_hl = nil
+      if opts.icon ~= nil then
+        local _, hl = opts.icon(entry.path)
+        icon_hl = hl
+      end
+      rows[#rows + 1] = file_row(entry, '', nil, icon_hl, entry.path)
+    end
+  end
+end
+
 --- files -> 表示行テーブル。
 --- files: { {path, status, added, deleted, viewed} } (viewed は呼び出し側が session から解決)
 --- opts = {
@@ -214,8 +262,11 @@ end
 ---   icon = nil | function(path) -> (string|nil), (hlname|nil) (2返り値 = 色 group),
 ---   base, head_display  -- tree ヘッダ «Showing changes for: <base>..<head 表示名>»
 --- }
---- 返り値 rows = { {kind='header'|'dir'|'file', text, path?, spans} }
---- (file 0 件はヘッダも出さない = 従来 «一致 0 件は 0 行一覧» 契約)。
+--- 返り値 rows = { {kind='header'|'separator'|'dir'|'file', text, path?, spans} }
+--- 構成: «Changes (N)» + (tree のみ) «Showing changes for: …» + 未レビューのツリー /
+--- flat 行 + 空行 (separator) + «Reviewed (M)» + レビュー済みのツリー / flat 行。
+--- Reviewed は 0 件でも常に出し、表示 file 0 件のときはヘッダも出さない
+--- (従来 «一致 0 件は 0 行一覧» 契約のまま)。
 function M.build(files, opts)
   opts = opts or {}
   opts.collapsed = opts.collapsed or {}
@@ -227,34 +278,16 @@ function M.build(files, opts)
     return a.path < b.path
   end)
 
-  local rows = {}
-  if opts.mode == 'list' then
-    -- 現行フラット形式 (フルパス 1 行)。親パスサフィックスは付けない (path 自体がフル)
-    for _, entry in ipairs(sorted) do
-      local icon_hl = nil
-      if opts.icon ~= nil then
-        local _, hl = opts.icon(entry.path)
-        icon_hl = hl
-      end
-      rows[#rows + 1] = file_row(entry, '', nil, icon_hl, entry.path)
-    end
-    return rows
-  end
-
   if #sorted == 0 then
-    return rows
+    return {}
   end
-  rows[#rows + 1] = {
-    kind = 'header',
-    text = ('Changes (%d)'):format(#sorted),
-    spans = {},
-  }
-  rows[#rows + 1] = {
-    kind = 'header',
-    text = ('Showing changes for: %s..%s'):format(opts.base or '', opts.head_display or ''),
-    spans = {},
-  }
-  emit_tree(build_tree(sorted), opts, '', rows)
+  local changes, reviewed = split_viewed(sorted)
+  local rows = {}
+  -- Changes セクション (subtitle は tree モードのみ。list は flat で compact)
+  emit_section_rows(changes, opts, rows, ('Changes (%d)'):format(#changes), true)
+  -- Reviewed セクション (常に表示。空行で区切る。subtitle は出さない)
+  rows[#rows + 1] = separator()
+  emit_section_rows(reviewed, opts, rows, ('Reviewed (%d)'):format(#reviewed), false)
   return rows
 end
 

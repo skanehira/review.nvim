@@ -257,22 +257,25 @@ KEYMAPS						*review-keymaps_ja*
 
  file panel (変更ファイル一覧)			*review-keymaps-sidebar_ja*
 
-	既定はフォルダツリー表示。ヘッダ 2 行 («Changes (N)» と «Showing changes
-	for: <base>..<head 表示名>»。head 表示名は通常経路 «working tree»、読み取り
-	専用 scratch 縮退時み ref 名) の下にパスツリーが続く。dir 行は末尾 «/» で
-	ファイルと区別し、status は配下の集約 (全子同一記号ならそのまま、種類混在
-	は «*»)。単一 child の dir 連鎖は «a/b/c/» と連結表示する。file 行は
-	«[✓?] <status> <コメントアイコン?> <icon?> <basename> +a -d»。+n は緑、
-	-n は赤で、コメントがあるファイルは status の後にコメントアイコン
+	既定はフォルダツリー表示を 2 セクションに分けたもの。Changes セクション
+	はヘッダ 2 行 («Changes (N)» と «Showing changes for: <base>..<head 表示名>»。
+	head 表示名は通常経路 «working tree»、読み取り専用 scratch 縮退時み ref 名)
+	の下に**未レビュー**のパスツリーが続き、空行を挟んで «Reviewed (M)» ヘッダの
+	下に**レビュー済み (viewed)** のパスツリーが続く (Reviewed は 0 件でも常に
+	表示)。dir 行は末尾 «/» でファイルと区別し、status は配下の集約 (全子同一
+	記号ならそのまま、種類混在は «*»)。単一 child の dir 連鎖は «a/b/c/» と連結
+	表示する。file 行は «<status> <コメントアイコン?> <icon?> <basename> +a -d»。
+	+n は緑、-n は赤で、コメントがあるファイルは status の後にコメントアイコン
 	(nf-cod-comment。Nerd Font のグリフ) が付く (親パスは出さない = ツリーの
 	インデントで判別)。filetype アイコンは nvim-web-devicons があるときだけ
 	自動で出る (無くてもテキスト表示)。
-	レビュー完了マークは行頭に [✓]。open や移動では決して付かず、パネルの
-	x でユーザーが付ける (セッションに保存され再起動後も復元)。
+	ファイルの「レビュー済み」はパネルの x で Reviewed セクションへ移動させて
+	表現する (行頭 [✓] は廃止。セッションに保存され再起動後も復元)。open や
+	移動では決して Reviewed に移らず、x だけが Changes ⇄ Reviewed を切り替える。
 
 	<CR>
 	  file 行 = そのファイルを head/base 窓に開く。focus とカーソルは file
-	  panel に残る (開いただけでレビュー完了マークは付かない)。dir 行 =
+	  panel に残る (開いただけで Reviewed には移らない)。dir 行 =
 	  折り畳み/展開のトグル (カーソルは dir 行に残る)
 
 	o
@@ -296,8 +299,8 @@ KEYMAPS						*review-keymaps_ja*
 	  tree 既定に戻る)
 
 	x
-	  レビュー完了マーク [✓] を付ける / 外す (dir ヘッダ行では無動作。open
-	  や移動では自動で付かない)
+	  Reviewed セクションへ移動する / そこから Changes へ戻す (Changes ⇄
+	  Reviewed。dir / ヘッダ行では無動作。open や移動では自動で移らない)
 
 	/
 	  一覧を絞り込む。入力 = paths の大文字小文字無視の部分一致で再描画。

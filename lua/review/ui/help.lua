@@ -75,7 +75,11 @@ local SECTIONS = {
       { 'last_file', 'last file (same rule as above)' },
       { 'refresh', 'refresh the diff (same as R in review windows)' },
       { 'toggle_style', 'toggle list view (full path 1 line) / tree view' },
-      { 'toggle_viewed', 'toggle review-done mark [✓] (open never sets it)' },
+      {
+        'toggle_viewed',
+        'move the file to/from the Reviewed section (Changes ⇄ Reviewed; '
+          .. 'open never moves it)',
+      },
       { 'filter', 'filter the list (empty input clears)' },
       { 'help', 'this help (g? also works in the panel)' },
       { 'close', 'close the session' },

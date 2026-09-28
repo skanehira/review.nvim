@@ -122,7 +122,13 @@ describe('help.open', function()
     assert.is_true(has_line(lines, '- **i** toggle list view (full path 1 line) / tree view'))
     assert.is_true(has_line(lines, '- **/** filter the list (empty input clears)'))
     assert.is_true(has_line(lines, '- **<F1>** this help (g? also works in the panel)'))
-    assert.is_true(has_line(lines, '- **x** toggle review-done mark [✓] (open never sets it)'))
+    assert.is_true(
+      has_line(
+        lines,
+        '- **x** move the file to/from the Reviewed section (Changes ⇄ Reviewed; '
+          .. 'open never moves it)'
+      )
+    )
     -- コメント一覧への導線は diff 節と同一文にすると has_line が節を区別できず
     -- (検出能力ゼロ)、文言を一意化している。
     assert.is_true(

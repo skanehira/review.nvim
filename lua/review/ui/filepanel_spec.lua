@@ -100,18 +100,23 @@ describe('filepanel.render tree (既定)', function()
         'A src/deep/',
         '    A new.lua +2 -0',
         'M a.lua +1 -0',
+        '',
+        'Reviewed (0)',
       }, panel_lines(buf))
 
-      -- viewed が変わっても同一 buffer を再構成する (append ではなく置換)
+      -- viewed が変わっても同一 buffer を再構成する (append ではなく置換)。
+      -- a.lua は Reviewed セクションへ移動する (行頭 [✓] は出さない)
       session.files['a.lua'] = { viewed = true }
       local buf2 = filepanel.render(session, files2(), TREE_OPTS)
       assert.equals(buf, buf2)
       assert.same({
-        'Changes (2)',
+        'Changes (1)',
         'Showing changes for: main..working tree',
         'A src/deep/',
         '    A new.lua +2 -0',
-        '[✓] M a.lua +1 -0',
+        '',
+        'Reviewed (1)',
+        'M a.lua +1 -0',
       }, panel_lines(buf2))
     end
   )
@@ -127,6 +132,8 @@ describe('filepanel.render tree (既定)', function()
         'Showing changes for: main..working tree',
         'M \u{EA6B} a.lua +1 -0',
         'A b.lua +1 -0',
+        '',
+        'Reviewed (0)',
       }, panel_lines(buf))
     end
   )
@@ -231,14 +238,20 @@ end)
 describe('filepanel.render list モード', function()
   use_env()
 
-  it('mode=list は現行フラット形式・ヘッダなし (viewed 行頭 [✓])', function()
+  it('mode=list は 2 セクション (viewed は Reviewed 側・行頭 [✓] なし)', function()
     local session = session_stub { files = { ['b.lua'] = { viewed = true } } }
     local buf = filepanel.render(
       session,
       { f('b.lua', 'M', 2, 1), f('src/x.lua', 'A', 1, 0) },
       { mode = 'list', base = 'main', head_display = 'working tree' }
     )
-    assert.same({ '[✓] M b.lua +2 -1', 'A src/x.lua +1 -0' }, panel_lines(buf))
+    assert.same({
+      'Changes (1)',
+      'A src/x.lua +1 -0',
+      '',
+      'Reviewed (1)',
+      'M b.lua +2 -1',
+    }, panel_lines(buf))
   end)
 
   it('tree -> list 再 render も同一 buffer (mode 切替で行だけ差替わる)', function()
@@ -250,7 +263,7 @@ describe('filepanel.render list モード', function()
       { mode = 'list', base = 'main' }
     )
     assert.equals(buf, buf2)
-    assert.same({ 'M a.lua +1 -0' }, panel_lines(buf2))
+    assert.same({ 'Changes (1)', 'M a.lua +1 -0', '', 'Reviewed (0)' }, panel_lines(buf2))
   end)
 end)
 
@@ -325,15 +338,16 @@ describe('filepanel カーソル追従・折込 contract', function()
   end)
 
   it(
-    '再 render は前回選択 entry を維持する (viewed 切替で行番号が揺れない)',
+    '再 render は前回選択 entry を維持する (viewed 切替で Reviewed セクションへ追従)',
     function()
       local session = session_stub()
       local buf = show(filepanel.render(session, files3(), TREE_OPTS))
-      vim.api.nvim_win_set_cursor(state.win, { 6, 0 }) -- a.lua 行
+      vim.api.nvim_win_set_cursor(state.win, { 6, 0 }) -- a.lua 行 (Changes)
       session.files['a.lua'] = { viewed = true }
       filepanel.render(session, files3(), TREE_OPTS)
-      assert.same({ 6, 0 }, vim.api.nvim_win_get_cursor(state.win))
-      assert.same({ kind = 'file', path = 'a.lua' }, filepanel.row_entry(buf, 6))
+      -- a.lua は Reviewed セクションへ移動するが、カーソルは同じ entry を追いかける
+      assert.same({ 8, 0 }, vim.api.nvim_win_get_cursor(state.win))
+      assert.same({ kind = 'file', path = 'a.lua' }, filepanel.row_entry(buf, 8))
     end
   )
 
@@ -346,8 +360,12 @@ describe('filepanel カーソル追従・折込 contract', function()
       head_display = 'working tree',
       collapsed = { ['src/deep'] = true },
     })
+    -- 隠れた選択行は行内に clamp (Reviewed セクションが下に増えても範囲外には出ない。
+    -- 旧構成 (セクションなし) では prev 行がそのまま末尾 = a.lua だったが、今は
+    -- 空行 (separator) 行に留まる — 範囲内 clamp は変わらない)
     local row = vim.api.nvim_win_get_cursor(state.win)[1]
-    assert.equals(vim.api.nvim_buf_line_count(buf), row, 'clamp 先は末尾行')
+    assert.equals(5, row)
+    assert.is_nil(filepanel.row_entry(buf, row)) -- separator (空行) は写像なし
   end)
 
   it(
@@ -382,6 +400,8 @@ describe('filepanel icon (devicons 自動検出)', function()
       'Showing changes for: main..working tree',
       'M C x.m +1 -0',
       'A y.lua +1 -0',
+      '',
+      'Reviewed (0)',
     }, panel_lines(buf))
   end)
 
@@ -434,7 +454,7 @@ describe('filepanel icon (devicons 自動検出)', function()
         { mode = 'list', base = 'main', head_display = 'working tree' }
       )
       local lines = panel_lines(buf)
-      assert.equals('M src/a.lua +1 -0', lines[1])
+      assert.equals('M src/a.lua +1 -0', lines[2])
       local marks = vim.api.nvim_buf_get_extmarks(buf, hl_ns(), 0, -1, { details = true })
       local name_hit
       for _, m in ipairs(marks) do
@@ -694,29 +714,38 @@ describe('filepanel 実 FS 正誤表 (temp repo + 実 git)', function()
       local buf = filepanel.render(session, files, TREE_OPTS)
 
       assert.same({
-        'Changes (6)',
+        'Changes (4)',
         'Showing changes for: main..working tree',
-        -- dir 先行 (名前のバイト順: cmd < src) -> root file 昇順 (a.lua < cmd < top.md)
+        -- dir 先行 (名前のバイト順: cmd < src) -> root file 昇順 (cmd < top.md。a.lua は
+        -- viewed=true で Reviewed 側へ)
         'A cmd/',
         '  A helper.go +1 -0',
-        '  [✓] A main.go +1 -0',
         'A src/deep/mid/',
         '      A fin.lua +1 -0',
-        '[✓] M a.lua +1 -1',
         'D cmd +0 -1',
         'A top.md +1 -0',
+        '',
+        'Reviewed (2)',
+        'A cmd/',
+        '  A main.go +1 -0',
+        'M a.lua +1 -1',
       }, panel_lines(buf))
-      -- 行 -> entry 写像 (同名 file/dir が kind で区別できること含む: 3 dir cmd / 7 file cmd)
+      -- 行 -> entry 写像 (同名 file/dir が kind で区別できること含む: 3 dir cmd / 7 file cmd
+      -- / 11 dir cmd (Reviewed) / 12 file cmd/main.go)
       assert.same({ kind = 'dir', path = 'cmd' }, filepanel.row_entry(buf, 3))
       assert.same({ kind = 'file', path = 'cmd/helper.go' }, filepanel.row_entry(buf, 4))
-      assert.same({ kind = 'file', path = 'cmd/main.go' }, filepanel.row_entry(buf, 5))
-      assert.same({ kind = 'dir', path = 'src/deep/mid' }, filepanel.row_entry(buf, 6))
-      assert.same({ kind = 'file', path = 'src/deep/mid/fin.lua' }, filepanel.row_entry(buf, 7))
-      assert.same({ kind = 'file', path = 'a.lua' }, filepanel.row_entry(buf, 8))
-      assert.same({ kind = 'file', path = 'cmd' }, filepanel.row_entry(buf, 9))
-      assert.same({ kind = 'file', path = 'top.md' }, filepanel.row_entry(buf, 10))
+      assert.same({ kind = 'dir', path = 'src/deep/mid' }, filepanel.row_entry(buf, 5))
+      assert.same({ kind = 'file', path = 'src/deep/mid/fin.lua' }, filepanel.row_entry(buf, 6))
+      assert.same({ kind = 'file', path = 'cmd' }, filepanel.row_entry(buf, 7))
+      assert.same({ kind = 'file', path = 'top.md' }, filepanel.row_entry(buf, 8))
+      assert.is_nil(filepanel.row_entry(buf, 9)) -- 空行 (separator) は写像なし
+      assert.is_nil(filepanel.row_entry(buf, 10)) -- Reviewed ヘッダも写像なし
+      assert.same({ kind = 'dir', path = 'cmd' }, filepanel.row_entry(buf, 11))
+      assert.same({ kind = 'file', path = 'cmd/main.go' }, filepanel.row_entry(buf, 12))
+      assert.same({ kind = 'file', path = 'a.lua' }, filepanel.row_entry(buf, 13))
 
       -- collapsed: dir 先行の先頭 dir と連結 chain の dir を同時に畳む
+      -- (collapsed 集合はセクション共通なので Reviewed 側の cmd/ も畳まれる)
       local buf2 = filepanel.render(session, files, {
         base = 'main',
         head_display = 'working tree',
@@ -724,13 +753,16 @@ describe('filepanel 実 FS 正誤表 (temp repo + 実 git)', function()
       })
       assert.equals(buf, buf2)
       assert.same({
-        'Changes (6)',
+        'Changes (4)',
         'Showing changes for: main..working tree',
         '▸ A cmd/',
         '▸ A src/deep/mid/',
-        '[✓] M a.lua +1 -1',
         'D cmd +0 -1',
         'A top.md +1 -0',
+        '',
+        'Reviewed (2)',
+        '▸ A cmd/',
+        'M a.lua +1 -1',
       }, panel_lines(buf2))
 
       -- filter 併用: 'mid' は連結 chain だけ残す (祖先 dir は自動で出る)
@@ -741,6 +773,8 @@ describe('filepanel 実 FS 正誤表 (temp repo + 実 git)', function()
         'Showing changes for: main..working tree',
         'A src/deep/mid/',
         '      A fin.lua +1 -0',
+        '',
+        'Reviewed (0)',
       }, panel_lines(buf3))
     end
   )

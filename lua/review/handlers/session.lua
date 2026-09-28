@@ -1032,10 +1032,10 @@ local function resolve_and_open(path, opts)
   reapply_marks(active.session, cur)
 
   -- panel カーソルを開いたファイル行へ逆追従 (<CR> 以外の移動系・初期開き含む)。
-  -- open はレビュー完了マーク (files[path].viewed = 行頭 [✓]) を変えない:
-  -- マークは panel の x でユーザーがトグルするのみ (diff-review「file panel」)。
+  -- open は viewed (Reviewed セクションへの移動) を変えない:
+  -- viewed は panel の x でユーザーがトグルするのみ (diff-review「file panel」)。
   -- したがって open_file の共通経路は永続状態を変えず save も不要
-  -- (INV-4 の save 対象 = コメント CRUD / マーク切替 / 差分再取得)。
+  -- (INV-4 の save 対象 = コメント CRUD / viewed 切替 / 差分再取得)。
   refresh_panel(path == M.NO_CHANGES and nil or { kind = 'file', path = path })
   apply_chrome()
   -- 移動行つき open: 実ファイルは即時、縮退 head は充填前でも bind 後の窓で
@@ -1866,12 +1866,16 @@ function M.visible_order(opts)
   end
   local entries = {}
   for _, e in ipairs(visible_files()) do
+    local state = active.session.files[e.path]
     entries[#entries + 1] = {
       path = e.path,
       status = e.status,
       added = e.added,
       deleted = e.deleted,
-      viewed = false,
+      -- viewed を session から解決する (filepanel.render と同一。treelist.build が
+      -- Changes / Reviewed に分割するため、移動系とコメント一覧の並びも両セクションを
+      -- 表示順 (Changes -> Reviewed) で辿る — diff-review「file panel」)。
+      viewed = state ~= nil and state.viewed == true,
     }
   end
   local rows = ui_treelist.build(entries, {

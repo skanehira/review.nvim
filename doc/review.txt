@@ -275,25 +275,28 @@ Review windows (head / base)			*review-keymaps-diff*
 
  file panel (changed files)			*review-keymaps-sidebar*
 
-	The default view is a folder tree. Below two header lines («Changes
-	(N)» and «Showing changes for: <base>..<head display name>»; the head
-	display name is «working tree» on the normal path and the saved ref
-	name when degraded to the read-only scratch) follows the path tree. dir
-	rows end with «/» to distinguish them from files; their status = the
-	aggregation of children (same symbol = as-is, mixed = «*»). Single-child
-	dir chains render joined («a/b/c/»). File rows are «[✓?] <status>
-	<comment-icon?> <icon?> <basename> +a -d»; +n green, -n red; files with
-	comments get a comment icon (nf-cod-comment; a Nerd Font glyph) after the
-	status (no parent path — the tree indent is the context). filetype icons
-	show automatically only when nvim-web-devicons is installed (plain text
-	without it).
-	The review-done mark [✓] sits at the start of the row. Never set by
-	open/movement — only the panel's x toggles it (saved in the session and
-	restored after restarts).
+	The default view is a folder tree split into two sections. In the
+	Changes section the headers «Changes (N)» and «Showing changes for:
+	<base>..<head display name>» (the head display name is «working tree»
+	on the normal path and the saved ref name when degraded to the
+	read-only scratch) precede the path tree of not-yet-reviewed files;
+	after a blank line the «Reviewed (M)» header precedes the tree of
+	reviewed (viewed) files. The Reviewed section is always shown, even at
+	0. dir rows end with «/» to distinguish them from files; their status
+	= the aggregation of children (same symbol = as-is, mixed = «*»).
+	Single-child dir chains render joined («a/b/c/»). File rows are
+	«<status> <comment-icon?> <icon?> <basename> +a -d»; +n green, -n
+	red; files with comments get a comment icon (nf-cod-comment; a Nerd
+	Font glyph) after the status (no parent path — the tree indent is the
+	context). filetype icons show automatically only when nvim-web-devicons
+	is installed (plain text without it).
+	A file is «reviewed» by moving it to the Reviewed section with the
+	panel's x (saved in the session and restored after restarts). Never
+	moved by open/movement — only x toggles it (Changes ⇄ Reviewed).
 
 	<CR>
 	  file row = open the file in the head/base windows. focus and cursor
-	  stay in the panel (opening never sets the review-done mark). dir row =
+	  stay in the panel (opening never moves the file to Reviewed). dir row =
 	  toggle fold (cursor stays on the dir row)
 
 	o
@@ -318,8 +321,9 @@ Review windows (head / base)			*review-keymaps-diff*
 	  the session file (reopening returns to the tree default)
 
 	x
-	  toggle the review-done mark [✓] (no-op on dir header rows; open and
-	  movement never set it automatically)
+	  move the file to/from the Reviewed section (Changes ⇄ Reviewed;
+	  no-op on dir / header rows; open and movement never move it
+	  automatically)
 
 	/
 	  filter the list. input = case-insensitive substring match on paths

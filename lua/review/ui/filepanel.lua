@@ -191,7 +191,8 @@ function M.render(session, files, opts)
   local row_map = {}
   for i, row in ipairs(rows) do
     texts[i] = row.text
-    if row.kind ~= 'header' then
+    -- header / separator (空行) は entry 写像を持たない (row_entry nil)
+    if row.kind == 'file' or row.kind == 'dir' then
       row_map[i] = { kind = row.kind, path = row.path }
     end
   end

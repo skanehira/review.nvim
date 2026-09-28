@@ -58,8 +58,8 @@ local function run()
   end, 'sidebar buffer')
 
   -- 基準: 開始時の b.lua 行 (feature で base 1 行を 2 行に置換 = +2 -1)。開封では
-  -- マークを付けない契約なので [✓] 接頭は付かない。この値を編集前に見るのが
-  -- 「カウントが変わっていない」の陰性対照になる。
+  -- Reviewed セクションへ移らない契約なので b.lua は Changes 側の素の行のまま。
+  -- この値を編集前に見るのが「カウントが変わっていない」の陰性対照になる。
   local row0 = sidebar_row 'b.lua'
   if row0 ~= 'M b.lua +2 -1' then
     fail('開始直後の b.lua 行が不一致: ' .. tostring(row0))

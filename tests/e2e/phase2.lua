@@ -113,8 +113,8 @@ local function run()
     fail 'active コメント本文の ReviewCommentBody chunk が無い'
   end
 
-  -- tree 既定: 行番号でなく entry 写像で行を引く。phase1 で x 付与した b.lua の
-  -- マークが復元され、開封のみの a.lua は無マークのまま (陰性対照)
+  -- tree 既定: 行番号でなく entry 写像で行を引く。phase1 で x 付与した b.lua は
+  -- Reviewed セクションに復元され、開封のみの a.lua は Changes に残る (陰性対照)
   local filepanel = require 'review.ui.filepanel'
   local sidebar_buf = vim.fn.bufnr 'review://sidebar/main--feature'
   local sidebar_lines = vim.api.nvim_buf_get_lines(sidebar_buf, 0, -1, false)
@@ -127,16 +127,22 @@ local function run()
     end
   end
   local a_row, b_row = row_of 'a.lua', row_of 'b.lua'
-  if b_row == nil or sidebar_lines[b_row]:sub(1, 6) ~= '[✓] ' then
+  local reviewed_row = nil
+  for r = 1, #sidebar_lines do
+    if sidebar_lines[r] == 'Reviewed (1)' then
+      reviewed_row = r
+    end
+  end
+  if b_row == nil or reviewed_row == nil or b_row <= reviewed_row then
     fail(
-      '復元後 sidebar の b.lua マークが復元されていない: '
-        .. tostring(sidebar_lines[b_row or 0])
+      '復元後 sidebar の b.lua が Reviewed セクションに無い: '
+        .. table.concat(sidebar_lines, ' / ')
     )
   end
-  if a_row == nil or sidebar_lines[a_row]:sub(1, 6) == '[✓] ' then
-    fail('開封のみの a.lua にマークが復元された: ' .. tostring(sidebar_lines[a_row]))
+  if a_row == nil or reviewed_row == nil or a_row >= reviewed_row then
+    fail('開封のみの a.lua が Reviewed へ移った: ' .. tostring(sidebar_lines[a_row]))
   end
-  if sidebar_lines[1] ~= 'Changes (3)' then
+  if sidebar_lines[1] ~= 'Changes (2)' then
     fail('復元 panel が tree 既定で開いていない: ' .. tostring(sidebar_lines[1]))
   end
 

@@ -560,6 +560,8 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
         'Showing changes for: main..working tree',
         'M a.lua +1 -0',
         'A b.lua +1 -0',
+        '',
+        'Reviewed (0)',
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
       assert.equals(0, #state.notifications)
       assert.equals(SLUG, session_handler.active().id)
@@ -1472,6 +1474,8 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
         'Showing changes for: main..feature',
         'M a.lua +1 -0',
         'A b.lua +1 -0',
+        '',
+        'Reviewed (0)',
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
     end
   )
@@ -1698,10 +1702,16 @@ describe('session.start 既存セッション継承と active 排他 (INV-1)', f
       )
       local sb = vim.fn.bufnr(SIDEBAR_NAME)
       local a_row = panel_row_for('file', 'a.lua')
-      assert.equals(
-        '[✓] M \u{EA6B} a.lua +1 -0',
-        vim.api.nvim_buf_get_lines(sb, 0, -1, false)[a_row]
-      )
+      assert.equals('M \u{EA6B} a.lua +1 -0', vim.api.nvim_buf_get_lines(sb, 0, -1, false)[a_row])
+      -- viewed=true は Reviewed セクションに載る (復元後もセクションが維持される)
+      assert.same({
+        'Changes (1)',
+        'Showing changes for: main..working tree',
+        'A b.lua +1 -0',
+        '',
+        'Reviewed (1)',
+        'M \u{EA6B} a.lua +1 -0',
+      }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
     end
   )
 
@@ -2287,6 +2297,8 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
         'Showing changes for: main..working tree',
         'M a.lua +1 -0',
         'A b.lua +1 -0',
+        '',
+        'Reviewed (0)',
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
     end
   )
@@ -2305,27 +2317,34 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     end
   )
 
-  it('x 後に panel 一覧が [✓] 再描画される (付与と解除の両方向)', function()
-    start_done('main', 'feature') -- 開封だけでは [✓] が付かない前提
-    focus_panel_file 'b.lua'
-    session_handler.toggle_viewed_current()
+  it(
+    'x で Reviewed セクションへ移動し、再 x で Changes へ戻る (再描画 + 両方向)',
+    function()
+      start_done('main', 'feature') -- 開封だけでは Reviewed に移らない前提
+      focus_panel_file 'b.lua'
+      session_handler.toggle_viewed_current()
 
-    local sb = vim.api.nvim_win_get_buf(ui_windows.win 'panel')
-    assert.same({
-      'Changes (2)',
-      'Showing changes for: main..working tree',
-      'M a.lua +1 -0',
-      '[✓] A b.lua +1 -0',
-    }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
+      local sb = vim.api.nvim_win_get_buf(ui_windows.win 'panel')
+      assert.same({
+        'Changes (1)',
+        'Showing changes for: main..working tree',
+        'M a.lua +1 -0',
+        '',
+        'Reviewed (1)',
+        'A b.lua +1 -0',
+      }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
 
-    session_handler.toggle_viewed_current() -- 解除方向も再描画される
-    assert.same({
-      'Changes (2)',
-      'Showing changes for: main..working tree',
-      'M a.lua +1 -0',
-      'A b.lua +1 -0',
-    }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
-  end)
+      session_handler.toggle_viewed_current() -- 解除方向も再描画される
+      assert.same({
+        'Changes (2)',
+        'Showing changes for: main..working tree',
+        'M a.lua +1 -0',
+        'A b.lua +1 -0',
+        '',
+        'Reviewed (0)',
+      }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
+    end
+  )
 
   it('q (close_by_key) は無確認で閉じ tab 消滅 INFO も出さない', function()
     start_done('main', 'feature')
@@ -3871,6 +3890,8 @@ describe('panel 絞り込み (`/`)', function()
       'Changes (1)',
       'Showing changes for: main..working tree',
       'M a.lua +1 -0',
+      '',
+      'Reviewed (0)',
     }, panel_lines())
     assert.equals('main..feature · 1 file · 0 comments · filter=a.lua', panel_winbar())
   end)
@@ -3879,10 +3900,10 @@ describe('panel 絞り込み (`/`)', function()
     start_done('main', 'feature')
     inputs.result = 'a.lua'
     session_handler.filter_sidebar()
-    assert.equals(3, #panel_lines())
+    assert.equals(5, #panel_lines())
     inputs.result = ''
     session_handler.filter_sidebar()
-    assert.equals(4, #panel_lines())
+    assert.equals(6, #panel_lines())
     assert.equals('main..feature · 2 files · 0 comments', panel_winbar())
   end)
 
@@ -3896,6 +3917,8 @@ describe('panel 絞り込み (`/`)', function()
       'Changes (1)',
       'Showing changes for: main..working tree',
       'M a.lua +1 -0',
+      '',
+      'Reviewed (0)',
     }, panel_lines())
   end)
 
@@ -3950,8 +3973,8 @@ end)
 -- BufWritePost -> `git diff <base>` 再取得 -> 再パース -> anchor 検証 ->
 -- ±カウント・panel・スレッド・winbar 再適用 -> :diffupdate -> 永続化。in-flight まとめ /
 -- 失敗保持 / close・切替時の active guard を応答キューで pin する (#15 の契約移植)。
--- 3 窓構造での観測面: winbar は w:review_winbar (窓変数)、panel 行の [✓] は
--- x でトグルするレビュー完了マーク (open では付かない)
+-- 3 窓構造での観測面: winbar は w:review_winbar (窓変数)、panel 行は
+-- Changes / Reviewed の 2 セクション (viewed = x で Reviewed へ移動。open では移らない)
 -- 表記、threads は head 実バッファ extmark、再取得で消えたファイルは files map と
 -- 一覧から落ち panel winbar 末尾 ⚠N で可視化 (#16 契約、persistence-restore
 -- 「anchor 検証」)。
@@ -4164,6 +4187,8 @@ describe(
           'Showing changes for: main..working tree',
           'M \u{EA6B} a.lua +2 -0',
           'A c.lua +1 -0',
+          '',
+          'Reviewed (0)',
         }, panel_rows())
         -- winbar: head 窓は窓変数 chrome (w:review_winbar 一本化)
         assert.equals('main..feature · a.lua · +2 -0 · 1 comment', head_winbar())
@@ -4213,6 +4238,8 @@ describe(
           'Showing changes for: main..working tree',
           'M a.lua +2 -0',
           'A c.lua +1 -0',
+          '',
+          'Reviewed (0)',
         }, panel_rows())
         assert.equals(0, #state.notifications)
       end
@@ -4337,6 +4364,8 @@ describe(
           'Showing changes for: main..working tree',
           'M a.lua +2 -0',
           'A c.lua +1 -0',
+          '',
+          'Reviewed (0)',
         }, panel_rows())
         assert.same(
           { ['a.lua'] = { viewed = false }, ['c.lua'] = { viewed = false } },
@@ -4436,6 +4465,8 @@ describe(
           'Showing changes for: main..working tree',
           'M a.lua +2 -0',
           'A c.lua +1 -0',
+          '',
+          'Reviewed (0)',
         }, panel_rows())
 
         -- #3: 告知済み -> rev-parse 比較は以後走らない (save ごとに同じ告知を出さ
@@ -4658,6 +4689,8 @@ describe('file panel ツリー / view state (issue-17)', function()
     '  A main.go +1 -0',
     'D cmd +0 -1',
     'M z.txt +1 -0',
+    '',
+    'Reviewed (0)',
   }
 
   it(
@@ -4686,11 +4719,14 @@ describe('file panel ツリー / view state (issue-17)', function()
       session_handler.toggle_listing_style()
       local _, lines = panel_window_lines()
       assert.same({
+        'Changes (5)',
         'M app/util/x.lua +1 -0',
         'A app/y.lua +1 -0',
         'D cmd +0 -1',
         'A cmd/main.go +1 -0',
         'M z.txt +1 -0',
+        '',
+        'Reviewed (0)',
       }, lines)
       -- list 表示では collapsed 集合は効かない (全ファイル行)
       session_handler.toggle_listing_style()
@@ -4718,6 +4754,8 @@ describe('file panel ツリー / view state (issue-17)', function()
         '  A main.go +1 -0',
         'D cmd +0 -1',
         'M z.txt +1 -0',
+        '',
+        'Reviewed (0)',
       }, lines)
       -- 折り畳み後も panel カーソルは dir 行に残り、選択 entry も dir のまま
       assert.equals(dir_row, vim.api.nvim_win_get_cursor(pw)[1])

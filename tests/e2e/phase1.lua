@@ -134,7 +134,7 @@ local function run()
   )
 
   -- file panel tree golden path (issue #17): ヘッダ 2 行・単一 child 連結 dir・
-  -- 開始 open ではマークを付けない (レビュー完了 [✓] = x トグルのみ)・親パス接尾なし
+  -- 開始 open では Reviewed に移さない (x のみ)・親パス接尾なし
   local tl = panel_lines()
   expect(tl[1] == 'Changes (3)', 'panel tree ヘッダ不一致: ' .. tostring(tl[1]))
   expect(
@@ -147,7 +147,7 @@ local function run()
   expect(tl[nrow] == '    A new.lua +1 -0', 'new.lua 行フォーマット不一致: ' .. tl[nrow])
   expect(
     tl[panel_row('file', 'a.lua')] == 'M a.lua +2 -2',
-    '開始 open の行に mark が付いている (開封では [✓] を付けない契約): '
+    '開始 open の行が Reviewed に移っている (開封では移さない契約): '
       .. tostring(tl[panel_row('file', 'a.lua')])
   )
 
@@ -157,7 +157,8 @@ local function run()
   vim.cmd 'normal i'
   local ll = panel_lines()
   expect(
-    table.concat(ll, '\n') == 'M a.lua +2 -2\nM b.lua +2 -1\nA src/deep/new.lua +1 -0',
+    table.concat(ll, '\n')
+      == 'Changes (3)\nM a.lua +2 -2\nM b.lua +2 -1\nA src/deep/new.lua +1 -0\n\nReviewed (0)',
     'i で list 表示にならない: ' .. table.concat(ll, ' / ')
   )
   print 'E2E-TR2 i=list'
@@ -274,11 +275,17 @@ local function run()
   wait_for(function()
     return vim.api.nvim_buf_get_lines(b_base_buf, 0, -1, false)[1] == 'base'
   end, 'base scratch に git show main:b.lua が充填される')
-  -- <CR> open だけでは行頭に [✓] は出ない (開封 != レビュー完了)
+  -- <CR> open だけでは Reviewed に移らない (開封 != レビュー完了。b.lua は Changes に残る)
   local brow = panel_row('file', 'b.lua')
   local sb_lines = panel_lines()
-  if sb_lines[brow] == nil or sb_lines[brow]:sub(1, 6) == '[✓] ' then
-    fail('open だけで [✓] が付いた: ' .. tostring(sb_lines[brow]))
+  local reviewed_zero = false
+  for _, l in ipairs(sb_lines) do
+    if l == 'Reviewed (0)' then
+      reviewed_zero = true
+    end
+  end
+  if not reviewed_zero or sb_lines[brow] == nil or sb_lines[brow] ~= 'M b.lua +2 -1' then
+    fail('open だけで b.lua が Reviewed へ動いた: ' .. table.concat(sb_lines, ' / '))
   end
 
   -- head 窓 = b.lua の実ファイル (編集可)。#18 以降はこの窓自体が実ファイルなので
@@ -310,11 +317,25 @@ local function run()
   vim.api.nvim_win_set_cursor(panel_win, { brow, 0 })
   vim.cmd 'normal x'
   wait_for(function()
-    local l = panel_lines()[brow]
-    return l ~= nil and l:sub(1, 6) == '[✓] '
-  end, 'x で b.lua 行に [✓]')
+    -- x で b.lua が Reviewed セクションへ移動する (Changes 側には居なくなる)
+    local lines = panel_lines()
+    local after_reviewed = false
+    local in_changes, in_reviewed = false, false
+    for _, l in ipairs(lines) do
+      if l == 'Reviewed (1)' then
+        after_reviewed = true
+      elseif l == 'M b.lua +2 -1' then
+        if after_reviewed then
+          in_reviewed = true
+        else
+          in_changes = true
+        end
+      end
+    end
+    return in_reviewed and not in_changes
+  end, 'x で b.lua が Reviewed セクションへ移動')
   vim.api.nvim_set_current_win(head_win)
-  print 'E2E-VW x=mark'
+  print 'E2E-VW x=reviewed'
 
   -- 移動キー (最終キー表 #18 の表示順版): <S-Tab> で a.lua -> ]F 最後 (b.lua) ->
   -- [F 最初 (src/deep/new.lua, ツリーは dir 先行) -> <Tab>/<S-Tab> 往復
