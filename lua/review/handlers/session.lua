@@ -1977,6 +1977,25 @@ function M.toggle_panel()
   M.focus_sidebar()
 end
 
+-- 表示順 (全セクション) で from_row より下の最初の file 行の entry。無ければ先頭へ戻る
+-- (x 後のカーソル移動用。row_entry 写像を持つ rendered buffer を走査する)。
+local function next_file_entry(buf, from_row)
+  local count = vim.api.nvim_buf_line_count(buf)
+  for r = from_row + 1, count do
+    local e = ui_filepanel.row_entry(buf, r)
+    if e ~= nil and e.kind == 'file' then
+      return e
+    end
+  end
+  for r = 1, count do
+    local e = ui_filepanel.row_entry(buf, r)
+    if e ~= nil and e.kind == 'file' then
+      return e
+    end
+  end
+  return nil
+end
+
 --- panel x: viewed 切替 -> 直後に save (INV-4)。
 function M.toggle_viewed_current()
   if active == nil then
@@ -1999,7 +2018,12 @@ function M.toggle_viewed_current()
   entry.viewed = not entry.viewed
   active.session.files[path] = entry
   persist()
-  refresh_panel()
+
+  -- カーソルは移動したファイル (Reviewed 末尾) へ追従せず、表示順 (全セクション) の
+  -- 「下の次のファイル」を指す (最後なら先頭へ戻る — diff-review「file panel」)。
+  -- 旧バッファの行写像から捕まえるのは、新レイアウトでは旧行位置が空行/ヘッダに化け、
+  -- 新表示スキャンだと移動したファイル自身に当たるため (実質同じ位置の「次のファイル」)。
+  refresh_panel(next_file_entry(buf, row))
 end
 
 -- ============================================================================

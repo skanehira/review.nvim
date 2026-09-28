@@ -151,7 +151,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | file panel | `<CR>` / `o` / `l` | カーソル entry を開く (ファイル = 実ファイル窓に張るが focus とカーソルは file panel に維持、dir = fold トグル)。file panel 上の `o` は «開く» (旧 diff 窓の `o` = 実ファイル別 tab は 2026-09 削除 — head 窓が実ファイルそのもののため) |
 | file panel | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (panel 起点では開いたあとも focus とカーソルを panel に維持 — `<CR>` と同一。head/base 窓起点では focus は head 窓に残る) |
 | file panel | `i` | list 表示 (フルパス 1 行) と tree 表示の切替 (view state。session JSON に載せない) |
-| file panel | `x` | viewed 切替 = ファイルを Changes ⇄ Reviewed セクション間で移動 (open / 移動系では決して Reviewed に移らない。dir / ヘッダ行は無動作) |
+| file panel | `x` | viewed 切替 = ファイルを Changes ⇄ Reviewed セクション間で移動 (open / 移動系では決して Reviewed に移らない。dir / ヘッダ行は無動作)。カーソルは移動したファイルを追わず表示順の次のファイルを指す (最後なら先頭へ) |
 | file panel | `/` | 絞り込み (大文字小文字無視の path 部分一致。空入力 = 解除、キャンセル = 現状維持。`<Tab>`/`[F`/`]F` と `<CR>` は絞り込み後の集合だけを辿る) |
 | file panel | `R` | 差分再取得 (レビュー窓の `R` と同一) |
 | file panel | `q` | `:Review close` 相当 (diff 窓の `q` と同じ) |

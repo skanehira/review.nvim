@@ -2255,6 +2255,8 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
       focus_panel_file 'b.lua'
       session_handler.toggle_viewed_current()
       assert.equals(true, load_saved().files['b.lua'].viewed) -- 付与と直後 save (INV-4)
+      -- x 後はカーソルが次のファイルへ動くので、解除は対象を再フォーカスしてから
+      focus_panel_file 'b.lua'
       session_handler.toggle_viewed_current()
       assert.equals(false, load_saved().files['b.lua'].viewed) -- 外しも同様
     end
@@ -2312,6 +2314,8 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
       session_handler.toggle_viewed_current()
       assert.equals(true, load_saved().files['a.lua'].viewed)
 
+      -- x 後はカーソルが次のファイル (b.lua) へ動くので、解除は対象を再フォーカス
+      focus_panel_file 'a.lua'
       session_handler.toggle_viewed_current()
       assert.equals(false, load_saved().files['a.lua'].viewed)
     end
@@ -2334,6 +2338,13 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
         'A b.lua +1 -0',
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
 
+      -- カーソルは Reviewed に追従せず「表示上の次のファイル」= a.lua (b.lua は最後
+      -- だったので先頭へ戻る) を指す
+      local pw = ui_windows.win 'panel'
+      assert.equals(panel_row_for('file', 'a.lua'), vim.api.nvim_win_get_cursor(pw)[1])
+
+      -- 解除方向も同様: b.lua (Reviewed) で x -> 次のファイルロジックで a.lua を指す
+      focus_panel_file 'b.lua'
       session_handler.toggle_viewed_current() -- 解除方向も再描画される
       assert.same({
         'Changes (2)',
@@ -2343,6 +2354,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
         '',
         'Reviewed (0)',
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
+      assert.equals(panel_row_for('file', 'a.lua'), vim.api.nvim_win_get_cursor(pw)[1])
     end
   )
 
@@ -4915,6 +4927,20 @@ describe('file panel ツリー / view state (issue-17)', function()
       session_handler.open_file 'app/y.lua'
       session_handler.next_file() -- パス昇順: app/y.lua -> cmd (file)
       assert.equals('cmd', panel_current_path())
+    end
+  )
+
+  it(
+    'x 後はカーソルが表示順の次のファイルを指す (dir 行を跨いで Reviewed には追従しない)',
+    function()
+      start_trees()
+      local pw = ui_windows.win 'panel'
+      vim.api.nvim_set_current_win(pw)
+      vim.api.nvim_win_set_cursor(pw, { panel_row_for('file', 'app/y.lua'), 0 })
+      session_handler.toggle_viewed_current()
+      -- app/y.lua の下は dir cmd/ を跨いで cmd/main.go (表示順の次のファイル)
+      assert.equals(panel_row_for('file', 'cmd/main.go'), vim.api.nvim_win_get_cursor(pw)[1])
+      assert.equals(true, load_saved().files['app/y.lua'].viewed)
     end
   )
 end)
