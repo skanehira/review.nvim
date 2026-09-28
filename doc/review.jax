@@ -1,4 +1,4 @@
-*review_ja.txt*	GitHub Files changed 風のブランチ / PR 差分レビュー (日本語版)
+*review.jax*	GitHub Files changed 風のブランチ / PR 差分レビュー (日本語版)
 
 この文書の最新版は英語 (doc/review.txt / `:h review`) が正本です。日本語は
 ここを参照してください。`set helplang=ja` を使うと `:h review-*` がこの版に

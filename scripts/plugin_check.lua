@@ -42,14 +42,14 @@ if notified[1].level ~= vim.log.levels.WARN then
   fail '通知レベルが WARN でない'
 end
 
--- :help review / :help review_ja — doc/review.txt (英語正本) と doc/review_ja.txt
--- (日本語版) をテンポラリ rtp にコピーして helptags を作り到達を確認する
--- (リポジトリの doc/ を汚染しない)。
+-- :help review / :help review_ja — doc/review.txt (英語正本) と doc/review.jax
+-- (日本語版 = helptags の言語拡張子規約 .jax → ja / tags-ja) をテンポラリ rtp に
+-- コピーして helptags を作り到達を確認する (リポジトリの doc/ を汚染しない)。
 local rtp_copy = vim.fn.tempname()
 if vim.fn.mkdir(rtp_copy .. '/doc', 'p') == 0 then
   fail('テンポラリ rtp が作れない: ' .. rtp_copy)
 end
-for _, name in ipairs { 'review.txt', 'review_ja.txt' } do
+for _, name in ipairs { 'review.txt', 'review.jax' } do
   local lines = vim.fn.readfile(repo .. '/doc/' .. name)
   if vim.fn.writefile(lines, rtp_copy .. '/doc/' .. name) ~= 0 then
     fail('doc/' .. name .. ' がコピーできない')
@@ -72,8 +72,8 @@ vim.cmd 'help review_ja'
 bufname = vim.api.nvim_buf_get_name(0)
 vim.cmd 'bwipeout!'
 vim.o.eventignore = ei_save
-if not bufname:match 'review_ja%.txt$' then
-  fail(':help review_ja が review_ja.txt に到達できない (bufname=' .. bufname .. ')')
+if not bufname:match 'review%.jax$' then
+  fail(':help review_ja が review.jax に到達できない (bufname=' .. bufname .. ')')
 end
 vim.fn.delete(rtp_copy, 'rf')
 
