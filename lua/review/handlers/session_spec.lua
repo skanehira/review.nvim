@@ -549,8 +549,9 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
       -- head 実ファイル窓 = 編集可
       local hw = ui_windows.win 'head'
       assert.equals(true, vim.bo[vim.api.nvim_win_get_buf(hw)].modifiable)
-      -- 開通 focus は head 窓 (直後の c/e が効く位置から開始)
-      assert.equals(hw, vim.api.nvim_get_current_win())
+      -- 開通 focus は file panel (カーソルはファイルパネルのまま。diff 窓へは移動系・
+      -- 標準の窓移動で移る)
+      assert.equals(ui_windows.win 'panel', vim.api.nvim_get_current_win())
 
       local sb = vim.fn.bufnr(SIDEBAR_NAME)
       assert.not_equals(-1, sb)
@@ -2096,8 +2097,11 @@ end)
 describe('panel 操作 (open_file / viewed) と移動系', function()
   use_env()
 
+  -- 移動系で「開いているファイル」= head 窓のバッファ (開通 focus は panel なので
+  -- current 窓 (= panel) の buf 名は使えない — head 窓を明示する)。
   local function ex_bufname()
-    return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(vim.api.nvim_get_current_win()))
+    local w = ui_windows.win 'head'
+    return w ~= nil and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)) or nil
   end
 
   it(
@@ -2202,7 +2206,7 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     assert.equals('head', ui_windows.role_of(ui_windows.win 'head'))
   end)
 
-  it('<Tab> で次ファイルへ open_file (マークは触らない / focus は head)', function()
+  it('<Tab> で次ファイルへ open_file (マークは触らない)', function()
     start_done('main', 'feature') -- 先頭 a.lua
     session_handler.next_file()
 
@@ -2236,7 +2240,8 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
       session_handler.next_file() -- b.lua
       session_handler.first_file()
       assert.equals(state.repo .. '/a.lua', ex_bufname())
-      assert.equals(ui_windows.win 'head', vim.api.nvim_get_current_win())
+      -- 開通 focus = panel なので移動系は panel 起点 (focus は panel に残る)
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
       session_handler.last_file()
       assert.equals(state.repo .. '/b.lua', ex_bufname())
       session_handler.last_file() -- 端の再押下 = 同一対象を維持 (無動作)
@@ -4681,6 +4686,54 @@ local function start_trees()
   return session_handler.start { base = 'main', head = 'feature' }
 end
 
+-- パネル表示順先頭 (ツリーは dir 先行 = app/x.lua) とパス昇順先頭 (a.txt) が
+-- 乖離する差分 (開始時初期開きの対象が「パネルの一番上」であることの pin 用)。
+local RAW_DIFF_PANEL_FIRST = table.concat({
+  'diff --git a/a.txt b/a.txt',
+  'index 111..222 100644',
+  '--- a/a.txt',
+  '+++ b/a.txt',
+  '@@ -1 +1,2 @@',
+  ' line1',
+  '+line2',
+  'diff --git a/app/x.lua b/app/x.lua',
+  'index 333..444 100644',
+  '--- a/app/x.lua',
+  '+++ b/app/x.lua',
+  '@@ -1 +1,2 @@',
+  ' x1',
+  '+x2',
+  'diff --git a/z.txt b/z.txt',
+  'index 555..666 100644',
+  '--- a/z.txt',
+  '+++ b/z.txt',
+  '@@ -1 +1,2 @@',
+  ' z1',
+  '+z2',
+  '',
+}, '\n')
+
+local function start_panel_first()
+  -- head 実ファイル経路 (:edit 相当) はディスク実在が前提なので、diff に出る
+  -- ファイルを自前で書き出す (use_env は root の a.lua 等しか作らない)。
+  local app = vim.fs.joinpath(state.repo, 'app')
+  vim.fn.mkdir(app, 'p')
+  for _, n in ipairs { 'a.txt', 'app/x.lua', 'z.txt' } do
+    local f = io.open(vim.fs.joinpath(state.repo, n), 'w')
+    f:write 'line1\nline2\n'
+    f:close()
+  end
+  install_git {
+    top_ok,
+    RP_HEAD_MATCH[1],
+    RP_HEAD_MATCH[2],
+    function()
+      return diff_ok(RAW_DIFF_PANEL_FIRST)
+    end,
+  }
+  return session_handler.start { base = 'main', head = 'feature' }
+end
+
 local function panel_window_lines()
   local pw = ui_windows.win 'panel'
   local buf = vim.api.nvim_win_get_buf(pw)
@@ -4714,6 +4767,22 @@ describe('file panel ツリー / view state (issue-17)', function()
       local pw = ui_windows.win 'panel'
       local row = vim.api.nvim_win_get_cursor(pw)[1]
       assert.equals(panel_row_for('file', 'app/util/x.lua'), row)
+    end
+  )
+
+  it(
+    '開始時の初期開きはパネル表示順 (ツリー上→下) の先頭ファイル (パス昇順ではない)',
+    function()
+      -- パス昇順先頭 = a.txt、パネル表示順先頭 = app/x.lua (dir 先行) で乖離する。
+      start_panel_first()
+      assert.equals('app/x.lua', panel_current_path())
+      -- head 窓の current もパネル表示順先頭 (実ファイル) に張られている
+      local hw = ui_windows.win 'head'
+      local real = vim.uv.fs_realpath(vim.fs.joinpath(state.repo, 'app/x.lua'))
+      assert.equals(real, vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(hw)))
+      -- 現対象が表示順先頭なので [F は no-op (初期開きと移動系が同一順序)
+      session_handler.first_file()
+      assert.equals('app/x.lua', panel_current_path())
     end
   )
 

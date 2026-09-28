@@ -1675,7 +1675,10 @@ local function build_file_state(session, files)
   for _, file in ipairs(files) do
     sorted[#sorted + 1] = file
   end
-  -- 一覧の先頭 = 初期開きファイルなので、pairs 順のまま繋ぐと復元経路だけ順序が揺れる。
+  -- file_order_sorted は panel 表示・移動系 (<Tab>/[F) の入力順 (パス昇順の決定的
+  -- 順序)。pairs 順のまま繋ぐと復元経路だけ順序が揺れるため、ここで必ず整列する
+  -- (開始時初期開きはこの順序でなく visible_order() の表示順を向く — 表示順が
+  -- 単一源のため、dir サブツリー先行のツリーと一致させる)。
   table.sort(sorted, function(a, b)
     return a.path < b.path
   end)
@@ -1745,14 +1748,21 @@ open_session_ui = function()
   ui_keygate.install(active.panel_buf)
   active.owned_bufs[active.panel_buf] = true
   -- vsplit 継承 drift 回避と tcd は windows.open 内 (レビュー 3 窓を作ってから
-  -- 内容を張る順序契約)。focus は head 窓で開始する。
+  -- 内容を張る順序契約)。開通後の focus は file panel に置く (下の focus_sidebar)。
   ui_windows.open { dir = review_dir(), on_tab_closed = on_review_tab_closed }
   ui_windows.set_panel_buf(active.panel_buf)
-  local first = active.file_order_sorted[1]
-  -- 「一覧先頭ファイルの open_file」(セッション開始時の初期開き)。files が
-  -- 空 (復元で差分消滅) は NO_CHANGES プレースホルダを開く。
-  resolve_and_open((first and first.path) or M.NO_CHANGES)
+  -- 「ファイルパネル表示順の先頭ファイルの open_file」(セッション開始時の初期開き)。
+  -- 表示順 (ツリー上→下 = <Tab>/[F と同一) は visible_order() が唯一の源 — パス昇順の
+  -- file_order_sorted[1] は dir サブツリー先行のパネル表示と一致しないため、初期開きが
+  -- パネル最上段のファイルと乖離しないよう表示順で選ぶ (Changes -> Reviewed の順)。
+  -- files が空 (復元で差分消滅) は NO_CHANGES プレースホルダを開く。
+  local order = M.visible_order()
+  resolve_and_open(order[1] or M.NO_CHANGES)
   ui_windows.sweep()
+  -- 開通後もカーソル (focus) は file panel に置く (diffview と同じ開始姿勢。diff 窓へ
+  -- は移動系・標準の窓移動で移る)。resolve_and_open の bind が head 窓へ focus を送る
+  -- ため、開通後に panel へ戻す (panel のカーソルは開いた先頭ファイル行のまま)。
+  M.focus_sidebar()
 end
 
 --- 読み込み済みセッションを new 側差分とともに開始処理へ引き継ぐ (restore ルート:

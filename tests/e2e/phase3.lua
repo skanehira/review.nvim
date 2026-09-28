@@ -47,12 +47,13 @@ local function run()
   wait_for(function()
     return vim.fn.bufexists 'review://sidebar/main--hotfix' == 1
   end, 'head 自動採用後の session 開始 (sidebar main--hotfix)')
-  -- 初期開き = 一覧先頭ファイルの open_file: head 窓は実ファイル (hotfix の a.lua)
+  -- 初期開き = file panel 表示順先頭 (ツリーは dir 先行 = src/deep/new.lua) の
+  -- open_file: head 窓は実ファイル (hotfix の src/deep/new.lua)
   wait_for(function()
     return windows.state() ~= nil and windows.win 'head' ~= nil
   end, 'hotfix レビュー 3 窓')
   local head = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(windows.win 'head'))
-  if head ~= realpath(vim.fs.joinpath(top_level(), 'a.lua')) then
+  if head ~= realpath(vim.fs.joinpath(top_level(), 'src/deep/new.lua')) then
     fail('head 自動採用後の head 窓が実ファイルでない: ' .. head)
   end
 

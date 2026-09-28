@@ -1,4 +1,5 @@
 <!-- product-mode: cli -->
+<!-- 変更履歴 [2026-09-28]: セッション開始 (start / 復元) の初期開きを「パネル表示順先頭ファイル」へ変更し、開通後も focus を file panel に置く (diffview と同じ開始姿勢) -->
 <!-- 変更履歴 [2026-09-20]: file panel 移動系 (<Tab>/<S-Tab>/[F/]F) も panel 起点では focus を panel に維持 (head/base 窓起点は head に残る) -->
 <!-- 変更履歴 [2026-09-18]: file panel <CR>/o/l の focus を panel 維持へ変更 (diff 窓へは移動系と標準の窓移動で移る) -->
 <!-- 変更履歴 [2026-09-17]: コメント一覧 (横断) 機能の追加 + focus_panel/toggle_panel の同期 mapping + 確認プロンプト vim.ui.input 復帰 + コメントアイコン nf-cod-comment -->

@@ -81,7 +81,14 @@ local function run()
   end, '初期 3 窓')
 
   -- コメント 1: a.lua 変更行 3 (LINE3-changed) の実ファイル head 窓。
+  -- 初期開きはパネル表示順先頭 (src/deep/new.lua — ツリーは dir 先行) なので、
+  -- <Tab> で a.lua へ移動してからコメントを付ける。
   local hw = windows.win 'head'
+  local tab_key = vim.api.nvim_replace_termcodes('<Tab>', true, false, true)
+  vim.cmd('normal 0' .. tab_key)
+  wait_for(function()
+    return tail_eq(buf_name(windows.win 'head'), 'a.lua')
+  end, '<Tab> で a.lua head 窓 (コメント用)')
   if not tail_eq(buf_name(hw), 'a.lua') then
     fail('初期 head 窓が a.lua でない: ' .. buf_name(hw))
   end

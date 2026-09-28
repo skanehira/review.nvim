@@ -34,13 +34,23 @@ local run = function()
 
   -- extmark 残骸検査の対象にする実ファイルバッファへ、head 窓打鍵でコメントを
   -- 1 件張っておく (:tabclose 前に残骸 > 0 の状態を作らないと clear を検証できない)。
+  -- 初期開きはパネル表示順先頭 (src/deep/new.lua — ツリーは dir 先行) なので、
+  -- <Tab> で a.lua へ移動してからコメントを張る。
   local head_win = windows.win 'head'
+  local tab_key = vim.api.nvim_replace_termcodes('<Tab>', true, false, true)
+  vim.cmd('normal 0' .. tab_key)
+  wait_for(function()
+    return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(head_win))
+      == realpath(vim.fs.joinpath(top, 'a.lua'))
+  end, '<Tab> で a.lua head 実ファイル')
   local a_buf = vim.api.nvim_win_get_buf(head_win)
   if vim.api.nvim_buf_get_name(a_buf) ~= realpath(vim.fs.joinpath(top, 'a.lua')) then
     fail(
       '前提の head 実ファイル窓が壊れている: ' .. vim.api.nvim_buf_get_name(a_buf)
     )
   end
+  -- 開通 focus は panel なので、head 窓打鍵 (c) に備えて head 窓へ移す
+  vim.api.nvim_set_current_win(head_win)
   vim.api.nvim_win_set_cursor(head_win, { 3, 0 })
   vim.cmd 'normal c'
   wait_for(function()

@@ -44,8 +44,22 @@ local function run()
     return windows.state() ~= nil and windows.win 'head' ~= nil
   end, '復元 3 窓')
 
-  -- head 窓 = 復元先頭ファイルの実バッファ (一覧先頭 a.lua の open_file)
+  -- 復元時も開始時と同じく file panel 表示順先頭 (src/deep/new.lua — ツリーは dir
+  -- 先行) が初期開きになる。コメントは a.lua にあるので、<Tab> で a.lua へ移動して
+  -- 実バッファの extmark を照合する。
   local head_win = windows.win 'head'
+  local n_buf = vim.api.nvim_win_get_buf(head_win)
+  if not vim.api.nvim_buf_get_name(n_buf):match 'src/deep/new%.lua$' then
+    fail(
+      '復元初期開きがパネル表示順先頭 (src/deep/new.lua) でない: '
+        .. vim.api.nvim_buf_get_name(n_buf)
+    )
+  end
+  local tab_key = vim.api.nvim_replace_termcodes('<Tab>', true, false, true)
+  vim.cmd('normal 0' .. tab_key)
+  wait_for(function()
+    return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(head_win)):match 'repo/a%.lua$'
+  end, '復元後 <Tab> で a.lua へ移動')
   local a_buf = vim.api.nvim_win_get_buf(head_win)
   if not vim.api.nvim_buf_get_name(a_buf):match 'repo/a%.lua$' then
     fail('復元 head 窓が実ファイルでない: ' .. vim.api.nvim_buf_get_name(a_buf))

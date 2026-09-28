@@ -92,16 +92,47 @@ local function run()
     fail('tcd が repo でない: ' .. vim.fn.getcwd(-1, review_tabnr))
   end
 
-  -- head 窓は実ファイル (編集可) / base 窓は review://base scratch
-  if win_buf_name(head_win) ~= realpath(vim.fs.joinpath(top, 'a.lua')) then
-    fail('head 窓が実ファイルでない: ' .. win_buf_name(head_win))
+  -- 開始時初期開き = file panel の表示順先頭 (src/deep/new.lua — ツリーは dir 先行。
+  -- パス昇順の a.lua ではない。diff-review「セッション開始時の初期開き」)。
+  local newlua_real = realpath(vim.fs.joinpath(top, 'src/deep/new.lua'))
+  if win_buf_name(head_win) ~= newlua_real then
+    fail(
+      '初期開きがパネル表示順先頭 (src/deep/new.lua) でない: '
+        .. win_buf_name(head_win)
+    )
   end
-  local a_buf = vim.api.nvim_win_get_buf(head_win)
+  local n_buf = vim.api.nvim_win_get_buf(head_win)
   -- 編集可 (実ファイル :edit 経路 / MUST 3) と read-only でないこと
-  expect(vim.bo[a_buf].modifiable, 'head 実ファイル窓が modifiable でない')
-  expect(not vim.bo[a_buf].readonly, 'head 実ファイル窓が read-only')
-  if win_buf_name(base_win) ~= 'review://base/main--feature/a.lua' then
+  expect(vim.bo[n_buf].modifiable, 'head 実ファイル窓が modifiable でない')
+  expect(not vim.bo[n_buf].readonly, 'head 実ファイル窓が read-only')
+  if win_buf_name(base_win) ~= 'review://base/main--feature/src/deep/new.lua' then
     fail('base 窓 scratch でない: ' .. win_buf_name(base_win))
+  end
+  local n_base = vim.api.nvim_win_get_buf(base_win)
+  -- 追加 (A) ファイルは base = 0 行 (空) scratch (issue #39)。両窓 diffoff (issue #38)。
+  local n_lines = vim.api.nvim_buf_get_lines(n_base, 0, -1, false)
+  if not (#n_lines == 0 or (#n_lines == 1 and n_lines[1] == '')) then
+    fail('new.lua base 窓が 0 行 (空) でない: ' .. table.concat(n_lines, ' / '))
+  end
+  if vim.wo[head_win].diff or vim.wo[base_win].diff then
+    fail '追加ファイル (new.lua) で窓 diff が有効 (diffoff 契約違反)'
+  end
+  -- 開通 focus は file panel (カーソルはファイルパネルのまま)
+  expect(panel_win == vim.api.nvim_get_current_win(), '開通 focus が file panel でない')
+
+  -- コメントフローは a.lua の変更行 3 で行うため、<Tab> で a.lua へ移動する
+  -- (panel 起点の移動系は focus を panel に残す。表示順 [new.lua, a.lua, b.lua])。
+  local start_tab = vim.api.nvim_replace_termcodes('<Tab>', true, false, true)
+  vim.cmd('normal 0' .. start_tab)
+  wait_for(function()
+    return win_buf_name(head_win) == realpath(vim.fs.joinpath(top, 'a.lua'))
+  end, '<Tab> で a.lua head 実ファイル (コメントフロー用)')
+  -- a.lua (M) のペア: head 実ファイル / base は review://base scratch
+  local a_buf = vim.api.nvim_win_get_buf(head_win)
+  expect(vim.bo[a_buf].modifiable, 'a.lua head 実ファイル窓が modifiable でない')
+  expect(not vim.bo[a_buf].readonly, 'a.lua head 実ファイル窓が read-only')
+  if win_buf_name(base_win) ~= 'review://base/main--feature/a.lua' then
+    fail('a.lua base 窓 scratch でない: ' .. win_buf_name(base_win))
   end
   local base_buf = vim.api.nvim_win_get_buf(base_win)
   -- base = git show main:a.lua (変更前の行がそのまま見える = 窓 diff の片側)。
@@ -124,8 +155,6 @@ local function run()
       fail('foldmethod=diff でない (win=' .. tostring(w) .. ')')
     end
   end
-  -- 開通 focus は head 窓 (直後の c/e が効く位置)
-  expect(head_win == vim.api.nvim_get_current_win(), '開通 focus が head 窓でない')
   print(
     ('E2E-L1 wins=3 tcd=repo head=%s base=%s'):format(
       win_buf_name(head_win),
@@ -183,7 +212,7 @@ local function run()
   print 'E2E-TR4 fold=toggled'
   expect(tl[panel_row('file', 'a.lua')] ~= nil, 'tree 復帰後に a.lua 行が消えた')
   print 'E2E-TR1 tree=header+chain'
-  -- 以降の c キー (head 窓) に備えて focus を戻す (開通時 focus = head の状態へ)
+  -- 以降の c キー (head 窓) に備えて focus を head 窓へ移す
   vim.api.nvim_set_current_win(head_win)
 
   -- head 窓の恒等行 3 (LINE3-changed) で c キー (keygate 実経路)

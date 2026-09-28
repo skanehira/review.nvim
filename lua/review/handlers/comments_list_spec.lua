@@ -438,6 +438,10 @@ describe('comments_list.open の位置契約 (レビュー tab 最下部・全�
     'head 窓から開いても一覧は最下部に全幅で開く (窓 diff opts を退避・winfixheight)',
     function()
       start_done()
+      -- 初期開きはパネル表示順先頭 (src/deep/new.lua = A・diffoff) なので、
+      -- 「分割元の窓を退避しない (head は窓 diff のまま)」を検証するには
+      -- 変更ファイル a.lua (M・窓 diff 有効) を開いてから行う。
+      session_handler.open_file 'a.lua'
       add_comment { body = 'use map' }
       local pw, bw, hw = ui_windows.win 'panel', ui_windows.win 'base', ui_windows.win 'head'
       vim.api.nvim_set_current_win(hw)
@@ -655,7 +659,8 @@ describe('comments_list.jump_current', function()
           level = vim.log.levels.WARN,
         },
       }, state.notifications)
-      assert.equals(state.repo .. '/a.lua', head_buf_name())
+      -- head 窓は初期開き (パネル表示順先頭 = src/deep/new.lua) のまま動かない
+      assert.equals(state.repo .. '/src/deep/new.lua', head_buf_name())
     end
   )
 
@@ -841,6 +846,9 @@ describe('comments_list.delete_current (一覧専用 arming)', function()
     'd: diff 窓の arming とは共有しない (diff で armed でも一覧の 1 回目は消さない)',
     function()
       start_done()
+      -- 初期開きはパネル表示順先頭 (src/deep/new.lua) なので、diff 側の arming を
+      -- a.lua の同じ行で立てるには先に a.lua を開く (head 窓 = a.lua)。
+      session_handler.open_file 'a.lua'
       add_comment { file = 'a.lua', line = 1, body = 'one' }
       comments_list.open()
 
@@ -1112,6 +1120,9 @@ describe('comments_list の追随 (再 render)', function()
     'コメント CRUD (diff 窓の c 追加) に追随して一覧が再 render される',
     function()
       start_done()
+      -- 初期開きはパネル表示順先頭 (src/deep/new.lua) なので、diff 窓からの追加を
+      -- a.lua の 2 行目に対して行うには先に a.lua を開く (head 窓 = a.lua)。
+      session_handler.open_file 'a.lua'
       add_comment { file = 'a.lua', line = 1, body = 'one' }
       comments_list.open()
 
