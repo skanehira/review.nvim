@@ -4943,4 +4943,125 @@ describe('file panel ツリー / view state (issue-17)', function()
       assert.equals(true, load_saved().files['app/y.lua'].viewed)
     end
   )
+
+  it(
+    '<C-f> / <C-b> (page_down / page_up): panel に focus したまま head (diff) 窓を 1 画面分スクロール',
+    function()
+      -- 長い a.lua を用意して head 窓のスクロールを検証 (60 行)
+      local f = io.open(vim.fs.joinpath(state.repo, 'a.lua'), 'w')
+      local lines = {}
+      for i = 1, 60 do
+        lines[i] = 'line' .. i
+      end
+      lines[2] = 'LINE3-changed'
+      lines[59] = 'LINE60-changed'
+      f:write(table.concat(lines, '\n') .. '\n')
+      f:close()
+      local raw = table.concat({
+        'diff --git a/a.lua b/a.lua',
+        'index 1111111..2222222 100644',
+        '--- a/a.lua',
+        '+++ b/a.lua',
+        '@@ -1,3 +1,3 @@',
+        ' line1',
+        '-line2',
+        '+LINE3-changed',
+        ' line3',
+        '@@ -59,2 +59,2 @@',
+        ' line59',
+        '-line60',
+        '+LINE60-changed',
+        '',
+      }, '\n')
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return diff_ok(raw)
+        end,
+        function(cmd)
+          assert.same({ 'git', 'show', 'main:a.lua' }, cmd)
+          return { code = 0, stdout = table.concat(lines, '\n') .. '\n', stderr = '' }
+        end,
+      }
+      session_handler.start { base = 'main', head = 'feature' }
+      local hw = ui_windows.win 'head'
+      local pw = ui_windows.win 'panel'
+      vim.api.nvim_win_set_cursor(hw, { 1, 0 })
+      vim.api.nvim_set_current_win(pw)
+      vim.api.nvim_win_set_cursor(pw, { 1, 0 })
+
+      session_handler.page_down()
+      assert.equals(
+        'panel',
+        ui_windows.role_of(vim.api.nvim_get_current_win()),
+        'focus は panel に残る'
+      )
+      local row = vim.api.nvim_win_get_cursor(hw)[1]
+      local w0 = vim.api.nvim_win_call(hw, function()
+        return vim.fn.line 'w0'
+      end)
+      assert.is_true(
+        row > 1,
+        'head 窓のカーソルが下へ動いていない (row=' .. row .. ')'
+      )
+      assert.is_true(
+        w0 > 1,
+        'head 窓のビューが下へスクロールしていない (w0=' .. w0 .. ')'
+      )
+      assert.equals(
+        row,
+        w0,
+        'zt でカーソル行が窓先頭 (row=' .. row .. ' w0=' .. w0 .. ')'
+      )
+
+      session_handler.page_up()
+      assert.equals(
+        'panel',
+        ui_windows.role_of(vim.api.nvim_get_current_win()),
+        'focus は panel に残る'
+      )
+      local row2 = vim.api.nvim_win_get_cursor(hw)[1]
+      assert.is_true(
+        row2 < row,
+        'head 窓が上へスクロールしていない (row=' .. row2 .. ')'
+      )
+    end
+  )
+
+  it('<C-f> / <C-b>: 端では clamp (head 窓は動かない)', function()
+    local f = io.open(vim.fs.joinpath(state.repo, 'a.lua'), 'w')
+    local lines = {}
+    for i = 1, 60 do
+      lines[i] = 'line' .. i
+    end
+    f:write(table.concat(lines, '\n') .. '\n')
+    f:close()
+    install_git {
+      top_ok,
+      RP_HEAD_MATCH[1],
+      RP_HEAD_MATCH[2],
+      function()
+        return diff_ok(RAW_DIFF_A_B)
+      end,
+      function()
+        return { code = 0, stdout = table.concat(lines, '\n') .. '\n', stderr = '' }
+      end,
+    }
+    session_handler.start { base = 'main', head = 'feature' }
+    local hw = ui_windows.win 'head'
+    local pw = ui_windows.win 'panel'
+    vim.api.nvim_set_current_win(pw)
+    vim.api.nvim_win_set_cursor(pw, { 1, 0 })
+
+    vim.api.nvim_win_set_cursor(hw, { 1, 0 })
+    session_handler.page_up() -- 先頭より上 = no-op
+    assert.equals(1, vim.api.nvim_win_get_cursor(hw)[1])
+
+    vim.api.nvim_win_set_cursor(hw, { 60, 0 })
+    session_handler.page_down() -- 末尾より下 = no-op
+    assert.equals(60, vim.api.nvim_win_get_cursor(hw)[1])
+    assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+  end)
 end)

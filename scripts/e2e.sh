@@ -103,6 +103,8 @@ grep -q 'E2E-L1 wins=3 tcd=repo' "$OUT1" || {
 grep -q 'E2E-W1 winbar=true' "$OUT1" || { echo 'e2e: phase1 winbar chrome (w: のみ) が入っていない' >&2; exit 1; }
 grep -q 'E2E-T1 thread=eol+virtlines' "$OUT1" || { echo 'e2e: コメント行下スレッド (件数 eol + virt_lines 本文) が表示されない' >&2; exit 1; }
 grep -q 'E2E-O1 fileview=real-editable' "$OUT1" || { echo 'e2e: phase1 head 窓が実ファイル (編集可) でない' >&2; exit 1; }
+grep -qF 'E2E-CN c[]=jump' "$OUT1" || { echo 'e2e: phase1 `[c`/`]c` コメントジャンプが効かない' >&2; exit 1; }
+grep -q 'E2E-PD C-f/C-b=page' "$OUT1" || { echo 'e2e: phase1 panel `<C-f>`/`<C-b>` の diff 窓スクロールが効かない' >&2; exit 1; }
 grep -q 'E2E-M1 S-Tab=prev' "$OUT1" || {
   echo 'e2e: phase1 `<S-Tab>` 前ファイル移動が効かない (最終キー表 #18)' >&2
   exit 1

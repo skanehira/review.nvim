@@ -79,6 +79,7 @@ The minimum touched by the flow above:
 | review window  | `D`                       | delete all comments (double-press; same as `:Review clear`)  |
 | review window  | `<Esc>`                   | cancel the d / D arming                                      |
 | review window  | `<Tab>` / `<S-Tab>`       | next / previous file                                         |
+| review window  | `[c` / `]c`               | previous / next comment in this file (head window only)      |
 | review window  | `<leader>e` / `<leader>b` | go to the file panel / toggle it                             |
 | review window  | `<leader>c`               | cross-file comments list                                     |
 | review window  | `q`                       | save and close the session                                   |
@@ -90,7 +91,7 @@ All keys are buffer-local and which keys are live depends on the window. The ful
 require('review').setup({ keymaps = { diff = { add_comment = 'gc' } } })
 ```
 
-hunk movement `[c` / `]c` and folds (`za` / `zo` / `zR`) stay Neovim defaults — the plugin maps nothing there. Review-window keymaps fire only when the window role matches at press time, so the same real file opened in your own window never mis-fires.
+folds (`za` / `zo` / `zR`) stay Neovim defaults — the plugin maps nothing there. In the review windows `[c` / `]c` are bound to comment navigation (previous / next comment; the built-in hunk movement remains in your own windows). Review-window keymaps fire only when the window role matches at press time, so the same real file opened in your own window never mis-fires.
 
 ## Commands
 

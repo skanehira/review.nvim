@@ -118,6 +118,8 @@ local function paint_keymaps(buf)
     { k.prev_file, "require('review.handlers.session').prev_file()" },
     { k.first_file, "require('review.handlers.session').first_file()" },
     { k.last_file, "require('review.handlers.session').last_file()" },
+    { k.page_down, "require('review.handlers.session').page_down()" },
+    { k.page_up, "require('review.handlers.session').page_up()" },
     { k.refresh, "require('review.handlers.session').refresh()" },
     { k.comments_list, "require('review.handlers.comments_list').open()" },
     { k.toggle_viewed, "require('review.handlers.session').toggle_viewed_current()" },

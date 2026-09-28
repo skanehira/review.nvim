@@ -24,6 +24,9 @@ local COMMENT_OPS = {
   delete_all = { mode = 'n', fn = 'delete_all_arming' },
   yank_prompt = { mode = 'n', fn = 'yank_current' },
   view_comments = { mode = 'n', fn = 'view_current' },
+  -- 前 / 次のコメントへジャンプ (head 窓のみ。端では clamp = no-op)
+  prev_comment = { mode = 'n', fn = 'prev_comment' },
+  next_comment = { mode = 'n', fn = 'next_comment' },
 }
 
 -- op -> (handler module, 関数名)。focus_panel (<leader>e) は panel への focus
@@ -194,10 +197,19 @@ local function install_sync(buf, lhs, op, fallback)
     return false
   end
   vim.keymap.set('n', lhs, function()
-    if gate_state(op) == false then
+    local gate = gate_state(op)
+    if gate == false then
       if fallback ~= nil then
         M.restore_builtin(fallback)
       end
+      return
+    end
+    if gate == 'warn-comment' then
+      vim.notify('review.nvim: comments are not available in this window', vim.log.levels.WARN)
+      return
+    end
+    if COMMENT_OPS[op] ~= nil then
+      comment_dispatch(op)
       return
     end
     local target = DISPATCH[op]
@@ -229,6 +241,11 @@ function M.install(buf, session_id)
   install_one(buf, 'n', k.cancel_arming, 'cancel_arming')
   install_one(buf, 'n', k.yank_prompt, 'yank_prompt')
   install_one(buf, 'n', k.view_comments, 'view_comments')
+  -- [c / ]c は multi-char printable lhs の expr 経路で「次の打鍵まで反映されない」
+  -- 遅延が実測される (ユーザー報告) ため install_sync (非 expr 同期) で張る。
+  -- gate 不成立窓では built-in の [c/]c hunk 移動に復帰する (base 窓は WARN)。
+  install_sync(buf, k.prev_comment, 'prev_comment', k.prev_comment)
+  install_sync(buf, k.next_comment, 'next_comment', k.next_comment)
   install_one(buf, 'n', k.close, 'close')
   -- help (<F1> と fixed alias g?) は float 作成なので install_sync の同期経路。
   -- fire (expr+schedule 経由) は環境により «次打鍵まで反映されない» 遅延が実測され
@@ -241,8 +258,10 @@ function M.install(buf, session_id)
   install_sync(buf, 'g?', 'help', 'g?')
   install_one(buf, 'n', k.next_file, 'next_file')
   install_one(buf, 'n', k.prev_file, 'prev_file')
-  install_one(buf, 'n', k.first_file, 'first_file')
-  install_one(buf, 'n', k.last_file, 'last_file')
+  -- [F / ]F も multi-char printable lhs の expr 遅延クラス (上記 [c/]c と同型)。
+  -- gate 不成立窓では built-in へ復帰。
+  install_sync(buf, k.first_file, 'first_file', k.first_file)
+  install_sync(buf, k.last_file, 'last_file', k.last_file)
   install_one(buf, 'n', k.refresh, 'refresh')
   if k.focus_panel ~= nil then
     install_sync(buf, k.focus_panel, 'focus_panel')

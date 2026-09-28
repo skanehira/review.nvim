@@ -152,6 +152,8 @@ Defaults and the override format:
 			prev_file      = '<S-Tab>',
 			first_file     = '[F',
 			last_file      = ']F',
+			prev_comment   = '[c',   -- previous comment in this file
+			next_comment   = ']c',   -- next comment in this file
 			refresh        = 'R',
 			focus_panel    = '<leader>e',
 			toggle_panel   = '<leader>b',
@@ -166,6 +168,8 @@ Defaults and the override format:
 			prev_file      = '<S-Tab>',
 			first_file     = '[F',
 			last_file      = ']F',
+			page_down      = '<C-f>', -- scroll half a page down
+			page_up        = '<C-b>', -- scroll half a page up
 			refresh        = 'R',
 			toggle_style   = 'i',    -- list / tree view toggle
 			toggle_viewed  = 'x',
@@ -201,11 +205,13 @@ Review windows (head / base)			*review-keymaps-diff*
 	Reviews open in a dedicated tabpage with 3 windows (file panel │ base │
 	head). The head window is the real file (`:edit`, editable); the base
 	window is a `git show` scratch. The two windows use Neovim's standard
-	window diff, so `[c` / `]c` hunk movement and folds work as-is. The
-	keys below are installed buffer-local in the head/base windows and
-	fire only when the window role gate passes at press time. In windows
-	that fail the gate (the same real file opened in your own window) 1
-	keystroke falls back to built-in behavior (review actions never
+	window diff, so folds work as-is. In the review windows the `[c` / `]c`
+	keys are bound to comment navigation (see below) instead of the built-in
+	hunk movement; the built-in hunk movement is still available in your own
+	windows. The keys below are installed buffer-local in the head/base
+	windows and fire only when the window role gate passes at press time. In
+	windows that fail the gate (the same real file opened in your own window)
+	1 keystroke falls back to built-in behavior (review actions never
 	mis-fire).
 
 	c
@@ -252,6 +258,13 @@ Review windows (head / base)			*review-keymaps-diff*
 	<S-Tab>		open the previous file (same rule)
 	[F		open the first file (no-op when already first)
 	]F		open the last file (no-op when already last)
+
+	[c / ]c
+	  jump to the previous / next comment in the current file (head window
+	  only; cursor moves to the comment's start line and the window centers
+	  on it with zz). base window and deleted/binary notice windows show
+	  «comments are not available in this window». no-op at the edges and
+	  when the file has no comments
 
 	R
 	  refetch the diff (git diff re-run -> reparse -> anchor verification ->
@@ -313,6 +326,13 @@ Review windows (head / base)			*review-keymaps-diff*
 	<S-Tab>		previous file (ditto)
 	[F		first file (same rule as above)
 	]F		last file (same rule as above)
+
+	<C-f> / <C-b>
+	  scroll the head (diff) window half a page down / up while keeping
+	  focus in the panel (the same as pressing <C-d>/<C-u> in the diff
+	  window; the base window scrolls along via scrollbind). no-op at the
+	  edges
+
 	R		refetch the diff (same as R in the review windows)
 
 	i
@@ -338,8 +358,8 @@ Review windows (head / base)			*review-keymaps-diff*
 	Cursor movement in the panel alone never swaps the diff. Conversely
 	open_file scrolls the panel cursor to the row (mutual highlight:
 	selection + cursorline). Movement keys pressed from the panel
-	(<Tab>/<S-Tab>/[F/]F) return focus to the panel too (from the review
-	windows focus stays in the head window).
+	(<Tab>/<S-Tab>/[F/]F/<C-f>/<C-b>) return focus to the panel too (from
+	the review windows focus stays in the head window).
 
  comments list (cross-file)			*review-keymaps-commentlist*
 
@@ -446,10 +466,12 @@ The three review windows			*review-display-diff*
 	head window
 	  the new side of the diff = the real file itself (:edit). Editable,
 	  filetype / LSP work. Comparison with base is Neovim's standard window
-	  diff (DiffAdd / DiffChange / DiffDelete / DiffText); folds, `[c` /
-	  `]c` hunk movement and scrollbind stay standard (unmapped). Added and
-	  deleted files exit the window diff and open in plain colors; the type
-	  is told by the winbar marks (` · new file` / ` · deleted`).
+	  diff (DiffAdd / DiffChange / DiffDelete / DiffText); folds and
+	  scrollbind stay standard. `[c` / `]c` are bound to comment navigation
+	  in the review windows (the built-in hunk movement remains in your own
+	  windows). Added and deleted files exit the window diff and open in
+	  plain colors; the type is told by the winbar marks (` · new file` /
+	  ` · deleted`).
 
 	base window
 	  the read-only scratch of `git show <base>:<path>`. Added files get a

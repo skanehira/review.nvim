@@ -33,6 +33,9 @@ M.defaults = {
       prev_file = '<S-Tab>',
       first_file = '[F',
       last_file = ']F',
+      -- 前 / 次のコメントへジャンプ (head 窓のみ。端では clamp = no-op)
+      prev_comment = '[c',
+      next_comment = ']c',
       refresh = 'R',
       -- file panel へ focus (閉じていれば再建) と panel 表示トグル
       -- (閉じても tab とレビュー窓は残る)
@@ -53,6 +56,10 @@ M.defaults = {
       prev_file = '<S-Tab>',
       first_file = '[F',
       last_file = ']F',
+      -- panel に focus したまま head (diff) 窓を 1 画面分スクロール
+      -- (diff 窓で <C-f>/<C-b> を押すのと同じ。端では clamp = no-op)
+      page_down = '<C-f>',
+      page_up = '<C-b>',
       toggle_viewed = 'x',
       close = 'q',
       filter = '/',

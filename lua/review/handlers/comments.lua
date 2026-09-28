@@ -230,6 +230,69 @@ function M.view_current()
   })
 end
 
+--- `c[` / `c]`: 現在の head 窓が表示するファイル内の、カーソル行より前 / 後の
+--- コメント開始行へジャンプする (端では clamp = no-op)。コメントは
+--- session.comments が真実 (extmark は使わない)。解けない outdated (行がバッファ
+--- 外) は対象外。ジャンプ先で窓を縦中央に寄せる (zz)。
+local function jump_comment(delta)
+  local target = head_target()
+  if target == nil then
+    return
+  end
+  local line_count = vim.api.nvim_buf_line_count(target.buf)
+  local sorted = {}
+  for _, c in ipairs(target.session.comments or {}) do
+    if c.file == target.path and c.line ~= nil and c.line >= 1 and c.line <= line_count then
+      sorted[#sorted + 1] = c
+    end
+  end
+  if #sorted == 0 then
+    return
+  end
+  table.sort(sorted, function(a, b)
+    if a.line ~= b.line then
+      return a.line < b.line
+    end
+    return a.id < b.id
+  end)
+  local cur = cursor_row()
+  local target_comment = nil
+  if delta > 0 then
+    for _, c in ipairs(sorted) do
+      if c.line > cur then
+        target_comment = c
+        break
+      end
+    end
+  else
+    for i = #sorted, 1, -1 do
+      local c = sorted[i]
+      if c.line < cur then
+        target_comment = c
+        break
+      end
+    end
+  end
+  if target_comment == nil then
+    return
+  end
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_cursor(win, { target_comment.line, 0 })
+  vim.api.nvim_win_call(win, function()
+    vim.cmd 'normal! zz'
+  end)
+end
+
+--- `c[`: 前のコメントへジャンプ (head 窓のみ。先頭より上では no-op)。
+function M.prev_comment()
+  jump_comment(-1)
+end
+
+--- `c]`: 次のコメントへジャンプ (head 窓のみ。末尾より下では no-op)。
+function M.next_comment()
+  jump_comment(1)
+end
+
 --- `d`: カーソル行 (range 内) のコメントを arming 二重押しで削除 (状態定義は
 --- ファイル冒頭側)。複数該当時は保持順の最初を対象にする。
 function M.delete_current()

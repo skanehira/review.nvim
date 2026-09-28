@@ -37,6 +37,8 @@ local SECTIONS = {
       { 'prev_file', 'previous file (no-op at the edges)' },
       { 'first_file', 'first file' },
       { 'last_file', 'last file' },
+      { 'prev_comment', 'previous comment in this file (head window only; no-op at the edges)' },
+      { 'next_comment', 'next comment in this file (head window only; no-op at the edges)' },
       { 'refresh', 'refresh the diff' },
       { 'focus_panel', 'go to the file panel (changed files)' },
       {
@@ -73,6 +75,14 @@ local SECTIONS = {
       { 'prev_file', 'previous file (same rule as above)' },
       { 'first_file', 'first file (same rule as above)' },
       { 'last_file', 'last file (same rule as above)' },
+      {
+        'page_down',
+        'scroll the diff window one screen down (focus stays in the panel)',
+      },
+      {
+        'page_up',
+        'scroll the diff window one screen up (focus stays in the panel)',
+      },
       { 'refresh', 'refresh the diff (same as R in review windows)' },
       { 'toggle_style', 'toggle list view (full path 1 line) / tree view' },
       {

@@ -675,3 +675,89 @@ describe('comments y / i', function()
     assert.same({ '[1] c1  a.lua:2  ! outdated (excluded from prompt)', '  drifted' }, lines)
   end)
 end)
+
+describe('comments [c / ]c (前後のコメントへジャンプ)', function()
+  use_env()
+
+  local function seed_at(row, body)
+    focus_head_row(row)
+    comments_handler.add_normal()
+    type_into_float(body)
+  end
+
+  local function cursor_row()
+    return vim.api.nvim_win_get_cursor(state.head_win)[1]
+  end
+
+  it(
+    'c]: カーソル行より後の最初のコメント開始行へジャンプ (同行情は飛ばす)',
+    function()
+      seed_at(2, 'first')
+      seed_at(2, 'second') -- 同一行の別コメント (群)
+      seed_at(4, 'third')
+
+      focus_head_row(1)
+      comments_handler.next_comment()
+      assert.equals(2, cursor_row(), '1 -> 最初のコメント')
+
+      focus_head_row(2)
+      comments_handler.next_comment()
+      assert.equals(4, cursor_row(), '同行情の 2 件目は飛ばして次の行へ')
+
+      -- 範囲コメント: 開始行へジャンプする
+      focus_head_row(3)
+      set_visual_marks(3, 4)
+      comments_handler.add_visual_marks()
+      type_into_float 'range'
+      focus_head_row(3)
+      comments_handler.next_comment()
+      assert.equals(4, cursor_row(), '範囲コメントは開始行 (4) へ')
+    end
+  )
+
+  it('c[: カーソル行より前の最後のコメント開始行へジャンプ', function()
+    seed_at(2, 'first')
+    seed_at(4, 'second')
+
+    focus_head_row(5)
+    comments_handler.prev_comment()
+    assert.equals(4, cursor_row(), '5 -> 直前のコメント')
+
+    focus_head_row(4)
+    comments_handler.prev_comment()
+    assert.equals(2, cursor_row(), '4 -> さらに前へ')
+  end)
+
+  it(
+    '端では clamp (no-op): 先頭より上で [c / 末尾より下で ]c は何もしない',
+    function()
+      seed_at(2, 'only')
+      seed_at(4, 'second')
+
+      focus_head_row(1)
+      comments_handler.prev_comment()
+      assert.equals(1, cursor_row(), '先頭より上は no-op')
+
+      focus_head_row(5)
+      comments_handler.next_comment()
+      assert.equals(5, cursor_row(), '末尾より下は no-op')
+    end
+  )
+
+  it('base 窓では WARN してジャンプしない (head 窓のみ)', function()
+    seed_at(2, 'base check')
+    local base_win = ui_windows.win 'base'
+    vim.api.nvim_set_current_win(base_win)
+    vim.api.nvim_win_set_cursor(base_win, { 1, 0 })
+    state.notifications = {}
+
+    comments_handler.next_comment()
+    assert.equals(1, vim.api.nvim_win_get_cursor(base_win)[1], 'カーソルは動かない')
+    assert.same({
+      {
+        msg = 'review.nvim: comments are not available in this window',
+        level = vim.log.levels.WARN,
+      },
+    }, state.notifications)
+  end)
+end)

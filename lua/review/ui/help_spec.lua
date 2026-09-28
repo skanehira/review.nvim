@@ -78,6 +78,15 @@ describe('help.open', function()
     assert.is_true(has_line(lines, '- **<S-Tab>** previous file (no-op at the edges)'))
     assert.is_true(has_line(lines, '- **[F** first file'))
     assert.is_true(has_line(lines, '- **]F** last file'))
+    assert.is_true(
+      has_line(
+        lines,
+        '- **[c** previous comment in this file (head window only; no-op at the edges)'
+      )
+    )
+    assert.is_true(
+      has_line(lines, '- **]c** next comment in this file (head window only; no-op at the edges)')
+    )
     assert.is_true(has_line(lines, '- **R** refresh the diff'))
     assert.is_true(has_line(lines, '- **<F1>** this help (also opens with g?)'))
     assert.is_true(has_line(lines, '- **<leader>e** go to the file panel (changed files)'))
@@ -118,6 +127,15 @@ describe('help.open', function()
     assert.is_true(has_line(lines, '- **<S-Tab>** previous file (same rule as above)'))
     assert.is_true(has_line(lines, '- **[F** first file (same rule as above)'))
     assert.is_true(has_line(lines, '- **]F** last file (same rule as above)'))
+    assert.is_true(
+      has_line(
+        lines,
+        '- **<C-f>** scroll the diff window one screen down (focus stays in the panel)'
+      )
+    )
+    assert.is_true(
+      has_line(lines, '- **<C-b>** scroll the diff window one screen up (focus stays in the panel)')
+    )
     assert.is_true(has_line(lines, '- **R** refresh the diff (same as R in review windows)'))
     assert.is_true(has_line(lines, '- **i** toggle list view (full path 1 line) / tree view'))
     assert.is_true(has_line(lines, '- **/** filter the list (empty input clears)'))

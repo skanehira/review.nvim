@@ -1942,6 +1942,49 @@ function M.last_file()
   open_file_keep_focus(target)
 end
 
+-- `<C-f>` / `<C-b>` の共通処理: file panel に focus したまま head (diff) 窓の
+-- 表示を半ページ分スクロールする (diff 窓で <C-d>/<C-u> を押すのと同じ動き。
+-- head/base は scrollbind で連動するため base 窓も一緒に動く)。
+-- 背景窓への nvim_win_set_cursor / zt は diff 窓ではビューが進まない (カーソルは
+-- 動くが w0 が固定され、端まで押すまでスクロールしない = ユーザー報告の「何回か
+-- 押してからスクロール」の真因。fold に隠れた行へのビュースクロールが diff モード
+-- で効かない)。解決策: head を一時的に current にしてカーソルを動かし、`zv`
+-- (カーソル行が見える fold を開く) → `zt`/`zb` でビューを配置してから panel へ
+-- focus を戻す。focus は常に panel に戻る (同期実行)。
+local function scroll_diff_view(delta)
+  local hw = ui_windows.win 'head'
+  if hw == nil or not vim.api.nvim_win_is_valid(hw) then
+    return
+  end
+  local line_count = vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(hw))
+  if line_count == 0 then
+    return
+  end
+  local page = math.max(1, math.floor(vim.api.nvim_win_get_height(hw) / 2))
+  local keep = vim.api.nvim_get_current_win()
+  vim.api.nvim_set_current_win(hw)
+  local cur = vim.api.nvim_win_get_cursor(hw)[1]
+  local target = math.max(1, math.min(cur + delta * page, line_count))
+  if target == cur then
+    vim.api.nvim_set_current_win(keep)
+    return -- 端 (clamp)
+  end
+  vim.api.nvim_win_set_cursor(hw, { target, 0 })
+  vim.cmd 'normal! zv'
+  vim.cmd('normal! ' .. (delta > 0 and 'zt' or 'zb'))
+  vim.api.nvim_set_current_win(keep)
+end
+
+--- `<C-f>` (file panel): head (diff) 窓を半ページ分下へスクロール (focus は panel)。
+function M.page_down()
+  scroll_diff_view(1)
+end
+
+--- `<C-b>` (file panel): head (diff) 窓を半ページ分上へスクロール (focus は panel)。
+function M.page_up()
+  scroll_diff_view(-1)
+end
+
 --- `<leader>e`: panel へ focus を移す。窓が閉じられていた場合は左に再建し
 --- render し直す (sidebar buf は bufhidden=wipe で表示窓と共に消える — AGENTS)。
 function M.focus_sidebar()

@@ -210,6 +210,24 @@ local function run()
   local s_mark = vim.api.nvim_buf_get_extmarks(a_buf, ns, 0, -1, {})[1]
   print(('E2E-S1 body=%s line=%d'):format(body, s_mark[2] + 1))
 
+  -- [c / ]c: head 窓で前/次のコメントへジャンプ (a.lua のコメントは line 3)
+  vim.api.nvim_win_set_cursor(head_win, { 1, 0 })
+  vim.cmd 'normal ]c'
+  wait_for(function()
+    return vim.api.nvim_win_get_cursor(head_win)[1] == 3
+  end, ']c で次のコメント (line 3) へジャンプ')
+  vim.api.nvim_win_set_cursor(head_win, { 60, 0 })
+  vim.cmd 'normal [c'
+  wait_for(function()
+    return vim.api.nvim_win_get_cursor(head_win)[1] == 3
+  end, '[c で前のコメント (line 3) へジャンプ')
+  vim.api.nvim_win_set_cursor(head_win, { 1, 0 })
+  vim.cmd 'normal [c'
+  wait_for(function()
+    return vim.api.nvim_win_get_cursor(head_win)[1] == 1
+  end, '[c が先頭より上では no-op (clamp)')
+  print 'E2E-CN c[]=jump'
+
   -- winbar chrome: 窓変数 w:review_winbar のみ (b: は実ファイル窓から漏れるため使わない)
   print(
     ('E2E-W1 winbar=%s'):format(
@@ -392,6 +410,34 @@ local function run()
   wait_for(function()
     return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'a.lua'))
   end, 'コメント閲覧前の a.lua 復帰')
+
+  -- <C-f> / <C-b>: panel に focus したまま head (diff) 窓を半ページ分スクロール
+  vim.api.nvim_set_current_win(panel_win)
+  local hwin = windows.win 'head'
+  vim.api.nvim_win_set_cursor(hwin, { 1, 0 })
+  local cfb = vim.api.nvim_replace_termcodes('<C-f>', true, false, true)
+  vim.cmd('normal ' .. cfb)
+  wait_for(function()
+    return windows.role_of(vim.api.nvim_get_current_win()) == 'panel'
+      and vim.api.nvim_win_get_cursor(hwin)[1] > 1
+  end, '<C-f> で head (diff) 窓が半ページ分下へスクロール (focus は panel)')
+  local down = vim.api.nvim_win_get_cursor(hwin)[1]
+  -- ビュー (w0) も進んでいること (カーソルだけ動いてスクロールしない事故の再発防止)
+  local w0 = vim.api.nvim_win_call(hwin, function()
+    return vim.fn.line 'w0'
+  end)
+  if w0 <= 1 then
+    fail('<C-f> で head 窓のビュー (w0=' .. w0 .. ') が下へスクロールしない')
+  end
+  local cbb = vim.api.nvim_replace_termcodes('<C-b>', true, false, true)
+  vim.cmd('normal ' .. cbb)
+  wait_for(function()
+    return vim.api.nvim_win_get_cursor(hwin)[1] < down
+  end, '<C-b> で head (diff) 窓が半ページ分上へスクロール')
+  print 'E2E-PD C-f/C-b=page'
+  -- 以降の閲覧 float は head 窓起点なので focus を戻す
+  vim.api.nvim_set_current_win(head_win)
+
   vim.api.nvim_win_set_cursor(vim.api.nvim_get_current_win(), { 3, 0 })
   vim.cmd 'normal i'
   wait_for(function()

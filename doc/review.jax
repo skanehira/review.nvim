@@ -140,6 +140,8 @@ KEYMAPS						*review-keymaps_ja*
 			prev_file      = '<S-Tab>',
 			first_file     = '[F',
 			last_file      = ']F',
+			prev_comment   = '[c',   -- このファイルの前のコメント
+			next_comment   = ']c',   -- このファイルの次のコメント
 			refresh        = 'R',
 			focus_panel    = '<leader>e',
 			toggle_panel   = '<leader>b',
@@ -154,6 +156,8 @@ KEYMAPS						*review-keymaps_ja*
 			prev_file      = '<S-Tab>',
 			first_file     = '[F',
 			last_file      = ']F',
+			page_down      = '<C-f>', -- 半ページ分下へスクロール
+			page_up        = '<C-b>', -- 半ページ分上へスクロール
 			refresh        = 'R',
 			toggle_style   = 'i',    -- list ⇄ tree 表示切替
 			toggle_viewed  = 'x',
@@ -188,11 +192,12 @@ KEYMAPS						*review-keymaps_ja*
 
 	レビューは専有 tabpage の 3 窓 (file panel │ base │ head) で開く。head 窓は
 	実ファイル (`:edit`・編集可)、base 窓は `git show` の scratch。2 窓は Neovim
-	標準の窓 diff なので hunk 移動の `[c` / `]c` や fold が標準のまま効く。以下の
-	キーは head / base 窓に buffer-local で貼り、押した時点の窓 role gate を通る
-	ものだけが発火する。gate を通らない窓 (ユーザーが自分の窓で開いた同じ実
-	ファイルなど) では 1 キーストロークが built-in 動作に戻る (レビュー操作は
-	誤発火しない)。
+	標準の窓 diff なので fold が標準のまま効く。レビュー窓では `[c` / `]c` は
+	コメント移動に割り当てている (下記参照。標準の hunk 移動は自分の窓では
+	そのまま使える)。以下のキーは head / base 窓に buffer-local で貼り、押した
+	時点の窓 role gate を通るものだけが発火する。gate を通らない窓 (ユーザーが
+	自分の窓で開いた同じ実ファイルなど) では 1 キーストロークが built-in 動作に
+	戻る (レビュー操作は誤発火しない)。
 
 	c
 	  コメント作成 (head 窓のみ)。visual-line で範囲指定。base 窓・削除/
@@ -235,6 +240,12 @@ KEYMAPS						*review-keymaps_ja*
 	<S-Tab>		前のファイルを開く (上記と同じ規則)
 	[F		最初のファイルを開く (現対象が最初のとき無動作)
 	]F		最後のファイルを開く (現対象が最後のとき無動作)
+
+	[c / ]c
+	  現在のファイルの前 / 次のコメントへジャンプ (head 窓のみ。コメントの
+	  開始行へカーソルを移し、zz で窓を縦中央に寄せる)。base 窓・削除/binary
+	  告知窓では «comments are not available in this window»。端とコメント
+	  0 件では無動作
 
 	R
 	  差分を再取得 (git diff 再実行 -> 再パース -> anchor 検証 -> ±カウント・
@@ -291,6 +302,12 @@ KEYMAPS						*review-keymaps_ja*
 	<S-Tab>		前のファイル (同上)
 	[F		最初のファイル (上記と同じ規則)
 	]F		最後のファイル (上記と同じ規則)
+
+	<C-f> / <C-b>
+	  panel に focus したまま head (diff) 窓を半ページ分下 / 上へスクロール
+	  (diff 窓で <C-d>/<C-u> を押すのと同じ。base 窓は scrollbind で連動)。
+	  端では無動作
+
 	R		差分を再取得 (レビュー窓の R と同一)
 
 	i
@@ -314,8 +331,8 @@ KEYMAPS						*review-keymaps_ja*
 
 	panel のカーソル移動だけでは diff を切り替えない。逆にファイルを open_file
 	すると panel のカーソルがその行へ追従する (相互ハイライト: 選択行 +
-	cursorline)。panel から押した移動キー (<Tab>/<S-Tab>/[F/]F) も focus を
-	panel に残す (レビュー窓から押したときは head 窓に残る)。
+	cursorline)。panel から押した移動キー (<Tab>/<S-Tab>/[F/]F/<C-f>/<C-b>) も
+	focus を panel に残す (レビュー窓から押したときは head 窓に残る)。
 
  コメント一覧 (横断)			*review-keymaps-commentlist_ja*
 
@@ -412,8 +429,9 @@ outdated 認定 (差分の揺れで対象行を特定できないコメント) �
 	head 窓
 	  差分の new 側 = 実ファイルそのもの (:edit)。編集可・filetype / LSP が
 	  効く。base との比較は Neovim 標準の窓 diff (DiffAdd / DiffChange /
-	  DiffDelete / DiffText) で、fold・`[c` / `]c` hunk 移動・scrollbind は
-	  標準のまま (マップしていない)。追加・削除ファイルは窓 diff を無効化
+	  DiffDelete / DiffText) で、fold・scrollbind は標準のまま。`[c` / `]c`
+	  はレビュー窓ではコメント移動に割り当てている (標準の hunk 移動は
+	  自分の窓ではそのまま使える)。追加・削除ファイルは窓 diff を無効化
 	  して素の色で開き、種別は winbar のマーク (` · new file` / ` ·
 	  deleted`) で判別する。
 

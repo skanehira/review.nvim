@@ -189,6 +189,8 @@ describe('keygate.install / uninstall', function()
       k.prev_file,
       k.first_file,
       k.last_file,
+      k.prev_comment,
+      k.next_comment,
       k.refresh,
       k.focus_panel,
       k.toggle_panel,
@@ -309,11 +311,11 @@ describe('keygate.install / uninstall', function()
           ours = ours + 1
         end
       end
-      -- config.keymaps.diff の n -mode 全キー = 17 (c/e/d/D/<Esc>/y/i/q/<F1>/<Tab>/
-      -- <S-Tab>/[F/]F/R/<leader>e/<leader>b/<leader>c) + g? 別名 = 18。v の c は別 mode。
+      -- config.keymaps.diff の n -mode 全キー = 19 (c/e/d/D/<Esc>/y/i/q/<F1>/<Tab>/
+      -- <S-Tab>/[F/]F/c[/c]/R/<leader>e/<leader>b/<leader>c) + g? 別名 = 20。v の c は別 mode。
       -- focus_panel / toggle_panel / comments_list / help (<F1>・g?) は非 expr の
       -- callback map (同期発火) で数える。
-      assert.equals(18, ours)
+      assert.equals(20, ours)
     end
   )
 
@@ -557,15 +559,31 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       vim.api.nvim_win_set_buf(state.user_win, head_buf)
       vim.api.nvim_set_current_win(state.user_win)
       -- 特キーは fallback が nvim_replace_termcodes 変換済みで返す契約 (変換除去の
-      -- 変異を検出するため特キー含めキーごとに完全一致。'<Tab>' 素戻しは <Tab> でない)
+      -- 変異を検出するため特キー含めキーごとに完全一致。'<Tab>' 素戻しは <Tab> でない)。
+      -- expr 系 (<Tab>/<S-Tab>/R) は返り値で元キーを返し、非 expr callback 系
+      -- ([F/]F) は restore_builtin で feedkeys 再投入する (返り値は nil — 検証は
+      -- restore_builtin の引数で contract を pin)。
+      local restore_got = {}
+      local restore_real = keygate.restore_builtin
+      keygate.restore_builtin = function(keys)
+        table.insert(restore_got, keys)
+      end
+      finally_restore(function()
+        keygate.restore_builtin = restore_real
+      end)
       for _, key in ipairs { '<Tab>', '<S-Tab>', '[F', ']F', 'R' } do
         state.notifications = {}
         local res = press(head_buf, key, state.user_win)
-        assert.equals(
-          vim.api.nvim_replace_termcodes(key, true, false, true),
-          res,
-          key .. ' の fallback が built-in へ返らない'
-        )
+        if key == '[F' or key == ']F' then
+          assert.same({ vim.api.nvim_replace_termcodes(key, true, false, true) }, restore_got)
+          restore_got = {}
+        else
+          assert.equals(
+            vim.api.nvim_replace_termcodes(key, true, false, true),
+            res,
+            key .. ' の fallback が built-in へ返らない'
+          )
+        end
         vim.wait(100, function()
           for _, n in ipairs(state.notifications) do
             if n.msg:find('SPY:', 1, true) ~= nil then
