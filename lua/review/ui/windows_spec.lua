@@ -109,13 +109,15 @@ describe('windows.open: 専有 tab 3 窓の開通', function()
     assert.equals(windows.win 'head', vim.api.nvim_get_current_win())
   end)
 
-  it('panel 窓幅は config.panel_width + winfixwidth', function()
+  it('panel 窓幅は config.panel_width + winfixwidth + wrap=off', function()
     local config = require 'review.config'
     config.setup { panel_width = 27 }
     windows.open { dir = OTHER_DIR, on_tab_closed = function() end }
     local sb = windows.win 'panel'
     assert.equals(27, vim.api.nvim_win_get_width(sb))
     assert.equals(true, vim.wo[sb].winfixwidth)
+    -- 長いフルパスを折り返さない (wrap は窓ローカル)
+    assert.equals(false, vim.wo[sb].wrap)
   end)
 
   it(

@@ -87,6 +87,9 @@ function M.open(opts)
 
   vim.api.nvim_win_set_config(panel_win, { width = config.get().panel_width })
   vim.wo[panel_win].winfixwidth = true
+  -- panel 窓は長いフルパスを折り返さない (wrap は窓ローカル — DESIGN「既知の
+  -- 制約」の panel wrap=off 契約。filepanel の render は buffer なので設定できない)
+  vim.wo[panel_win].wrap = false
   -- base/head 窓 opts は bind 側 (buf を張るとき) に適用する。開通直後の
   -- 空 [No Name] 共有窓に foldmethod=diff を当てると、その後の set_buf で
   -- diff fold の再計算が効かず foldclosed() が永久に -1 になる (0.13 実測。
@@ -366,6 +369,7 @@ function M.show_panel(buf)
   pw = st.panel_win
   vim.api.nvim_win_set_config(pw, { width = config.get().panel_width })
   vim.wo[pw].winfixwidth = true
+  vim.wo[pw].wrap = false
   if buf ~= nil then
     M.set_panel_buf(buf)
   end
