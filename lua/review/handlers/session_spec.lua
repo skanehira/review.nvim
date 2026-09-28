@@ -5014,16 +5014,20 @@ describe('file panel ツリー / view state (issue-17)', function()
   )
 
   it(
-    '<C-f> / <C-b> (page_down / page_up): panel に focus したまま head (diff) 窓を 1 画面分スクロール',
+    '<C-f> / <C-b> (page_down / page_up): panel に focus したまま head (diff) 窓を半ページ分スクロール (fold は変えない)',
     function()
-      -- 長い a.lua を用意して head 窓のスクロールを検証 (60 行)
-      local f = io.open(vim.fs.joinpath(state.repo, 'a.lua'), 'w')
+      -- 40 行・20 行目のみ変更の a.lua を用意する (windows_spec の陽性対照と同じ
+      -- 形状: 窓 diff の fold が確実に閉じる帯 = hunk の foldcontext の外)。
       local lines = {}
-      for i = 1, 60 do
-        lines[i] = 'line' .. i
+      for i = 1, 40 do
+        lines[i] = 'l' .. i
       end
-      lines[2] = 'LINE3-changed'
-      lines[59] = 'LINE60-changed'
+      lines[20] = 'CHANGED-20'
+      local base_lines = {}
+      for i = 1, 40 do
+        base_lines[i] = 'l' .. i
+      end
+      local f = io.open(vim.fs.joinpath(state.repo, 'a.lua'), 'w')
       f:write(table.concat(lines, '\n') .. '\n')
       f:close()
       local raw = table.concat({
@@ -5031,15 +5035,9 @@ describe('file panel ツリー / view state (issue-17)', function()
         'index 1111111..2222222 100644',
         '--- a/a.lua',
         '+++ b/a.lua',
-        '@@ -1,3 +1,3 @@',
-        ' line1',
-        '-line2',
-        '+LINE3-changed',
-        ' line3',
-        '@@ -59,2 +59,2 @@',
-        ' line59',
-        '-line60',
-        '+LINE60-changed',
+        '@@ -20,1 +20,1 @@',
+        '-l20',
+        '+CHANGED-20',
         '',
       }, '\n')
       install_git {
@@ -5051,7 +5049,7 @@ describe('file panel ツリー / view state (issue-17)', function()
         end,
         function(cmd)
           assert.same({ 'git', 'show', 'main:a.lua' }, cmd)
-          return { code = 0, stdout = table.concat(lines, '\n') .. '\n', stderr = '' }
+          return { code = 0, stdout = table.concat(base_lines, '\n') .. '\n', stderr = '' }
         end,
       }
       session_handler.start { base = 'main', head = 'feature' }
@@ -5060,6 +5058,27 @@ describe('file panel ツリー / view state (issue-17)', function()
       vim.api.nvim_win_set_cursor(hw, { 1, 0 })
       vim.api.nvim_set_current_win(pw)
       vim.api.nvim_win_set_cursor(pw, { 1, 0 })
+
+      -- fold 状態の pin: 窓 diff の fold (hunk の foldcontext の外の帯) を閉じ、
+      -- スクロール後も不変であることを確認する (旧実装の zv は押下ごとにカーソル
+      -- 位置の fold を開いていた = 折りたたみが崩れる副作用)。スクロールコマンド
+      -- (<C-e>/<C-y>) は fold 状態を一切変えない。foldclosed は窓ローカルなので
+      -- head 窓を nvim_win_call で明示する (current は panel)。
+      local function fold_state()
+        return vim.api.nvim_win_call(hw, function()
+          local s = {}
+          for l = 1, 40 do
+            local fc = vim.fn.foldclosed(l)
+            if fc >= 1 then
+              s[#s + 1] = fc
+            end
+          end
+          return s
+        end)
+      end
+      local before = fold_state()
+      -- 陽性対照: 窓 diff の fold が実際に閉じていること (空なら検証が無効)
+      assert.is_true(#before > 0, '窓 diff の fold が閉じていない (検証無効)')
 
       session_handler.page_down()
       assert.equals(
@@ -5072,18 +5091,13 @@ describe('file panel ツリー / view state (issue-17)', function()
         return vim.fn.line 'w0'
       end)
       assert.is_true(
-        row > 1,
-        'head 窓のカーソルが下へ動いていない (row=' .. row .. ')'
-      )
-      assert.is_true(
         w0 > 1,
         'head 窓のビューが下へスクロールしていない (w0=' .. w0 .. ')'
       )
-      assert.equals(
-        row,
-        w0,
-        'zt でカーソル行が窓先頭 (row=' .. row .. ' w0=' .. w0 .. ')'
-      )
+      -- カーソルは画面外に出ないよう追従する (スクロールコマンドの標準挙動。
+      -- 旧実装の zt による「カーソル行を窓先頭に」とは違う)
+      assert.is_true(row > 1, 'head 窓のカーソルが追従していない (row=' .. row .. ')')
+      assert.same(before, fold_state(), 'page_down が fold 状態を変えた')
 
       session_handler.page_up()
       assert.equals(
@@ -5091,11 +5105,11 @@ describe('file panel ツリー / view state (issue-17)', function()
         ui_windows.role_of(vim.api.nvim_get_current_win()),
         'focus は panel に残る'
       )
-      local row2 = vim.api.nvim_win_get_cursor(hw)[1]
-      assert.is_true(
-        row2 < row,
-        'head 窓が上へスクロールしていない (row=' .. row2 .. ')'
-      )
+      local w0b = vim.api.nvim_win_call(hw, function()
+        return vim.fn.line 'w0'
+      end)
+      assert.is_true(w0b < w0, 'head 窓のビューが上へ戻っていない (w0=' .. w0b .. ')')
+      assert.same(before, fold_state(), 'page_up が fold 状態を変えた')
     end
   )
 

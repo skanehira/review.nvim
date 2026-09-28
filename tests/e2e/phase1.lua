@@ -450,7 +450,6 @@ local function run()
     return windows.role_of(vim.api.nvim_get_current_win()) == 'panel'
       and vim.api.nvim_win_get_cursor(hwin)[1] > 1
   end, '<C-f> で head (diff) 窓が半ページ分下へスクロール (focus は panel)')
-  local down = vim.api.nvim_win_get_cursor(hwin)[1]
   -- ビュー (w0) も進んでいること (カーソルだけ動いてスクロールしない事故の再発防止)
   local w0 = vim.api.nvim_win_call(hwin, function()
     return vim.fn.line 'w0'
@@ -460,9 +459,13 @@ local function run()
   end
   local cbb = vim.api.nvim_replace_termcodes('<C-b>', true, false, true)
   vim.cmd('normal ' .. cbb)
+  -- スクロールコマンド (<C-y>) はビューポートだけを戻す (カーソルは画面内に
+  -- 残る範囲で動かない)。w0 が戻ることを見る。
   wait_for(function()
-    return vim.api.nvim_win_get_cursor(hwin)[1] < down
-  end, '<C-b> で head (diff) 窓が半ページ分上へスクロール')
+    return vim.api.nvim_win_call(hwin, function()
+      return vim.fn.line 'w0'
+    end) < w0
+  end, '<C-b> で head (diff) 窓のビューが半ページ分上へスクロール')
   print 'E2E-PD C-f/C-b=page'
   -- 以降の閲覧 float は head 窓起点なので focus を戻す
   vim.api.nvim_set_current_win(head_win)

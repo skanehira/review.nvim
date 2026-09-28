@@ -1,4 +1,5 @@
 <!-- product-mode: cli -->
+<!-- 変更履歴 [2026-09-28]: panel <C-f>/<C-b> のスクロールを <C-e>/<C-y> スクロールコマンド方式へ変更 (set_cursor + zv + zt/zb 撤廃 = fold 状態を変えない。diffview.nvim の scroll_view と同方式) -->
 <!-- 変更履歴 [2026-09-28]: セッション開始 (start / 復元) の初期開きを「パネル表示順先頭ファイル」へ変更し、開通後も focus を file panel に置く (diffview と同じ開始姿勢) -->
 <!-- 変更履歴 [2026-09-20]: file panel 移動系 (<Tab>/<S-Tab>/[F/]F) も panel 起点では focus を panel に維持 (head/base 窓起点は head に残る) -->
 <!-- 変更履歴 [2026-09-18]: file panel <CR>/o/l の focus を panel 維持へ変更 (diff 窓へは移動系と標準の窓移動で移る) -->
@@ -152,7 +153,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | head/base 窓 | `<F1>` / `g?` | help float (内容は markdown。`g?` は config を持たない固定の別名で `<F1>` と同一呼び出し) |
 | file panel | `<CR>` / `o` / `l` | カーソル entry を開く (ファイル = 実ファイル窓に張るが focus とカーソルは file panel に維持、dir = fold トグル)。file panel 上の `o` は «開く» (旧 diff 窓の `o` = 実ファイル別 tab は 2026-09 削除 — head 窓が実ファイルそのもののため) |
 | file panel | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (panel 起点では開いたあとも focus とカーソルを panel に維持 — `<CR>` と同一。head/base 窓起点では focus は head 窓に残る) |
-| file panel | `<C-f>` / `<C-b>` | panel に focus したまま head (diff) 窓を半ページ分下 / 上へスクロール (diff 窓で `<C-d>`/`<C-u>` を押すのと同じ。base 窓は scrollbind で連動。**背景窓への `nvim_win_set_cursor` + `zt`/`zb` は diff 窓でビューが進まない** — カーソルは動くが w0 が固定され端まで押すまでスクロールしない (ユーザー報告「何回か押してからスクロール」)。解決: head を一時的に current にし、カーソルを動かし、`zv` (カーソル行が見える fold を開く — diff の閉じた fold がビュースクロールを妨げるため) → `zt`/`zb` で配置して panel へ focus を戻す。端は無動作 = clamp) |
+| file panel | `<C-f>` / `<C-b>` | panel に focus したまま head (diff) 窓を半ページ分下 / 上へスクロール (diff 窓で `<C-d>`/`<C-u>` を押すのと同じ。base 窓は scrollbind で連動。実装は diffview.nvim の `scroll_view` と同方式 = `<C-e>`/`<C-y>` スクロールコマンドを head 窓へ `nvim_win_call` で発火 — カーソルを動かさずビューポートだけを動かし、**fold 状態を一切変えない** (旧実装の `nvim_win_set_cursor` + `zv` + `zt`/`zb` は diff モードでビューが進まない実測があり、`zv` が押下ごとにカーソル位置の fold を開く副作用があった)。カーソルは画面外に出そうなときだけ追従。端は無動作 = clamp) |
 | file panel | `i` | list 表示 (フルパス 1 行) と tree 表示の切替 (view state。session JSON に載せない) |
 | file panel | `x` | viewed 切替 = ファイルを Changes ⇄ Reviewed セクション間で移動 (open / 移動系では決して Reviewed に移らない。dir / ヘッダ行は無動作)。カーソルは移動したファイルを追わず表示順の次のファイルを指す (最後なら先頭へ) |
 | file panel | `/` | 絞り込み (大文字小文字無視の path 部分一致。空入力 = 解除、キャンセル = 現状維持。`<Tab>`/`[F`/`]F` と `<CR>` は絞り込み後の集合だけを辿る) |
