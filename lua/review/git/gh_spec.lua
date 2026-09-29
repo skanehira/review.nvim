@@ -246,11 +246,32 @@ describe('git/gh api 一覧系 (引数組み立て + JSON 変換)', function()
   end)
 end)
 
-describe('git/gh api 書き込み系 (引数組み立て)', function()
+describe('git/gh api 書き込み系 (JSON body を --input で渡す)', function()
   use_env()
 
-  it('create_review_comment は新規行コメントを POST (body/path/line)', function()
-    stub_exit { code = 0, stdout = '{"id":50,"body":"ok"}', stderr = '' }
+  -- 書き込み系は gh api の -f/-F フォームが整数を文字列化して 422 になる実測のため、
+  -- JSON body を一時ファイルに書いて --input で渡す。ここではファイル内容を読んで
+  -- (cmd, payload) を記録し、応答を返す。
+  local function install_write(response_stdout)
+    state.calls = {}
+    cli._set_system(function(cmd, _opts, on_exit)
+      local payload = nil
+      for i = 1, #cmd - 1 do
+        if cmd[i] == '--input' then
+          local f = io.open(cmd[i + 1], 'r')
+          if f ~= nil then
+            payload = vim.json.decode(f:read '*a')
+            f:close()
+          end
+        end
+      end
+      table.insert(state.calls, { cmd = cmd, payload = payload })
+      on_exit { code = 0, stdout = response_stdout, stderr = '' }
+    end)
+  end
+
+  it('create_review_comment は新規行コメントを JSON で POST (body/path/line)', function()
+    install_write '{"id":50,"body":"ok"}'
     local received
     gh.create_review_comment({
       repo = REPO,
@@ -261,45 +282,30 @@ describe('git/gh api 書き込み系 (引数組み立て)', function()
     }, function(res)
       received = res
     end)
-    assert.same({
-      'gh',
-      'api',
-      '--method',
-      'POST',
-      'repos/acme/demo/pulls/7/comments',
-      '-F',
-      'body=use insert',
-      '-F',
-      'path=src/a.lua',
-      '-f',
-      'line=12',
-    }, state.calls[1].cmd)
+    local c = state.calls[1]
+    assert.same(
+      { 'gh', 'api', '--method', 'POST', 'repos/acme/demo/pulls/7/comments', '--input' },
+      { c.cmd[1], c.cmd[2], c.cmd[3], c.cmd[4], c.cmd[5], c.cmd[6] }
+    )
+    assert.is_string(c.cmd[7]) -- --input の一時ファイル名
+    assert.same({ body = 'use insert', path = 'src/a.lua', line = 12 }, c.payload)
     assert.equals(50, received.data.id)
   end)
 
   it('create_review_comment は in_reply_to 指定で返信 POST (他 params 無し)', function()
-    stub_exit { code = 0, stdout = '{"id":51}', stderr = '' }
+    install_write '{"id":51}'
     gh.create_review_comment({
       repo = REPO,
       number = 7,
       body = 'reply text',
       in_reply_to = 101,
     }, function() end)
-    assert.same({
-      'gh',
-      'api',
-      '--method',
-      'POST',
-      'repos/acme/demo/pulls/7/comments',
-      '-F',
-      'body=reply text',
-      '-f',
-      'in_reply_to=101',
-    }, state.calls[1].cmd)
+    assert.same({ body = 'reply text', in_reply_to = 101 }, state.calls[1].payload)
+    assert.matches('pulls/7/comments', table.concat(state.calls[1].cmd, ' '))
   end)
 
   it('create_review_comment は subject_type=file でファイルレベルを POST', function()
-    stub_exit { code = 0, stdout = '{"id":52}', stderr = '' }
+    install_write '{"id":52}'
     gh.create_review_comment({
       repo = REPO,
       number = 7,
@@ -307,67 +313,61 @@ describe('git/gh api 書き込み系 (引数組み立て)', function()
       subject_type = 'file',
       body = 'file note',
     }, function() end)
-    assert.same({
-      'gh',
-      'api',
-      '--method',
-      'POST',
-      'repos/acme/demo/pulls/7/comments',
-      '-F',
-      'body=file note',
-      '-F',
-      'path=src/a.lua',
-      '-f',
-      'subject_type=file',
-    }, state.calls[1].cmd)
+    assert.same(
+      { body = 'file note', path = 'src/a.lua', subject_type = 'file' },
+      state.calls[1].payload
+    )
   end)
 
-  it('create_review は event (+body) を POST', function()
-    stub_exit { code = 0, stdout = '{"id":9,"state":"APPROVED"}', stderr = '' }
+  it('create_review は event (+body) を JSON で POST', function()
+    install_write '{"id":9,"state":"APPROVED"}'
     local received
     gh.create_review({ repo = REPO, number = 7, event = 'APPROVE', body = 'lgtm' }, function(res)
       received = res
     end)
-    assert.same({
-      'gh',
-      'api',
-      '--method',
-      'POST',
-      'repos/acme/demo/pulls/7/reviews',
-      '-f',
-      'event=APPROVE',
-      '-F',
-      'body=lgtm',
-    }, state.calls[1].cmd)
+    assert.same({ event = 'APPROVE', body = 'lgtm' }, state.calls[1].payload)
+    assert.matches('pulls/7/reviews', table.concat(state.calls[1].cmd, ' '))
     assert.equals('APPROVED', received.data.state)
   end)
 
-  it('create_review は body 省略時 body フラグを付けない', function()
-    stub_exit { code = 0, stdout = '{}', stderr = '' }
+  it('create_review は body 省略時 body キーを載せない', function()
+    install_write '{}'
     gh.create_review({ repo = REPO, number = 7, event = 'COMMENT' }, function() end)
-    assert.same({
-      'gh',
-      'api',
-      '--method',
-      'POST',
-      'repos/acme/demo/pulls/7/reviews',
-      '-f',
-      'event=COMMENT',
-    }, state.calls[1].cmd)
+    assert.same({ event = 'COMMENT' }, state.calls[1].payload)
   end)
 
-  it('submit_review は PUT pulls/{n}/reviews/{id}', function()
-    stub_exit { code = 0, stdout = '{"state":"APPROVED"}', stderr = '' }
-    gh.submit_review({ repo = REPO, number = 7, review_id = 3, event = 'APPROVE' }, function() end)
+  it('create_review は comments 配列 (行コメント) を JSON に載せる', function()
+    install_write '{"id":9,"state":"COMMENTED"}'
+    gh.create_review({
+      repo = REPO,
+      number = 7,
+      event = 'COMMENT',
+      body = 'summary',
+      comments = { { path = 'a.lua', line = 12, body = 'note' } },
+    }, function() end)
     assert.same({
-      'gh',
-      'api',
-      '--method',
-      'PUT',
-      'repos/acme/demo/pulls/7/reviews/3',
-      '-f',
-      'event=APPROVE',
-    }, state.calls[1].cmd)
+      event = 'COMMENT',
+      body = 'summary',
+      comments = { { path = 'a.lua', line = 12, body = 'note' } },
+    }, state.calls[1].payload)
+    assert.matches('pulls/7/reviews', table.concat(state.calls[1].cmd, ' '))
+  end)
+
+  it('list_review_comments_by_review は GET /reviews/{id}/comments', function()
+    stub_exit {
+      code = 0,
+      stdout = '[{"id":61,"path":"a.lua","line":12,"body":"note"}]',
+      stderr = '',
+    }
+    local received
+    gh.list_review_comments_by_review({ repo = REPO, number = 7, review_id = 9 }, function(res)
+      received = res
+    end)
+    assert.same(
+      { 'gh', 'api', 'repos/acme/demo/pulls/7/reviews/9/comments', '--paginate' },
+      state.calls[1].cmd
+    )
+    assert.equals(61, received.data[1].id)
   end)
 
   it('api 書き込みの未 auth 失敗は E_GH に変換する', function()

@@ -58,17 +58,31 @@ local function use_env()
     -- git は branch セッション開始に必要な最小応答
     cli._set_system(function(cmd, _opts, on_exit)
       if cmd[1] == 'gh' and cmd[2] == 'api' then
-        table.insert(state.gh_calls, cmd)
         local line = table.concat(cmd, ' ')
+        local payload = nil
+        for i = 1, #cmd - 1 do
+          if cmd[i] == '--input' then
+            local fh = io.open(cmd[i + 1], 'r')
+            if fh ~= nil then
+              payload = vim.json.decode(fh:read '*a')
+              fh:close()
+            end
+          end
+        end
+        table.insert(state.gh_calls, { cmd = cmd, payload = payload })
         if line:find('/comments', 1, true) and cmd[3] == '--method' and cmd[4] == 'POST' then
           if line:find('/issues/', 1, true) then
             on_exit { code = 0, stdout = '{"id":300}', stderr = '' }
           else
-            on_exit { code = 0, stdout = '{"id":200,"pull_request_review_id":9}', stderr = '' }
+            on_exit { code = 0, stdout = '{"id":201,"pull_request_review_id":9}', stderr = '' }
           end
+        elseif line:find('reviews/9/comments', 1, true) then
+          on_exit {
+            code = 0,
+            stdout = '[{"id":200,"path":"a.lua","line":2,"body":"new note"}]',
+            stderr = '',
+          }
         elseif line:find('/reviews', 1, true) and cmd[3] == '--method' and cmd[4] == 'POST' then
-          on_exit { code = 0, stdout = '{"id":9,"state":"APPROVED"}', stderr = '' }
-        elseif line:find('/reviews/9', 1, true) and cmd[3] == '--method' and cmd[4] == 'PUT' then
           on_exit { code = 0, stdout = '{"id":9,"state":"APPROVED"}', stderr = '' }
         else
           on_exit { code = 0, stdout = '[]', stderr = '' }
@@ -169,18 +183,23 @@ describe('handlers/submit submit_review', function()
 
       submit_handler.submit_review()
 
-      -- push 順: c1 (root, POST comments), c2 (reply, POST comments), g1 (POST issues comments),
-      -- submit (PUT reviews/9)
+      -- 順序: 1) create_review (行 root を comments で 1 レビュー submit)
+      --       2) GET /reviews/9/comments (gh_id 対応付け)
+      --       3) reply を POST /comments (in_reply_to)
+      --       4) general を POST /issues/comments
       local calls = state.gh_calls
       assert.equals(4, #calls)
-      assert.matches('pulls/7/comments', table.concat(calls[1], ' '))
-      assert.matches('in_reply_to=101', table.concat(calls[2], ' '))
-      assert.matches('issues/7/comments', table.concat(calls[3], ' '))
-      assert.matches('reviews/9', table.concat(calls[4], ' '))
-      assert.matches('event=APPROVE', table.concat(calls[4], ' '))
-      -- gh_id が記録される
+      assert.matches('pulls/7/reviews', table.concat(calls[1].cmd, ' '))
+      assert.equals('APPROVE', calls[1].payload.event)
+      assert.equals('lgtm', calls[1].payload.body)
+      assert.same({ { path = 'a.lua', line = 2, body = 'new note' } }, calls[1].payload.comments)
+      assert.matches('reviews/9/comments', table.concat(calls[2].cmd, ' '))
+      assert.matches('pulls/7/comments', table.concat(calls[3].cmd, ' '))
+      assert.equals(101, calls[3].payload.in_reply_to) -- 返信は in_reply_to (数値)
+      assert.matches('issues/7/comments', table.concat(calls[4].cmd, ' '))
+      -- gh_id が記録される (root は review comments の対応付け / reply・general は応答)
       assert.equals(200, state.session.comments[1].gh_id)
-      assert.equals(200, state.session.comments[2].gh_id)
+      assert.equals(201, state.session.comments[2].gh_id)
       assert.equals(300, state.session.general[1].gh_id)
       assert.equals(1, refreshed)
       assert.is_true(
@@ -199,10 +218,47 @@ describe('handlers/submit submit_review', function()
     )
   end)
 
-  it('root の push 失敗は WARN して pending を保持し submit へ進まない', function()
-    state.session.comments = {
-      { id = 'c1', file = 'a.lua', line = 2, end_line = 2, body = 'x', origin = 'local' },
-    }
+  it(
+    'バッチ submit の失敗は WARN して pending を保持し以後へ進まない',
+    function()
+      state.session.comments = {
+        { id = 'c1', file = 'a.lua', line = 2, end_line = 2, body = 'x', origin = 'local' },
+      }
+      local refreshed = 0
+      session_handler.refresh = function()
+        refreshed = refreshed + 1
+      end
+      vim.ui.select = function(_items, _opts, cb)
+        cb 'COMMENT'
+      end
+      vim.ui.input = function(_opts, cb)
+        cb ''
+      end
+      -- バッチ (POST /reviews) を失敗させる
+      cli._set_system(function(cmd, _opts, on_exit)
+        if cmd[1] == 'gh' and cmd[2] == 'api' then
+          table.insert(state.gh_calls, { cmd = cmd })
+          if table.concat(cmd, ' '):find('pulls/7/reviews', 1, true) then
+            on_exit { code = 1, stdout = '', stderr = 'gh: Validation Failed (HTTP 422)\n' }
+            return
+          end
+        end
+        on_exit { code = 0, stdout = '[]', stderr = '' }
+      end)
+
+      submit_handler.submit_review()
+
+      assert.is_true(state.notifications[1].msg:find('failed to submit the review', 1, true) ~= nil)
+      assert.is_nil(state.session.comments[1].gh_id) -- pending 保持
+      assert.equals(0, refreshed)
+      -- 以後へ進まない (POST /reviews の 1 回だけ)
+      assert.equals(1, #state.gh_calls)
+    end
+  )
+
+  it('行 root が無い場合は event + body の判定レビューのみ確定する', function()
+    state.session.comments = {}
+    state.session.general = { { id = 'g1', origin = 'local', body = 'general reply' } }
     local refreshed = 0
     session_handler.refresh = function()
       refreshed = refreshed + 1
@@ -211,26 +267,16 @@ describe('handlers/submit submit_review', function()
       cb 'COMMENT'
     end
     vim.ui.input = function(_opts, cb)
-      cb ''
+      cb 'summary only'
     end
-    -- 最初の POST comments を失敗させる
-    cli._set_system(function(cmd, _opts, on_exit)
-      if cmd[1] == 'gh' and cmd[2] == 'api' then
-        table.insert(state.gh_calls, cmd)
-        if table.concat(cmd, ' '):find('pulls/7/comments', 1, true) then
-          on_exit { code = 1, stdout = '', stderr = 'gh: Validation Failed (HTTP 422)\n' }
-          return
-        end
-      end
-      on_exit { code = 0, stdout = '[]', stderr = '' }
-    end)
 
     submit_handler.submit_review()
 
-    assert.is_true(state.notifications[1].msg:find('failed to push comment c1', 1, true) ~= nil)
-    assert.is_nil(state.session.comments[1].gh_id) -- pending 保持
-    assert.equals(0, refreshed)
-    -- submit へ進まない (POST comments の 1 回だけ)
-    assert.equals(1, #state.gh_calls)
+    local calls = state.gh_calls
+    assert.equals(2, #calls)
+    assert.matches('pulls/7/reviews', table.concat(calls[1].cmd, ' '))
+    assert.same({ event = 'COMMENT', body = 'summary only' }, calls[1].payload)
+    assert.matches('issues/7/comments', table.concat(calls[2].cmd, ' '))
+    assert.equals(1, refreshed)
   end)
 end)

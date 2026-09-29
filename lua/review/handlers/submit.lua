@@ -1,14 +1,17 @@
 -- レビュー submit (pr-comments「submit フロー」)。mode=pr セッションの
 -- local pending コメント (インライン / ファイルレベル / 一般) を GitHub へ push し、
 -- レビューを event (COMMENT / APPROVE / REQUEST_CHANGES) + 任意のサマリ本文で
--- 確定する。GitHub の「pending review → submit」モデルを再現する:
---   1. 新規スレッドの pending を先に create_review_comment (path + line / file)
---   2. 返信 (in_reply_to) を create_review_comment — 根がローカルのときは
---      1 で採番された gh_id へ解決する
---   3. 一般コメントの pending を create_issue_comment
---   4. 作成された pending review を submit_review (event + body) で確定
---      (コメントが 1 件も無い場合は create_review で event のみ確定)
---   5. 完了後に差分再取得 (session.refresh) で gh 状態へ突合 (pending 表示が消える)
+-- 確定する。GitHub の「pending 蓄積 → submit で一括確定」を REST で実現する:
+--   1. 新規スレッドの行コメントは create_review の comments 配列に載せて
+--      event + body と一緒に 1 回のレビューとして submit する (GitHub の
+--      PR レビュー画面と同じ: コメント + 判定 + サマリが 1 レビューになる)。
+--      作成されたコメントの gh_id は GET /reviews/{id}/comments で対応付ける。
+--   2. ファイルレベル (subject_type=file) と返信 (in_reply_to) は batch の
+--      comments 配列に載せられない (GitHub スキーマ制約) ため、個別に
+--      create_review_comment で POST する (返信はスレッド継承で submitted)。
+--   3. 一般コメントの pending は create_issue_comment で POST する。
+--   4. 行コメントが 1 件も無いときは create_review (event + body) で判定だけ確定。
+--   5. 完了後に session.refresh (差分 + gh 再取り込み) で pending 表示を解消する。
 -- 失敗時は WARN し、未 push の pending は保持する (再試行可)。
 local gh = require 'review.git.gh'
 local pr_comments = require 'review.handlers.pr_comments'
@@ -33,10 +36,9 @@ local function local_gh_id(comments, id)
   return nil
 end
 
--- pending コメント 1 件を push する。replies は in_reply_to 解決済みの gh_id で、
--- roots は path (+line / file) で作る。成功でコメントに gh_id を記録し、
--- created (レビュー comment の配列) へ追記。失敗は cb(false)。
-local function push_one(session, repo, number, c, created, cb)
+-- レビューコメント 1 件を個別 POST する (ファイルレベル / 返信)。
+-- 成功でコメントに gh_id を記録する。失敗は cb(false)。
+local function push_one(session, repo, number, c, cb)
   local opts = { repo = repo, number = number, body = c.body }
   if c.in_reply_to ~= nil then
     local target = c.in_reply_to
@@ -53,11 +55,7 @@ local function push_one(session, repo, number, c, created, cb)
     opts.in_reply_to = target
   else
     opts.path = c.file
-    if c.subject_type == 'file' then
-      opts.subject_type = 'file'
-    else
-      opts.line = c.line
-    end
+    opts.subject_type = 'file' -- ファイルレベル (line 不要)
   end
   gh.create_review_comment(opts, function(res)
     if not res.ok then
@@ -66,24 +64,23 @@ local function push_one(session, repo, number, c, created, cb)
       return
     end
     c.gh_id = res.data.id
-    created[#created + 1] = res.data
     cb(true)
   end)
 end
 
-local function push_all(session, repo, number, pending, cb)
-  if #pending == 0 then
+-- リストを直列に個別 POST する (中断時 cb(false))。
+local function push_sequence(session, repo, number, list, cb)
+  if #list == 0 then
     cb(true)
     return
   end
-  local created = {}
   local i = 1
   local function next_step()
-    if i > #pending then
-      cb(true, created)
+    if i > #list then
+      cb(true)
       return
     end
-    push_one(session, repo, number, pending[i], created, function(ok)
+    push_one(session, repo, number, list[i], function(ok)
       if not ok then
         cb(false)
         return
@@ -121,8 +118,29 @@ local function push_general(repo, number, pending, cb)
   next_step()
 end
 
--- 確定フロー本体。pending を push し、その pending review (または event のみ) を
--- submit し、完了で session.refresh (差分 + gh コメント再取り込み) を走らせる。
+-- バッチ submit した行コメントの gh_id を、そのレビューに属するコメント一覧と
+-- (path, line, body) で対応付ける (local の pending を解消するため)。
+local function match_review_comment_ids(review_comments, line_roots)
+  local roots = {}
+  for _, c in ipairs(line_roots) do
+    roots[#roots + 1] = {
+      c = c,
+      path = c.file,
+      line = c.line,
+      body = c.body,
+    }
+  end
+  for _, gc in ipairs(review_comments or {}) do
+    for _, r in ipairs(roots) do
+      if r.c.gh_id == nil and gc.path == r.path and gc.line == r.line and gc.body == r.body then
+        r.c.gh_id = gc.id
+      end
+    end
+  end
+end
+
+-- 確定フロー本体。pending を push し、event + body でレビューを確定し、
+-- 完了で session.refresh (差分 + gh コメント再取り込み) を走らせる。
 local function do_submit(session, event, body)
   local pr = session.pr
   local repo = gh.repo_from_url(pr and pr.url)
@@ -133,53 +151,81 @@ local function do_submit(session, event, body)
   local number = tostring(pr.number)
   local pending = pr_comments.pending_comments(session)
   local pending_general = pr_comments.pending_general(session)
-  -- roots (in_reply_to=nil) を先に push して gh_id を採番し、返信がそれを参照できる
-  -- ようにする (submit フロー 1→2)。
-  local roots = {}
-  local replies = {}
+  -- 種別で分割: バッチ (行 root) / 個別 (ファイルレベル root / 返信) / 一般
+  local line_roots, file_roots, replies = {}, {}, {}
   for _, c in ipairs(pending) do
-    if c.in_reply_to == nil then
-      roots[#roots + 1] = c
-    else
+    if c.in_reply_to ~= nil then
       replies[#replies + 1] = c
+    elseif c.subject_type == 'file' then
+      file_roots[#file_roots + 1] = c
+    else
+      line_roots[#line_roots + 1] = c
     end
   end
-  push_all(session, repo, number, roots, function(ok_roots, created_roots)
-    if not ok_roots then
+
+  -- 1) ファイルレベル root と返信を個別 POST (返信は参照先 root の gh_id が要る。
+  --    バッチ対象 (行 root) を先に submit してから、その gh_id 対応を済ませる)
+  local function push_individuals(ok)
+    if not ok then
       return
     end
-    push_all(session, repo, number, replies, function(ok_replies, created_replies)
-      if not ok_replies then
+    push_sequence(session, repo, number, file_roots, function(ok_files)
+      if not ok_files then
         return
       end
-      push_general(repo, number, pending_general, function(ok_gen)
-        if not ok_gen then
+      push_sequence(session, repo, number, replies, function(ok_replies)
+        if not ok_replies then
           return
         end
-        local all_created = vim.list_extend(created_roots or {}, created_replies or {})
-        local review_id = all_created[1] ~= nil and all_created[1].pull_request_review_id or nil
-        local function submitted(res)
-          if not res.ok then
-            notify_warn('failed to submit the review: ' .. (res.error or 'unknown error'))
+        push_general(repo, number, pending_general, function(ok_gen)
+          if not ok_gen then
             return
           end
           vim.notify('review.nvim: review submitted (event=' .. event .. ')', vim.log.levels.INFO)
-          -- 差分 + gh コメントを再取り込みして pending 表示を解消する (submit フロー 5)。
           session_handler.refresh()
-        end
-        if review_id ~= nil then
-          gh.submit_review({
-            repo = repo,
-            number = number,
-            review_id = review_id,
-            event = event,
-            body = body,
-          }, submitted)
-        else
-          gh.create_review({ repo = repo, number = number, event = event, body = body }, submitted)
-        end
+        end)
       end)
     end)
+  end
+
+  -- 2) 行 root を event + body + comments で 1 レビューとして submit
+  local comments = {}
+  for _, c in ipairs(line_roots) do
+    comments[#comments + 1] = { path = c.file, line = c.line, body = c.body }
+  end
+  if #line_roots > 0 then
+    gh.create_review({
+      repo = repo,
+      number = number,
+      event = event,
+      body = body,
+      comments = comments,
+    }, function(res)
+      if not res.ok then
+        notify_warn('failed to submit the review: ' .. (res.error or 'unknown error'))
+        return
+      end
+      -- 作成されたコメントの gh_id を対応付けて pending を解消する
+      gh.list_review_comments_by_review({
+        repo = repo,
+        number = number,
+        review_id = res.data.id,
+      }, function(cres)
+        if cres.ok then
+          match_review_comment_ids(cres.data, line_roots)
+        end
+        push_individuals(true)
+      end)
+    end)
+    return
+  end
+  -- 3) 行 root が無い: event + body の判定レビューのみ確定
+  gh.create_review({ repo = repo, number = number, event = event, body = body }, function(res)
+    if not res.ok then
+      notify_warn('failed to submit the review: ' .. (res.error or 'unknown error'))
+      return
+    end
+    push_individuals(true)
   end)
 end
 

@@ -47,6 +47,26 @@ local function decode_json(res, label, cb)
   cb(result.ok(decoded))
 end
 
+-- 書き込み系 (POST / PUT) の共通実行。gh api の `-f`/`-F` フォームフィールドは
+-- 全て文字列になり GitHub が整数フィールド (line / in_reply_to 等) を 422 で
+-- 拒否する実測があるため、JSON body を一時ファイルに書いて `--input` で渡す。
+-- 一時ファイルはコールバック完了時に削除する (クラッシュ時は /tmp に残る許容)。
+local function run_api_json(args_prefix, payload, opts, cb)
+  local file = vim.fn.tempname()
+  local f = io.open(file, 'w')
+  if f == nil then
+    cb(result.err('failed to write the request body', result.codes.E_GH))
+    return
+  end
+  f:write(vim.json.encode(payload))
+  f:close()
+  local args = vim.list_extend(args_prefix, { '--input', file })
+  run_api(args, opts, function(res)
+    pcall(os.remove, file)
+    cb(res)
+  end)
+end
+
 -- gh api の REST パス組み立て。opts.repo = { owner, repo }。
 
 --- PR url (session.pr.url) から owner/repo を抜く。URL でなければ nil。
@@ -169,112 +189,118 @@ end
 --- in_reply_to 指定時は他パラメータを GitHub が無視する (返信 = スレッド継承)。
 --- cb(result) data = 作成されたコメントオブジェクト。
 function M.create_review_comment(opts, cb)
-  local args = {
-    'api',
-    '--method',
-    'POST',
-    ('repos/%s/%s/pulls/%s/comments'):format(opts.repo.owner, opts.repo.repo, opts.number),
-    '-F',
-    'body=' .. opts.body,
-  }
+  local payload = { body = opts.body }
   if opts.in_reply_to ~= nil then
-    args[#args + 1] = '-f'
-    args[#args + 1] = 'in_reply_to=' .. opts.in_reply_to
+    payload.in_reply_to = opts.in_reply_to
   else
-    args[#args + 1] = '-F'
-    args[#args + 1] = 'path=' .. opts.path
+    payload.path = opts.path
     if opts.subject_type == 'file' then
-      args[#args + 1] = '-f'
-      args[#args + 1] = 'subject_type=file'
+      payload.subject_type = 'file'
     else
-      args[#args + 1] = '-f'
-      args[#args + 1] = 'line=' .. opts.line
+      payload.line = opts.line
       if opts.start_line ~= nil then
-        args[#args + 1] = '-f'
-        args[#args + 1] = 'start_line=' .. opts.start_line
+        payload.start_line = opts.start_line
+        payload.side = 'RIGHT'
       end
     end
   end
-  run_api(args, opts, function(res)
-    if not res.ok then
-      cb(res)
-      return
+  run_api_json(
+    {
+      'api',
+      '--method',
+      'POST',
+      ('repos/%s/%s/pulls/%s/comments'):format(opts.repo.owner, opts.repo.repo, opts.number),
+    },
+    payload,
+    opts,
+    function(res)
+      if not res.ok then
+        cb(res)
+        return
+      end
+      decode_json(res, 'gh api create review comment', cb)
     end
-    decode_json(res, 'gh api create review comment', cb)
-  end)
-end
-
---- レビュー submit (コメント無しの event 確定用)。POST repos/{o}/{r}/pulls/{n}/reviews。
---- opts = { repo, number, event ('COMMENT'|'APPROVE'|'REQUEST_CHANGES'), body?, cwd? }。
-function M.create_review(opts, cb)
-  local args = {
-    'api',
-    '--method',
-    'POST',
-    ('repos/%s/%s/pulls/%s/reviews'):format(opts.repo.owner, opts.repo.repo, opts.number),
-    '-f',
-    'event=' .. opts.event,
-  }
-  if opts.body ~= nil and opts.body ~= '' then
-    args[#args + 1] = '-F'
-    args[#args + 1] = 'body=' .. opts.body
-  end
-  run_api(args, opts, function(res)
-    if not res.ok then
-      cb(res)
-      return
-    end
-    decode_json(res, 'gh api create review', cb)
-  end)
+  )
 end
 
 --- 一般コメント (conversation) の投稿。POST repos/{o}/{r}/issues/{n}/comments。
 --- opts = { repo, number, body, cwd? }。cb(result) data = 作成されたコメント。
 function M.create_issue_comment(opts, cb)
-  local args = {
-    'api',
-    '--method',
-    'POST',
-    ('repos/%s/%s/issues/%s/comments'):format(opts.repo.owner, opts.repo.repo, opts.number),
-    '-F',
-    'body=' .. opts.body,
-  }
-  run_api(args, opts, function(res)
-    if not res.ok then
-      cb(res)
-      return
+  run_api_json(
+    {
+      'api',
+      '--method',
+      'POST',
+      ('repos/%s/%s/issues/%s/comments'):format(opts.repo.owner, opts.repo.repo, opts.number),
+    },
+    { body = opts.body },
+    opts,
+    function(res)
+      if not res.ok then
+        cb(res)
+        return
+      end
+      decode_json(res, 'gh api create issue comment', cb)
     end
-    decode_json(res, 'gh api create issue comment', cb)
-  end)
+  )
 end
 
---- pending レビューの submit。PUT repos/{o}/{r}/pulls/{n}/reviews/{review_id}。
---- opts = { repo, number, review_id, event, body?, cwd? }。
-function M.submit_review(opts, cb)
-  local args = {
-    'api',
-    '--method',
-    'PUT',
-    ('repos/%s/%s/pulls/%s/reviews/%s'):format(
-      opts.repo.owner,
-      opts.repo.repo,
-      opts.number,
-      opts.review_id
-    ),
-    '-f',
-    'event=' .. opts.event,
-  }
+--- レビュー submit (コメント付きで 1 回のレビューとして確定)。
+--- POST repos/{o}/{r}/pulls/{n}/reviews。
+--- opts = { repo, number, event ('COMMENT'|'APPROVE'|'REQUEST_CHANGES'),
+---          body?, comments? = [{ path, line, body }...], cwd? }。
+--- comments は新規スレッドの行コメントの配列 (返信 in_reply_to やファイルレベル
+--- subject_type は batch に載せられない — GitHub のスキーマ制約。個別 POST で送る)。
+function M.create_review(opts, cb)
+  local payload = { event = opts.event }
   if opts.body ~= nil and opts.body ~= '' then
-    args[#args + 1] = '-F'
-    args[#args + 1] = 'body=' .. opts.body
+    payload.body = opts.body
   end
-  run_api(args, opts, function(res)
-    if not res.ok then
-      cb(res)
-      return
+  if opts.comments ~= nil and #opts.comments > 0 then
+    payload.comments = opts.comments
+  end
+  run_api_json(
+    {
+      'api',
+      '--method',
+      'POST',
+      ('repos/%s/%s/pulls/%s/reviews'):format(opts.repo.owner, opts.repo.repo, opts.number),
+    },
+    payload,
+    opts,
+    function(res)
+      if not res.ok then
+        cb(res)
+        return
+      end
+      decode_json(res, 'gh api create review', cb)
     end
-    decode_json(res, 'gh api submit review', cb)
-  end)
+  )
+end
+
+--- 特定レビューに属するコメント一覧。GET repos/{o}/{r}/pulls/{n}/reviews/{id}/comments。
+--- バッチ submit (create_review の comments) で作られたコメントの gh_id 対応付けに使う。
+function M.list_review_comments_by_review(opts, cb)
+  run_api(
+    {
+      'api',
+      ('repos/%s/%s/pulls/%s/reviews/%s/comments'):format(
+        opts.repo.owner,
+        opts.repo.repo,
+        opts.number,
+        opts.review_id
+      ),
+      '--paginate',
+    },
+    opts,
+    function(res)
+      if not res.ok then
+        cb(res)
+        return
+      end
+      decode_json(res, 'gh api list review comments by review', cb)
+    end
+  )
 end
 
 return M
