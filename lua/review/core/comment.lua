@@ -232,4 +232,10 @@ function M.from_gh(gh, opts)
   return c
 end
 
+--- demo: a commentable helper for the PR-comments demo PR (verification PR only).
+function M.demo_placeholder()
+  return 42
+end
+
 return M
+
