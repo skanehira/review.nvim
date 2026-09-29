@@ -57,6 +57,17 @@ Everything runs through one command and its subcommands:
 	  as <leader>c). If already open, that window is focused. WARN when no
 	  session is active. Keys: |review-keymaps-commentlist|
 
+	:Review pr-chat
+	  Open the PR conversation (general comments not attached to a line,
+	  same as the p key in the review windows |review-keymaps-diff|). PR
+	  sessions only; WARN otherwise. Keys: |review-keymaps-prchat|
+
+	:Review submit
+	  Submit the review: choose an event (Comment / Approve / Request
+	  changes) and an optional summary, then push the pending comments
+	  (replies, file-level and general included) to GitHub and finish the
+	  review (same as the s key |review-keymaps-diff|). PR sessions only
+
 	:Review close		save and close the current session |review-sessions|
 
 	:Review delete {id}
@@ -159,6 +170,9 @@ Defaults and the override format:
 			toggle_panel   = '<leader>b',
 			view_comments  = 'i',
 			comments_list  = '<leader>c', -- cross-file comments list
+			reply_comment  = 'r',   -- reply to the thread on the cursor line (head only)
+			submit_review  = 's',   -- submit the review (push pending + event; PR only)
+			open_pr_chat   = 'p',   -- open the PR conversation (general comments)
 		},
 		sidebar = {                   -- file panel (changed files)
 			open_diff      = '<CR>',
@@ -177,6 +191,8 @@ Defaults and the override format:
 			help           = '<F1>', -- g? is a fixed alias for the same call
 			close          = 'q',
 			comments_list  = '<leader>c', -- cross-file comments list
+			submit_review  = 's',   -- submit the review (same as the diff windows)
+			open_pr_chat   = 'p',   -- open the PR conversation (same as the diff windows)
 		},
 		sessionlist = {               -- the :Review list buffer
 			open           = '<CR>',
@@ -190,6 +206,13 @@ Defaults and the override format:
 			cancel_arming  = '<Esc>', -- cancel the d / D arming
 			edit           = 'e',
 			yank           = 'y',
+			reply          = 'r',    -- reply to the thread on the cursor line
+			submit         = 's',    -- submit the review (same as s in the diff windows)
+			close          = 'q',
+		},
+		prchat = {                    -- the :Review pr-chat conversation
+			reply          = 'r',    -- reply to the PR (pending; submitted with s)
+			submit         = 's',    -- submit the review (same as s in the diff windows)
 			close          = 'q',
 		},
 	}
@@ -286,7 +309,22 @@ Review windows (head / base)			*review-keymaps-diff*
 	  view the full comment text on the cursor line in a read-only
 	  (markdown) window (edit with e). q / <Esc> closes
 
- file panel (changed files)			*review-keymaps-sidebar*
+	r
+	  reply to the thread on the cursor line (head window only). The reply
+	  is saved as a local pending comment (⚠ marker) and pushed to GitHub
+	  with submit_review (s). Reply to an existing GitHub thread keeps it
+	  in that thread (in_reply_to). See |review-pr-comments|
+
+	s
+	  submit the review: choose an event (Comment / Approve / Request
+	  changes) and an optional summary, then push the pending comments and
+	  finish the review (PR sessions only |review-pr-comments|)
+
+	p
+	  open the PR conversation (general comments not attached to a line,
+	  same as :Review pr-chat |review-keymaps-prchat|). PR sessions only
+
+  file panel (changed files)			*review-keymaps-sidebar*
 
 	The default view is a folder tree split into two sections. In the
 	Changes section the headers «Changes (N)» and «Showing changes for:
@@ -353,6 +391,8 @@ Review windows (head / base)			*review-keymaps-diff*
 
 	q		close the session (same as q in the diff windows)
 	<leader>c	open the comments list (same as the diff windows)
+	s		submit the review (same as s in the diff windows)
+	p		open the PR conversation (same as p in the diff windows)
 	<F1> / g?	keymap help float (same as the diff windows. g? is a fixed alias)
 
 	Cursor movement in the panel alone never swaps the diff. Conversely
@@ -402,7 +442,25 @@ Review windows (head / base)			*review-keymaps-diff*
 
 	q		close the list (the session state is untouched)
 
- Sessions list (:Review list)			*review-keymaps-sessionlist* *review-list*
+	r
+	  reply to the thread on the cursor line (a line thread or a
+	  file-level «(file)» row). Saved as a local pending comment; pushed
+	  to GitHub with submit (s). See |review-pr-comments|
+
+	s		submit the review (same as s in the diff windows)
+
+  PR conversation (:Review pr-chat)		*review-keymaps-prchat*
+
+	The PR conversation (general comments not attached to a line) in one
+	buffer (`review://pr-chat/<session-id>`), full-width at the bottom of
+	the review tab like the comments list. 1 comment = its author line +
+	body lines. PR sessions only.
+
+	r		reply to the PR (a local pending comment; submitted with s)
+	s		submit the review (same as s in the diff windows)
+	q		close the conversation (the session state is untouched)
+
+  Sessions list (:Review list)			*review-keymaps-sessionlist* *review-list*
 
 	<CR>		open the selected session (closed -> open)
 	q		close the list (the session state is untouched)
@@ -453,6 +511,46 @@ without a window (deleted/binary notices) show as `⚠N` at the end of the file
 panel winbar (:h review-display). They are excluded from the default
 `:Review prompt` output. Bodies are never lost — they remain in the pre-close
 JSON, and walking refs back can make them active again.
+
+==============================================================================
+PR COMMENTS (GitHub)				*review-pr-comments*
+
+In PR sessions (:Review pr) review.nvim talks to GitHub's review comments.
+This is only for mode=pr — branch reviews keep working entirely locally.
+
+Display
+	On session start (and on R |review-keymaps-diff|) the PR's review
+	comments are fetched and merged into the session:
+	  - line threads: shown as the usual threads under the line; each
+	    comment's author (GitHub login) is the thread prefix. Comments of
+	    an unsubmitted review (or your not-yet-pushed replies) get a ⚠
+	    marker.
+	  - file-level comments (`subject_type=file`, no line): a box headed
+	    «[file] <path>» above line 1 of the head window.
+	  - general comments (the PR conversation, not attached to a line): in
+	    the pr-chat window |review-keymaps-prchat|.
+	Your own comments (c / r) are local pending (⚠) until submitted.
+
+Reply (r)
+	Replies to an existing thread keep it in that thread (in_reply_to on
+	GitHub). The reply is a local pending comment; it is pushed when the
+	review is submitted.
+
+Submit (s / :Review submit)
+	Accumulated pending comments are pushed to GitHub and the review is
+	finished with an event (Comment / Approve / Request changes) and an
+	optional summary:
+	  1. new line comments are submitted as ONE review carrying the event
+	     + summary + the comments (the same shape as the GitHub PR review
+	     screen)
+	  2. file-level comments and replies (which GitHub's batch API cannot
+	     carry) are posted individually
+	  3. general comments are posted to the PR conversation
+	Afterwards the session refreshes and pending markers clear. A failed
+	push WARNs and leaves the pending comments for retry.
+
+	Submitting requires gh authentication and only applies to mode=pr
+	sessions.
 
 ==============================================================================
 DISPLAY characteristics				*review-display*
@@ -528,6 +626,7 @@ CONTENTS					*review-contents*
   SETUP			|review-setup|
   KEYMAPS		|review-keymaps|
   SESSION		|review-sessions|
+  PR COMMENTS		|review-pr-comments|
   DISPLAY		|review-display|
   COMMENT INPUT		|review-comment-input|
 

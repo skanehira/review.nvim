@@ -46,7 +46,17 @@ GitHub の Files changed 風に、ブランチ (git ref) 間の差分と PR の�
 
 head 窓で `:w` すると差分が再取得され、±カウント・コメント位置・プロンプトが保存済みの内容に更新される。
 
-**3. プロンプトを取り出して AI に渡す**
+**3. (PR) GitHub のレビュー画面と同じようにコメント・返信・submit**
+
+PR セッション (`:Review pr`) では既存のレビューコメントを取り込んでスレッドに
+表示する (各コメントは作者の接頭辞、未 submit は ⚠ マーカー。ファイルレベル
+コメントはファイル 1 行目上に箱で表示し、PR 会話は `p` / `:Review pr-chat` で
+開く)。スレッド上で `r` を押すと返信でき (GitHub 上では同じスレッドに残る)、
+`c` で新規コメント。これらは local pending として蓄積され、`s` /
+`:Review submit` で push して event (Comment / Approve / Request changes) +
+任意のサマリ本文でレビューを確定する (`:h review-pr-comments`)。
+
+**4. プロンプトを取り出して AI に渡す**
 
 `:Review prompt` で集めたコメントが整形され、クリップボードにコピーされる (クリップボードが使えない環境では `"0` レジスタ)。コピーが成功すると «copied %d comments to the clipboard» とメッセージが出る (`y` でも同じ):
 
@@ -64,7 +74,7 @@ setup は冪等にしたい
 
 コピー後に不要になったコメントは `:Review clear` (またはレビュー窓 / コメント一覧で `D` 2 回) で全件削除できる。AI に渡した後の残骸掃除用で、outdated も含めて全部消える。コピー後の自動削除はしない — ミスコピ時に再度コピーできる余地を残すためで、削除は常に明示操作 + 確認 (コマンドは `[y/N]`、キーは arming 二重押し) を挟む。二重押しの途中取消は `<Esc>` でもよい (2 秒待ち不要)。
 
-**4. 閉じる**
+**5. 閉じる**
 
 `q` (または `:Review close`) でコメントを保存して閉じる。`:Review pr` で展開した worktree も同時に掃除される。
 
@@ -82,6 +92,9 @@ setup は冪等にしたい
 | レビュー窓 | `[c` / `]c`               | このファイルの前 / 次のコメントへジャンプ (head 窓のみ) |
 | レビュー窓 | `<leader>e` / `<leader>b` | file panel へ移動 / 表示トグル                        |
 | レビュー窓 | `<leader>c`               | 全ファイル横断のコメント一覧                          |
+| レビュー窓 | `r`                       | カーソル行のスレッドへ返信 (head 窓のみ)              |
+| レビュー窓 | `s`                       | レビュー submit (pending push + event。PR セッションのみ) |
+| レビュー窓 | `p`                       | PR 会話 (一般コメント) を開く (PR セッションのみ)     |
 | レビュー窓 | `q`                       | 保存してセッションを閉じる                            |
 | レビュー窓 | `<F1>` / `g?`             | その窓で効くキーの help float                         |
 
@@ -102,6 +115,8 @@ fold (`za` / `zo` / `zR`) は Neovim 標準のキーのままで、レビュー�
 | `:Review`                       | 続きのセッションを復元 (open 状態のみ)                      |
 | `:Review list`                  | 保存済みセッション一覧から開く                              |
 | `:Review comments`              | コメント横断一覧を開く (`<leader>c` と同じ)                 |
+| `:Review pr-chat`               | PR 会話 (一般コメント) を開く (`p` と同じ)                  |
+| `:Review submit`                | レビュー submit (pending push + event。`s` と同じ)          |
 | `:Review close`                 | 保存して閉じる                                              |
 | `:Review delete {id}`           | 保存済みセッションを削除 (worktree 掃除含む)                |
 | `:Review prompt [file]`         | プロンプトをクリップボードへ (ファイル指定可)               |

@@ -24,7 +24,7 @@ Neovim 内で GitHub の Files changed のようにブランチ/PR 差分をレ�
 
 **review 対象の定義**: branch モードは base vs **現在のチェックアウトの作業ツリー** (未コミット変更を含む。保存時は自動再取得)。PR モードは base vs **自前 worktree の状態** (チェックアウト時点 = head コミット内容。worktree 内で編集すればそれも対象)。`staged` / `working` / `.` などの特殊引数は作らない — 引数で対象を切り替えず、常に上記の定義で自動確定する。
 
-**やらないこと**: stdin 差分入力、生成ファイルの自動折りたたみ、GitHub のレビューコメントスレッド取り込み・書き戻し、telescope / nui.nvim 等の外部 UI プラグイン連携、diffview.nvim にある hunk stage/unstage・commit log panel・merge tool・option panel (diffview 化する対象は見た目・レイアウト・キーの導線であり、git 編集機能はスコープ外)。
+**やらないこと**: stdin 差分入力、生成ファイルの自動折りたたみ、telescope / nui.nvim 等の外部 UI プラグイン連携、diffview.nvim にある hunk stage/unstage・commit log panel・merge tool・option panel (diffview 化する対象は見た目・レイアウト・キーの導線であり、git 編集機能はスコープ外)。PR セッションのレビューコメントは取り込み・返信・submit の対象 (features/pr-comments) だが、他ユーザーのコメントの編集・削除と、レビューコメントの一括取り込み (comments を GitHub の状態に同期) 以外の Git 操作は対象外。
 
 ## アーキテクチャと技術選定
 
@@ -100,18 +100,36 @@ DB は持たない。状態はすべてセッション JSON ファイル (正本
 | `status` | `"open" \| "closed"` | close はファイル削除ではなく closed にする (再オープンのため) |
 | `files` | map path → `{viewed}` (boolean) | 差分に出てくる全ファイルの状態。`viewed=true` は file panel の **Reviewed セクション**に表示される (x で切替) |
 | `comments` | Comment[] | 下記 |
+| `general` | GeneralComment[]\|null | 一般コメント (conversation、mode=pr のみ。下記) |
 | `created_at` / `updated_at` | number | epoch seconds |
 
-Comment:
+Comment (features/pr-comments で GitHub 連携フィールドが追加。全て optional / 後方互換):
 
 | key | 型 | 説明 |
 | --- | --- | --- |
 | `id` | string | `c<n>` (セッション内連番。新規採番は既存 max+1) |
 | `file` | string | リポジトリ相対パス |
-| `line` / `end_line` | number | **new (head) 側**のファイル行番号 (= head 実窓のバッファ行番号)。単一行なら同値 |
+| `line` / `end_line` | number\|nil | **new (head) 側**のファイル行番号 (= head 実窓のバッファ行番号)。単一行なら同値。`subject_type='file'` のときは持たない |
 | `body` | string | マルチライン可 |
-| `anchor` | `{before, line, after}` (各 string\|null) | 追加時点の new 側行テキスト + 前後 1 行 (存在しなければ null)。復元時の漂移検出用 |
+| `anchor` | `{before, line, after}` (各 string\|null) | 追加時点の new 側行テキスト + 前後 1 行 (存在しなければ null)。復元時の漂移検出用。gh 由来は持たない |
 | `state` | `"active" \| "outdated"` | 復元検証の結果 |
+| `created_at` | number | |
+| `origin` | `"local" \| "gh"` | 出所 (省略 = local) |
+| `gh_id` | number\|nil | GitHub の review comment id。push 済み local にも付与 |
+| `gh_user` | string\|nil | 作者 login (gh コメント) |
+| `gh_state` | `"pending" \| "submitted"` | submit 状態 (reviews 一覧の PENDING review との突合) |
+| `in_reply_to` | number\|string\|nil | スレッドの根: gh 根の gh_id (number) またはローカル根の id (string)。返信の posting 対象 |
+| `subject_type` | `"line" \| "file"` | 行 / ファイルレベルの区別 (省略 = line)。file は line/end_line を持たない |
+
+GeneralComment:
+
+| key | 型 | 説明 |
+| --- | --- | --- |
+| `id` | string | `g<n>` (一般コメント専用の連番) |
+| `origin` | `"local" \| "gh"` | 出所 |
+| `gh_id` | number\|nil | GitHub の issue comment id |
+| `gh_user` | string\|nil | 作者 login |
+| `body` | string | マルチライン可 |
 | `created_at` | number | |
 
 ## API 一覧
@@ -148,7 +166,10 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | head/base 窓 | `<Tab>` / `<S-Tab>` | 次 / 前のファイル (file panel の表示順 = ツリー上→下。折りたたみ・絞り込みを反映。端は無動作。panel `<CR>` と同一の open 経路 = マークは変えない。diff ペアが切れていれば張直す) |
 | head/base 窓 | `<leader>e` / `<leader>b` | file panel へ focus / file panel 表示トグル (panel を閉じても tab とレビュー窓は残る。再建は上段の左 `leftabove vsplit` — 一覧が最下部に開いていてもその全幅を保つ) |
 | head/base 窓 | `<leader>c` | コメント一覧 (横断) をレビュー tab の最下部に全幅で開く (`:Review comments` と同一。既に開いていればその窓へ focus)。非 expr の同期 mapping (「既知の制約」キー) |
-| head/base 窓 | `R` | 差分再取得 (`git diff` 引数形は head 解決に一致 — 通常 `<base>` / 縮退 `<base> <head>`) → 再パース → anchor 検証 → ±カウント・スレッド・panel 更新 → :diffupdate |
+| head/base 窓 | `r` | カーソル行のスレッドへ返信 (head 窓のみ。既存入力 float。返信は local pending (`in_reply_to` = スレッドの根) として蓄積し、`s` で GitHub へ push — features/pr-comments) |
+| head/base 窓 | `s` | レビュー submit (event 選択 + 任意サマリ本文 → pending を push → 確定。PR セッションのみ — features/pr-comments) |
+| head/base 窓 | `p` | PR 一般コメント (conversation) を開く (`:Review pr-chat` と同一。最下部全幅)。PR セッションのみ |
+| head/base 窓 | `R` | 差分再取得 (`git diff` 引数形は head 解決に一致 — 通常 `<base>` / 縮退 `<base> <head>`) → 再パース → anchor 検証 → ±カウント・スレッド・panel 更新 → :diffupdate。**PR セッションでは加えて GitHub のコメントを取り込み直す** (features/pr-comments) |
 | head/base 窓 | `q` | `:Review close` 相当 (コメントありなら確認プロンプト。tab を閉じる。repo 本体の実ファイルバッファとユーザー窓には触れない。`created_by_us=true` の worktree 配下の実ファイルバッファのみ remove 前に破棄する) |
 | head/base 窓 | `<F1>` / `g?` | help float (内容は markdown。`g?` は config を持たない固定の別名で `<F1>` と同一呼び出し) |
 | file panel | `<CR>` / `o` / `l` | カーソル entry を開く (ファイル = 実ファイル窓に張るが focus とカーソルは file panel に維持、dir = fold トグル)。file panel 上の `o` は «開く» (旧 diff 窓の `o` = 実ファイル別 tab は 2026-09 削除 — head 窓が実ファイルそのもののため) |
@@ -161,10 +182,13 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | file panel | `q` | `:Review close` 相当 (diff 窓の `q` と同じ) |
 | file panel | `<leader>c` | open the comments list (same as the diff windows) |
 | file panel | `help` (`<F1>` 既定) / `g?` | help float (diff 窓と同じ。`g?` は固定の別名) |
+| file panel | `s` / `p` | レビュー submit / PR 一般コメント (diff 窓の同名キーと同一) |
 | commentlist (`:Review comments` の一覧) | `<CR>` | jump to the comment on the cursor line (ファイル open + 移動行 + fold を開く。outdated は記録行へ INFO、binary/削除・差分外は WARN。確定文言の正本は comment-list「ジャンプ」) |
 | commentlist | `d` / `D` / `e` / `y` | カーソル行コメントの削除 (一覧専用の arming 二重押し = 同じ comment id・2 秒内。diff 窓の arming とは共有しない) / 全コメント一括削除 (同じく一覧専用の arming = 件数一致・2 秒内。diff 窓の arming とは別状態で、確定で単一削除の arming も解除。絞り込み外のコメントも全件消える) / 編集 / 単一 prompt yank (e / y は diff 窓の同名キーと同一動作) |
+| commentlist | `r` / `s` | カーソル行のスレッドへ返信 (行 / ファイルレベル両対応。local pending として追加 — features/pr-comments) / レビュー submit (diff 窓の `s` と同一) |
 | commentlist | `<Esc>` | 一覧専用の `d` / `D` arming を解除 (INFO。解除物が無ければ無動作。diff 窓の arming は触らない) |
 | commentlist | `q` | 一覧バッファを閉じる (セッション状態は変えない) |
+| prchat (`:Review pr-chat` の会話) | `r` / `s` / `q` | PR 一般コメントへ返信 (local pending。submit で issues/{n}/comments へ) / レビュー submit / 閉じる |
 | sessionlist (`:Review list` のバッファ) | `<Enter>` | 選択セッションを開く (closed → open。head 解決フロー・worktree 要否は pr-worktree の作成判断で再開時に再評価) |
 | sessionlist | `d` | 選択セッションを削除 (`:Review delete` と同一の確認フロー) |
 | sessionlist | `q` | 一覧バッファを閉じる (セッション状態は変えない) |

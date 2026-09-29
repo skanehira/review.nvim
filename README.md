@@ -46,7 +46,18 @@ Move between files with `<Tab>` / `<S-Tab>` and press `c` on a changed line to e
 
 `:w` in the head window refetches the diff and updates the ±counts, comment positions and the prompt against the saved content.
 
-**3. Export the prompt to your AI agent**
+**3. (PR) Comment, reply and submit like GitHub's review screen**
+
+In a PR session (`:Review pr`) the existing review comments are fetched and shown
+in the threads — each comment prefixed by its author, unsubmitted ones with a ⚠
+marker; file-level comments appear in a box above line 1 of the file and the PR
+conversation opens with `p` (or `:Review pr-chat`). `r` on a thread replies to
+it (kept in the same thread on GitHub), `c` adds a new comment; all of these
+accumulate as local pending. `s` (or `:Review submit`) pushes them and finishes
+the review with an event (Comment / Approve / Request changes) plus an optional
+summary (`:h review-pr-comments`).
+
+**4. Export the prompt to your AI agent**
 
 `:Review prompt` formats the collected comments and copies them to the clipboard (falls back to the `"0` register without a clipboard provider). A successful copy shows «copied %d comments to the clipboard» (`y` does the same per line):
 
@@ -64,7 +75,7 @@ Paste it straight into your AI agent. `@path#L<line>` points at the real file un
 
 Comments you no longer need after copying can be removed with `:Review clear` (or pressing `D` twice in the review window / comments list): a cleanup pass for the leftovers after handing the prompt to the AI — everything disappears, outdated included. Nothing is deleted automatically after a copy — that would leave you stranded after a mis-copy — so deletion always goes through an explicit action plus confirmation (`[y/N]` for the command, an arming double-press for the key). The double-press can also be aborted with `<Esc>` (no 2s wait).
 
-**4. Close**
+**5. Close**
 
 `q` (or `:Review close`) saves the comments and closes. Worktrees created by `:Review pr` are cleaned up at the same time.
 
@@ -82,6 +93,9 @@ The minimum touched by the flow above:
 | review window  | `[c` / `]c`               | previous / next comment in this file (head window only)      |
 | review window  | `<leader>e` / `<leader>b` | go to the file panel / toggle it                             |
 | review window  | `<leader>c`               | cross-file comments list                                     |
+| review window  | `r`                       | reply to the thread on the cursor line (head window only)    |
+| review window  | `s`                       | submit the review (push pending + event; PR sessions only)   |
+| review window  | `p`                       | open the PR conversation (general comments; PR sessions only)|
 | review window  | `q`                       | save and close the session                                   |
 | review window  | `<F1>` / `g?`             | help float listing the keys available in that window         |
 
@@ -102,6 +116,8 @@ folds (`za` / `zo` / `zR`) stay Neovim defaults — the plugin maps nothing ther
 | `:Review`                       | resume a saved session (open status only)                    |
 | `:Review list`                  | open from the saved-session list                             |
 | `:Review comments`              | open the cross-file comments list (same as `<leader>c`)      |
+| `:Review pr-chat`               | open the PR conversation (general comments; same as `p`)     |
+| `:Review submit`                | submit the review (push pending + event; same as `s`)        |
 | `:Review close`                 | save and close                                               |
 | `:Review delete {id}`           | delete a saved session (includes worktree cleanup)           |
 | `:Review prompt [file]`         | copy the prompt to the clipboard (optionally one file)       |
@@ -118,7 +134,7 @@ The ref for `start`, the number for `pr` and the id for `delete` are `<Tab>`-com
 
 ## Documentation
 
-- Help contents: `:h review` (Usage / API / Setup / Keymaps / Sessions / Display)
+- Help contents: `:h review` (Usage / API / Setup / Keymaps / Sessions / PR Comments / Display)
 - Japanese help: `:h review_ja` (a translation of this help; `set helplang=ja` makes `:h review-*` resolve to it)
 - Public Lua API: `:h review-api`
 - Design: [docs/design/DESIGN.md](docs/design/DESIGN.md) and [docs/design/features/](docs/design/features/)

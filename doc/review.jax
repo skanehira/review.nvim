@@ -52,6 +52,17 @@ USAGE						*review-usage_ja*
 	  最下部に全幅で開く (<leader>c と同じ)。開いていればその窓へ focus。
 	  active が無ければ WARN。操作は |review-keymaps-commentlist_ja|
 
+	:Review pr-chat
+	  行に紐づかない PR 一般コメント (conversation) を開く (レビュー窓の
+	  p |review-keymaps-diff_ja| と同じ)。PR セッションのみ。それ以外は
+	  WARN。操作は |review-keymaps-prchat_ja|
+
+	:Review submit
+	  レビューを submit する: event (Comment / Approve / Request changes)
+	  と任意のサマリ本文を選び、pending コメント (返信・ファイルレベル・
+	  一般含む) を GitHub へ push してレビューを確定する (レビュー窓の
+	  s |review-keymaps-diff_ja| と同じ)。PR セッションのみ
+
 	:Review close		現セッションを保存して閉じる |review-sessions_ja|
 
 	:Review delete {id}
@@ -147,6 +158,9 @@ KEYMAPS						*review-keymaps_ja*
 			toggle_panel   = '<leader>b',
 			view_comments  = 'i',
 			comments_list  = '<leader>c', -- 横断コメント一覧
+			reply_comment  = 'r',   -- カーソル行のスレッドへ返信 (head のみ)
+			submit_review  = 's',   -- レビュー submit (pending push + event。PR のみ)
+			open_pr_chat   = 'p',   -- PR 一般コメント (conversation) を開く
 		},
 		sidebar = {                   -- file panel (変更ファイル一覧)
 			open_diff      = '<CR>',
@@ -165,6 +179,8 @@ KEYMAPS						*review-keymaps_ja*
 			help           = '<F1>', -- g? も固定別名で同じ呼び出し
 			close          = 'q',
 			comments_list  = '<leader>c', -- 横断コメント一覧
+			submit_review  = 's',   -- レビュー submit (diff 窓と同じ)
+			open_pr_chat   = 'p',   -- PR 一般コメント (diff 窓と同じ)
 		},
 		sessionlist = {               -- :Review list の一覧
 			open           = '<CR>',
@@ -178,6 +194,13 @@ KEYMAPS						*review-keymaps_ja*
 			cancel_arming  = '<Esc>', -- d / D の arming 解除
 			edit           = 'e',
 			yank           = 'y',
+			reply          = 'r',    -- カーソル行のスレッドへ返信
+			submit         = 's',    -- レビュー submit (diff 窓の s と同じ)
+			close          = 'q',
+		},
+		prchat = {                    -- :Review pr-chat の会話
+			reply          = 'r',    -- PR へ返信 (pending。s で submit)
+			submit         = 's',    -- レビュー submit (diff 窓の s と同じ)
 			close          = 'q',
 		},
 	}
@@ -265,6 +288,21 @@ KEYMAPS						*review-keymaps_ja*
 	i
 	  カーソル行のコメント全文を read-only 窓 (markdown) で閲覧 (編集は e)。
 	  q / <Esc> で閉じる
+
+	r
+	  カーソル行のスレッドへ返信する (head 窓のみ)。返信は local pending
+	  (⚠ マーカー) として保存され、submit_review (s) で GitHub へ push される。
+	  既存の GitHub スレッドへの返信はそのスレッド (in_reply_to) に残る。
+	  |review-pr-comments_ja|
+
+	s
+	  レビューを submit する: event (Comment / Approve / Request changes) と
+	  任意のサマリ本文を選び、pending コメントを push してレビューを確定する
+	  (PR セッションのみ |review-pr-comments_ja|)
+
+	p
+	  PR 一般コメント (conversation) を開く (:Review pr-chat と同じ
+	  |review-keymaps-prchat_ja|)。PR セッションのみ
 
  file panel (変更ファイル一覧)			*review-keymaps-sidebar_ja*
 
@@ -488,6 +526,7 @@ CONTENTS					*review-contents_ja*
   SETUP			|review-setup_ja|
   KEYMAPS		|review-keymaps_ja|
   SESSION		|review-sessions_ja|
+  PR COMMENTS		|review-pr-comments_ja|
   DISPLAY		|review-display_ja|
   COMMENT INPUT		|review-comment-input_ja|
 
