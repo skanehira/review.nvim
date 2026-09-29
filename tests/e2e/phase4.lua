@@ -41,7 +41,7 @@ local function run()
 
   -- サブコマンド位置では git を引かない (start 候補に混ざらない)
   local subs = review.complete('s', 'Review s', 0)
-  if #subs ~= 1 or subs[1] ~= 'start' then
+  if #subs ~= 2 or subs[1] ~= 'start' or subs[2] ~= 'submit' then
     fail('サブコマンド位置の候補が壊れた: ' .. table.concat(subs, ','))
   end
 

@@ -411,7 +411,7 @@ describe('comment.from_gh', function()
       gh_id = 500,
       gh_user = 'octocat',
       in_reply_to = nil,
-      created_at = 1704132245,
+      created_at = 1704164645, -- 2024-01-02T03:04:05Z の UTC epoch (TZ 非依存)
       state = 'active',
       line = 12,
       end_line = 12,

@@ -10,16 +10,27 @@
 -- は全て optional (後方互換。branch セッションの旧スキーマはそのまま)。
 local M = {}
 
--- ISO8601 (GitHub API の created_at) を epoch seconds へ。解釈不能は 0。
+-- ISO8601 (GitHub API の created_at、常に Z = UTC) を epoch seconds へ。解釈不能は 0。
+-- vim.fn.strptime はローカル TZ 依存 (macOS と Linux で結果が変わる実測)、
+-- os.time のテーブル解釈も TZ 依存なので、days_from_civil による純計算で決定的に求める。
+local function days_from_civil(y, m, d)
+  y = y - (m <= 2 and 1 or 0)
+  local era = math.floor(y / 400)
+  local yoe = y - era * 400
+  local mp = m + (m > 2 and -3 or 9)
+  local doy = math.floor((153 * mp + 2) / 5) + d - 1
+  local doe = yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy
+  return era * 146097 + doe - 719468
+end
+
 local function gh_created_at(iso)
-  if type(iso) ~= 'string' or iso == '' then
+  local y, mo, d, h, mi, s = iso:match '^(%d%d%d%d)-(%d%d)-(%d%d)T(%d%d):(%d%d):(%d%d)Z$'
+  if not y then
     return 0
   end
-  local ok, t = pcall(vim.fn.strptime, '%Y-%m-%dT%H:%M:%SZ', iso)
-  if ok and t ~= nil and t > 0 then
-    return t
-  end
-  return 0
+  y, mo, d, h, mi, s =
+    tonumber(y), tonumber(mo), tonumber(d), tonumber(h), tonumber(mi), tonumber(s)
+  return days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + s
 end
 
 --- ファイルレベルコメント (subject_type == 'file') かどうか。
