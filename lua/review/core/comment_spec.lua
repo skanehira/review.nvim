@@ -254,3 +254,199 @@ describe('comment.find_at', function()
     assert.same({}, comment.find_at(single, 'a.lua', 7))
   end)
 end)
+
+describe('comment.add (GitHub 連携フィールド)', function()
+  it('subject_type=file は line/end_line を持たないコメントを作る', function()
+    local comments = {}
+    local added = comment.add(comments, {
+      file = 'lib.lua',
+      subject_type = 'file',
+      body = 'file-level note',
+      created_at = 5,
+    })
+    assert.same({
+      id = 'c1',
+      file = 'lib.lua',
+      subject_type = 'file',
+      body = 'file-level note',
+      state = 'active',
+      created_at = 5,
+    }, added)
+    assert.is_nil(added.line)
+    assert.is_nil(added.end_line)
+  end)
+
+  it(
+    '指定時のみ origin / gh_id / in_reply_to 等を載せる (旧スキーマ互換)',
+    function()
+      local comments = {}
+      local plain = comment.add(comments, { file = 'a.lua', line = 1, body = 'x', created_at = 1 })
+      assert.is_nil(plain.origin)
+      assert.is_nil(plain.gh_id)
+
+      local gh = comment.add(comments, {
+        file = 'a.lua',
+        line = 2,
+        body = 'reply',
+        created_at = 2,
+        origin = 'local',
+        gh_id = nil,
+        in_reply_to = 'c1',
+      })
+      assert.equals('local', gh.origin)
+      assert.equals('c1', gh.in_reply_to)
+      assert.is_nil(gh.gh_id) -- 明示 nil は載せない
+    end
+  )
+end)
+
+describe('comment.is_file_level / thread_at / file_thread', function()
+  local file_c = function(id, line, end_line)
+    return { id = id, file = 'a.lua', line = line, end_line = end_line, state = 'active' }
+  end
+
+  it('subject_type=file を is_file_level が判定する', function()
+    assert.is_false(comment.is_file_level(file_c('c1', 1, 1)))
+    local fc = file_c('c2', 1, 1)
+    fc.subject_type = 'file'
+    assert.is_true(comment.is_file_level(fc))
+  end)
+
+  it(
+    'thread_at は表示 anchor (range 最終行) を共有するコメント群を返す',
+    function()
+      local comments = {
+        file_c('c1', 4, 6),
+        file_c('c2', 6, 6),
+        file_c('c3', 5, 5),
+        file_c('c4', 9, 9),
+      }
+      assert.same({ comments[1], comments[2] }, comment.thread_at(comments, 'a.lua', 6))
+      assert.same({ comments[3] }, comment.thread_at(comments, 'a.lua', 5))
+      assert.same({}, comment.thread_at(comments, 'a.lua', 10))
+    end
+  )
+
+  it('thread_at はファイルレベルを対象外にし、file_thread が返す', function()
+    local fc = file_c('c1', 1, 1)
+    fc.subject_type = 'file'
+    local comments = { file_c('c2', 5, 5), fc }
+    assert.same({ fc }, comment.file_thread(comments, 'a.lua'))
+    assert.same({}, comment.thread_at(comments, 'a.lua', 1))
+    assert.same({}, comment.file_thread(comments, 'b.lua'))
+  end)
+end)
+
+describe('comment.reply_target', function()
+  local mk = function(id, opts)
+    local c = {
+      id = id,
+      file = opts.file or 'a.lua',
+      line = opts.line,
+      end_line = opts.end_line or opts.line,
+      state = 'active',
+    }
+    for _, k in ipairs { 'origin', 'gh_id', 'in_reply_to', 'subject_type' } do
+      if opts[k] ~= nil then
+        c[k] = opts[k]
+      end
+    end
+    return c
+  end
+
+  it('gh の根コメント (in_reply_to=nil) の gh_id を返す (行スレッド)', function()
+    local comments = {
+      mk('c1', { origin = 'gh', gh_id = 101, line = 5, in_reply_to = nil }),
+      mk('c2', { origin = 'gh', gh_id = 102, line = 5, in_reply_to = 101 }),
+    }
+    assert.equals(101, comment.reply_target(comments, 'a.lua', 5))
+  end)
+
+  it('gh 根が無いローカルスレッドは根コメント id を返す', function()
+    local comments = {
+      mk('c1', { line = 5, in_reply_to = nil }),
+      mk('c2', { line = 5, in_reply_to = 'c1' }),
+    }
+    assert.equals('c1', comment.reply_target(comments, 'a.lua', 5))
+  end)
+
+  it('push 済みローカル根 (gh_id あり) はその gh_id を返す', function()
+    local comments = {
+      mk('c1', { line = 5, in_reply_to = nil, gh_id = 201 }),
+    }
+    assert.equals(201, comment.reply_target(comments, 'a.lua', 5))
+  end)
+
+  it('スレッドが無い行は nil を返す', function()
+    assert.is_nil(comment.reply_target({}, 'a.lua', 5))
+  end)
+
+  it('ファイルレベルスレッド (line=nil) の根を返す', function()
+    local comments = {
+      mk('c1', { subject_type = 'file', origin = 'gh', gh_id = 301, in_reply_to = nil }),
+      mk('c2', { subject_type = 'file', origin = 'gh', gh_id = 302, in_reply_to = 301 }),
+    }
+    assert.equals(301, comment.reply_target(comments, 'a.lua', nil))
+  end)
+end)
+
+describe('comment.from_gh', function()
+  it('GitHub の review comment オブジェクトを Comment に正規化する', function()
+    local gh = {
+      id = 500,
+      path = 'src/a.lua',
+      body = 'use table.insert',
+      line = 12,
+      in_reply_to_id = nil,
+      user = { login = 'octocat' },
+      created_at = '2024-01-02T03:04:05Z',
+      subject_type = 'line',
+    }
+    local c = comment.from_gh(gh, { id = 'c7' })
+    assert.same({
+      id = 'c7',
+      file = 'src/a.lua',
+      body = 'use table.insert',
+      origin = 'gh',
+      gh_id = 500,
+      gh_user = 'octocat',
+      in_reply_to = nil,
+      created_at = 1704132245,
+      state = 'active',
+      line = 12,
+      end_line = 12,
+    }, c)
+  end)
+
+  it('subject_type=file は line を持たない', function()
+    local gh = {
+      id = 501,
+      path = 'src/a.lua',
+      body = 'note on the file',
+      line = nil,
+      user = { login = 'octocat' },
+      created_at = 'bad-date',
+      subject_type = 'file',
+    }
+    local c = comment.from_gh(gh, { id = 'c8' })
+    assert.equals('file', c.subject_type)
+    assert.is_nil(c.line)
+    assert.equals(0, c.created_at)
+  end)
+
+  it('line が無いコメントは original_line を仮置きする (outdated 予備)', function()
+    local gh = {
+      id = 502,
+      path = 'a.lua',
+      body = 'stale',
+      line = nil,
+      original_line = 3,
+      user = { login = 'x' },
+      created_at = '2024-01-02T03:04:05Z',
+      subject_type = 'line',
+    }
+    local c = comment.from_gh(gh, { id = 'c9' })
+    assert.equals(3, c.line)
+    assert.equals(3, c.end_line)
+  end)
+end)

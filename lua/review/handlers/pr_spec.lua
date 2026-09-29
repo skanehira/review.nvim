@@ -65,6 +65,12 @@ local function install_git(responses)
   state.git_calls = {}
   state.git_opts = {}
   cli._set_system(function(cmd, opts, on_exit)
+    -- gh api (PR 開始時のコメント取り込み pr-comments)。引数組み立てを対象とする
+    -- 本 spec では空応答で通し、call 記録・応答 index・通知に含めない。
+    if cmd[1] == 'gh' and cmd[2] == 'api' then
+      on_exit { code = 0, stdout = '[]', stderr = '' }
+      return
+    end
     local idx = #state.git_calls + 1
     table.insert(state.git_calls, cmd)
     state.git_opts[idx] = opts
@@ -222,6 +228,7 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         -- マークは panel の x でトグル)
         files = { ['a.lua'] = { viewed = false } },
         comments = {},
+        general = {},
         created_at = 4321,
         updated_at = 4321,
       }, saved)

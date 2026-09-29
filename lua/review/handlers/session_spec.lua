@@ -75,10 +75,25 @@ local state = {}
 -- state.git_opts[idx] には vim.system opts を並列記録し、cwd 契約を pin できるように
 -- する。show は既定応答 (base / 縮退 head scratch 充填) を用意し、open_file 由来の
 -- git show が応答不足で error にならないようにする (明示列挙も可能)。
+-- gh api (PR 開始時のコメント取り込み pr-comments)。git/worktree の引数組み立てを
+-- 対象とする本 spec では GET 一覧系を空応答で通し、call 記録にも応答 index にも
+-- 含めない (fetch 完了の通知も 0 件で出ない)。取り込み自体の検証は
+-- pr_comments_spec が担う。
+local function gh_api_stub(cmd, on_exit)
+  if cmd[1] == 'gh' and cmd[2] == 'api' then
+    on_exit { code = 0, stdout = '[]', stderr = '' }
+    return true
+  end
+  return false
+end
+
 local function install_git(responses)
   state.git_calls = {}
   state.git_opts = {}
   cli._set_system(function(cmd, opts, on_exit)
+    if gh_api_stub(cmd, on_exit) then
+      return
+    end
     local idx = #state.git_calls + 1
     table.insert(state.git_calls, cmd)
     state.git_opts[idx] = opts
@@ -107,6 +122,9 @@ local function install_git_deferred(responses, defer_pred)
   state.git_opts = {}
   state.deferred = nil
   cli._set_system(function(cmd, opts, on_exit)
+    if gh_api_stub(cmd, on_exit) then
+      return
+    end
     local idx = #state.git_calls + 1
     table.insert(state.git_calls, cmd)
     state.git_opts[idx] = opts
@@ -4034,6 +4052,9 @@ local function install_git_deferred_diff(responses)
   state.deferred = nil
   state.diff_calls = 0
   cli._set_system(function(cmd, opts, on_exit)
+    if gh_api_stub(cmd, on_exit) then
+      return
+    end
     local idx = #state.git_calls + 1
     table.insert(state.git_calls, cmd)
     state.git_opts[idx] = opts

@@ -32,6 +32,7 @@ local ui_scratchwin = require 'review.ui.scratchwin'
 local ui_windows = require 'review.ui.windows'
 local usermsg = require 'review.handlers.usermsg'
 local wt_buffers = require 'review.handlers.worktree_buffers'
+local pr_comments = require 'review.handlers.pr_comments'
 
 local M = {}
 
@@ -1708,6 +1709,11 @@ begin_session = function(args, files, existing, worktree, degraded)
       created_at = now(),
     }
   end
+  -- 新規セッションは一般コメント (PR conversation) の入れ物を持つ (pr のみ。
+  -- branch は session JSON に general を載せない — 旧スキーマ維持)。
+  if args.mode == 'pr' then
+    session.general = session.general or {}
+  end
   session.status = 'open'
   -- 作成判断の解を毎回上書き (crash 後の記録陳腐化を許さない — pr-worktree.md 異常終了回復)。
   session.worktree = worktree
@@ -1736,6 +1742,23 @@ begin_session = function(args, files, existing, worktree, degraded)
   if args.info ~= nil then
     -- PR タイトルは開始時 INFO のみ (セッションに永続化しない — pr-worktree.md)。
     vim.notify('review.nvim: ' .. args.info, vim.log.levels.INFO)
+  end
+  -- PR セッションは GitHub のレビューコメント / 一般コメントを非同期で取り込む
+  -- (diff と並行。完了時に突合 -> UI 再適用 -> 永続化 — pr-comments)。
+  -- active 同一性で close / 切替後の適用を破棄する。
+  if pr_comments.enabled(session) then
+    pr_comments.fetch(session, { files_by_path = files_by_path }, function(failed, added)
+      if active == nil or active.session ~= session then
+        return
+      end
+      M.commit_comment_change()
+      if not failed and added > 0 then
+        vim.notify(
+          ('review.nvim: imported %d comment(s) from the PR'):format(added),
+          vim.log.levels.INFO
+        )
+      end
+    end)
   end
 end
 
@@ -2310,6 +2333,22 @@ function M.refresh()
     end
     apply_refresh(current, res.data.files)
     notify_head_switch_once(current)
+    -- PR セッションは差分再取得に加えて GitHub のコメントも再取り込みする
+    -- (他ユーザーのコメント・pending 状態・削除を追随。突合 -> UI 再適用)。
+    if pr_comments.enabled(session) then
+      pr_comments.fetch(session, { files_by_path = current.files_by_path }, function(failed, added)
+        if active ~= current then
+          return
+        end
+        M.commit_comment_change()
+        if not failed and added > 0 then
+          vim.notify(
+            ('review.nvim: imported %d comment(s) from the PR'):format(added),
+            vim.log.levels.INFO
+          )
+        end
+      end)
+    end
     if follow then
       M.refresh()
     end

@@ -184,3 +184,212 @@ describe('git/gh pr_view 結果型分岐 (E_GH / E_PR)', function()
     end
   )
 end)
+
+local REPO = { owner = 'acme', repo = 'demo' }
+
+describe('git/gh repo_from_url', function()
+  it('PR url から owner/repo を取り出す', function()
+    assert.same(
+      { owner = 'acme', repo = 'demo' },
+      gh.repo_from_url 'https://github.com/acme/demo/pull/7'
+    )
+  end)
+
+  it('URL でない / nil は nil を返す', function()
+    assert.is_nil(gh.repo_from_url(nil))
+    assert.is_nil(gh.repo_from_url '7')
+  end)
+end)
+
+describe('git/gh api 一覧系 (引数組み立て + JSON 変換)', function()
+  use_env()
+
+  it('list_review_comments は --paginate 付きで GET し配列を data に返す', function()
+    stub_exit { code = 0, stdout = '[{"id":10,"path":"a.lua","body":"hi"}]', stderr = '' }
+    local received
+    gh.list_review_comments({ repo = REPO, number = 7 }, function(res)
+      received = res
+    end)
+    assert.same(
+      { 'gh', 'api', 'repos/acme/demo/pulls/7/comments', '--paginate' },
+      state.calls[1].cmd
+    )
+    assert.equals(true, received.ok)
+    assert.equals(10, received.data[1].id)
+    assert.equals('hi', received.data[1].body)
+  end)
+
+  it('list_reviews は pulls/{n}/reviews を GET する', function()
+    stub_exit { code = 0, stdout = '[{"state":"PENDING","id":3}]', stderr = '' }
+    local received
+    gh.list_reviews({ repo = REPO, number = 7 }, function(res)
+      received = res
+    end)
+    assert.same(
+      { 'gh', 'api', 'repos/acme/demo/pulls/7/reviews', '--paginate' },
+      state.calls[1].cmd
+    )
+    assert.equals('PENDING', received.data[1].state)
+  end)
+
+  it('list_issue_comments は issues/{n}/comments を GET する', function()
+    stub_exit { code = 0, stdout = '[{"body":"general"}]', stderr = '' }
+    local received
+    gh.list_issue_comments({ repo = REPO, number = 7 }, function(res)
+      received = res
+    end)
+    assert.same(
+      { 'gh', 'api', 'repos/acme/demo/issues/7/comments', '--paginate' },
+      state.calls[1].cmd
+    )
+    assert.equals('general', received.data[1].body)
+  end)
+end)
+
+describe('git/gh api 書き込み系 (引数組み立て)', function()
+  use_env()
+
+  it('create_review_comment は新規行コメントを POST (body/path/line)', function()
+    stub_exit { code = 0, stdout = '{"id":50,"body":"ok"}', stderr = '' }
+    local received
+    gh.create_review_comment({
+      repo = REPO,
+      number = 7,
+      path = 'src/a.lua',
+      line = 12,
+      body = 'use insert',
+    }, function(res)
+      received = res
+    end)
+    assert.same({
+      'gh',
+      'api',
+      '--method',
+      'POST',
+      'repos/acme/demo/pulls/7/comments',
+      '-F',
+      'body=use insert',
+      '-F',
+      'path=src/a.lua',
+      '-f',
+      'line=12',
+    }, state.calls[1].cmd)
+    assert.equals(50, received.data.id)
+  end)
+
+  it('create_review_comment は in_reply_to 指定で返信 POST (他 params 無し)', function()
+    stub_exit { code = 0, stdout = '{"id":51}', stderr = '' }
+    gh.create_review_comment({
+      repo = REPO,
+      number = 7,
+      body = 'reply text',
+      in_reply_to = 101,
+    }, function() end)
+    assert.same({
+      'gh',
+      'api',
+      '--method',
+      'POST',
+      'repos/acme/demo/pulls/7/comments',
+      '-F',
+      'body=reply text',
+      '-f',
+      'in_reply_to=101',
+    }, state.calls[1].cmd)
+  end)
+
+  it('create_review_comment は subject_type=file でファイルレベルを POST', function()
+    stub_exit { code = 0, stdout = '{"id":52}', stderr = '' }
+    gh.create_review_comment({
+      repo = REPO,
+      number = 7,
+      path = 'src/a.lua',
+      subject_type = 'file',
+      body = 'file note',
+    }, function() end)
+    assert.same({
+      'gh',
+      'api',
+      '--method',
+      'POST',
+      'repos/acme/demo/pulls/7/comments',
+      '-F',
+      'body=file note',
+      '-F',
+      'path=src/a.lua',
+      '-f',
+      'subject_type=file',
+    }, state.calls[1].cmd)
+  end)
+
+  it('create_review は event (+body) を POST', function()
+    stub_exit { code = 0, stdout = '{"id":9,"state":"APPROVED"}', stderr = '' }
+    local received
+    gh.create_review({ repo = REPO, number = 7, event = 'APPROVE', body = 'lgtm' }, function(res)
+      received = res
+    end)
+    assert.same({
+      'gh',
+      'api',
+      '--method',
+      'POST',
+      'repos/acme/demo/pulls/7/reviews',
+      '-f',
+      'event=APPROVE',
+      '-F',
+      'body=lgtm',
+    }, state.calls[1].cmd)
+    assert.equals('APPROVED', received.data.state)
+  end)
+
+  it('create_review は body 省略時 body フラグを付けない', function()
+    stub_exit { code = 0, stdout = '{}', stderr = '' }
+    gh.create_review({ repo = REPO, number = 7, event = 'COMMENT' }, function() end)
+    assert.same({
+      'gh',
+      'api',
+      '--method',
+      'POST',
+      'repos/acme/demo/pulls/7/reviews',
+      '-f',
+      'event=COMMENT',
+    }, state.calls[1].cmd)
+  end)
+
+  it('submit_review は PUT pulls/{n}/reviews/{id}', function()
+    stub_exit { code = 0, stdout = '{"state":"APPROVED"}', stderr = '' }
+    gh.submit_review({ repo = REPO, number = 7, review_id = 3, event = 'APPROVE' }, function() end)
+    assert.same({
+      'gh',
+      'api',
+      '--method',
+      'PUT',
+      'repos/acme/demo/pulls/7/reviews/3',
+      '-f',
+      'event=APPROVE',
+    }, state.calls[1].cmd)
+  end)
+
+  it('api 書き込みの未 auth 失敗は E_GH に変換する', function()
+    stub_exit { code = 1, stdout = '', stderr = 'please run: gh auth login\n' }
+    local received
+    gh.create_review_comment(
+      { repo = REPO, number = 7, path = 'a', line = 1, body = 'x' },
+      function(res)
+        received = res
+      end
+    )
+    assert.same('E_GH', received.code)
+    assert.equals('gh is not logged in; run `gh auth login`', received.error)
+  end)
+
+  it('api の 404 失敗は E_PR に変換する', function()
+    stub_exit { code = 1, stdout = '', stderr = 'gh: Not Found (HTTP 404)\n' }
+    local received
+    gh.list_review_comments({ repo = REPO, number = 999 }, function(res)
+      received = res
+    end)
+    assert.same('E_PR', received.code)
+    assert.matches('Not Found', received.error)
+  end)
+end)
