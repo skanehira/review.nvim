@@ -761,3 +761,52 @@ describe('comments [c / ]c (前後のコメントへジャンプ)', function()
     }, state.notifications)
   end)
 end)
+
+describe('comments r (返信 / local pending)', function()
+  use_env()
+
+  it(
+    'カーソル行スレッドへ返信: in_reply_to=gh 根の id を持つ local pending を追加・save',
+    function()
+      local sess = session_handler.active()
+      sess.comments = {
+        {
+          id = 'c1',
+          file = 'a.lua',
+          line = 2,
+          end_line = 2,
+          body = 'root',
+          origin = 'gh',
+          gh_id = 101,
+          in_reply_to = nil,
+        },
+      }
+      session_handler.commit_comment_change()
+      focus_head_row(2)
+      comments_handler.reply_at_cursor()
+      type_into_float 'my reply'
+
+      local comments = saved().comments
+      assert.equals(2, #comments)
+      local c = comments[2]
+      assert.equals('c2', c.id)
+      assert.equals('a.lua', c.file)
+      assert.equals(2, c.line)
+      assert.equals(2, c.end_line)
+      assert.equals('my reply', c.body)
+      assert.equals('local', c.origin)
+      assert.equals(101, c.in_reply_to)
+      assert.is_nil(c.gh_id)
+    end
+  )
+
+  it('スレッドが無い行は WARN で開かない', function()
+    focus_head_row(4)
+    comments_handler.reply_at_cursor()
+    assert.same({
+      msg = 'review.nvim: no thread to reply to on this line',
+      level = vim.log.levels.WARN,
+    }, state.notifications[1])
+    assert.equals(0, #saved().comments)
+  end)
+end)

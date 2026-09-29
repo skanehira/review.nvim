@@ -1752,6 +1752,7 @@ begin_session = function(args, files, existing, worktree, degraded)
         return
       end
       M.commit_comment_change()
+      require('review.handlers.pr_chat').refresh()
       if not failed and added > 0 then
         vim.notify(
           ('review.nvim: imported %d comment(s) from the PR'):format(added),
@@ -2341,6 +2342,7 @@ function M.refresh()
           return
         end
         M.commit_comment_change()
+        require('review.handlers.pr_chat').refresh()
         if not failed and added > 0 then
           vim.notify(
             ('review.nvim: imported %d comment(s) from the PR'):format(added),

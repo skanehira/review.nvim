@@ -52,6 +52,20 @@ local SECTIONS = {
           .. 'window if already open)',
       },
       { 'view_comments', 'view the comment on the cursor line (read-only)' },
+      {
+        'reply_comment',
+        'reply to the thread on the cursor line (saved as pending; '
+          .. 'head window only; submitted with submit_review)',
+      },
+      {
+        'submit_review',
+        'submit the review: push pending comments and finish with an event '
+          .. '(Comment / Approve / Request changes; PR sessions only)',
+      },
+      {
+        'open_pr_chat',
+        'open the PR conversation (general comments, same as :Review pr-chat)',
+      },
     },
   },
   {
@@ -94,6 +108,11 @@ local SECTIONS = {
       { 'help', 'this help (g? also works in the panel)' },
       { 'close', 'close the session' },
       { 'comments_list', 'open the comments list (same as the diff windows)' },
+      { 'submit_review', 'submit the review (same as s in the diff windows)' },
+      {
+        'open_pr_chat',
+        'open the PR conversation (general comments, same as the diff windows)',
+      },
     },
   },
   {
@@ -115,7 +134,21 @@ local SECTIONS = {
       },
       { 'edit', 'edit the comment on the cursor line' },
       { 'yank', 'yank the prompt of the comment on the cursor line' },
+      {
+        'reply',
+        'reply to the thread on the cursor line (line or file-level; saved as pending)',
+      },
+      { 'submit', 'submit the review (same as s in the diff windows)' },
       { 'close', 'close the list (leaves the session state unchanged)' },
+    },
+  },
+  {
+    title = 'PR conversation (:Review pr-chat)',
+    keymap = 'prchat',
+    rows = {
+      { 'reply', 'reply to the PR (saved as pending; submitted with submit_review)' },
+      { 'submit', 'submit the review (same as s in the diff windows)' },
+      { 'close', 'close the conversation (leaves the session state unchanged)' },
     },
   },
   {

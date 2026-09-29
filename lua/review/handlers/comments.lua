@@ -283,6 +283,42 @@ local function jump_comment(delta)
   end)
 end
 
+--- `r`: カーソル行のスレッドへ返信する (head 窓のみ。diff-review「操作」r)。
+--- 返信は local pending (in_reply_to = スレッドの根: gh 根の gh_id or ローカル根の
+--- id) として session.comments に追加し、submit (`s`) で GitHub へ一括 push される。
+function M.reply_at_cursor()
+  local target = head_target()
+  if target == nil then
+    return
+  end
+  local line = cursor_row()
+  if line < 1 or line > vim.api.nvim_buf_line_count(target.buf) then
+    notify_warn 'no thread on this line'
+    return
+  end
+  local thread_id = comment_model.reply_target(target.session.comments, target.path, line)
+  if thread_id == nil then
+    notify_warn 'no thread to reply to on this line'
+    return
+  end
+  ui_input.open {
+    hint = ('reply to %s:%d'):format(target.path, line),
+    on_confirm = function(body)
+      comment_model.add(target.session.comments, {
+        file = target.path,
+        line = line,
+        end_line = line,
+        body = body,
+        origin = 'local',
+        in_reply_to = thread_id,
+        created_at = now(),
+      })
+      session_handler.commit_comment_change()
+      vim.notify('review.nvim: reply saved (submit with s)', vim.log.levels.INFO)
+    end,
+  }
+end
+
 --- `c[`: 前のコメントへジャンプ (head 窓のみ。先頭より上では no-op)。
 function M.prev_comment()
   jump_comment(-1)

@@ -122,6 +122,8 @@ local function paint_keymaps(buf)
     { k.page_up, "require('review.handlers.session').page_up()" },
     { k.refresh, "require('review.handlers.session').refresh()" },
     { k.comments_list, "require('review.handlers.comments_list').open()" },
+    { k.submit_review, "require('review.handlers.submit').submit_review()" },
+    { k.open_pr_chat, "require('review.handlers.pr_chat').open()" },
     { k.toggle_viewed, "require('review.handlers.session').toggle_viewed_current()" },
     { k.filter, "require('review.handlers.session').filter_sidebar()" },
     { k.toggle_style, "require('review.handlers.session').toggle_listing_style()" },

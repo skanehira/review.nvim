@@ -6,10 +6,21 @@ local result = require 'review.core.result'
 local M = {}
 
 -- DESIGN.md「API 一覧」のコマンド表順。Tab 補完と unknown 判定の正本。
-M.subcommands = { 'start', 'pr', 'list', 'comments', 'close', 'delete', 'prompt', 'clear' }
+M.subcommands = {
+  'start',
+  'pr',
+  'list',
+  'comments',
+  'pr-chat',
+  'submit',
+  'close',
+  'delete',
+  'prompt',
+  'clear',
+}
 
 local USAGE = 'usage: :Review [start <base> [head] | pr <number|url> | list | '
-  .. 'comments | close | delete <id> | prompt [file] | clear]'
+  .. 'comments | pr-chat | submit | close | delete <id> | prompt [file] | clear]'
 
 local function usage(msg)
   vim.notify('review.nvim: ' .. msg, vim.log.levels.WARN)
@@ -62,6 +73,25 @@ end
 
 function M.cmd_close(_args)
   local res = require('review.handlers.session').close()
+  if not res.ok then
+    vim.notify(res.error, vim.log.levels.WARN)
+  end
+  return res
+end
+
+--- `:Review pr-chat`: PR 一般コメント (conversation) を開く (diff 窓の `p` と同一)。
+--- mode=pr 以外は handler が WARN。active 不在は E_NOT_ACTIVE。
+function M.cmd_pr_chat(_args)
+  local res = require('review.handlers.pr_chat').open()
+  if not res.ok then
+    vim.notify(res.error, vim.log.levels.WARN)
+  end
+  return res
+end
+
+--- `:Review submit`: レビュー submit (diff 窓の `s` と同一)。
+function M.cmd_submit(_args)
+  local res = require('review.handlers.submit').submit_review()
   if not res.ok then
     vim.notify(res.error, vim.log.levels.WARN)
   end
@@ -142,7 +172,8 @@ end
 function M.command(args)
   local sub = args[1]
   local target = sub or 'resume'
-  local handler = M['cmd_' .. target]
+  -- 'pr-chat' のようなハイフン付きサブコマンドは cmd_pr_chat へ (Lua 識別子の都合)
+  local handler = M['cmd_' .. target:gsub('-', '_')]
   if handler == nil then
     local msg = 'review.nvim: unknown subcommand: ' .. target
     vim.notify(msg .. '. ' .. USAGE, vim.log.levels.WARN)

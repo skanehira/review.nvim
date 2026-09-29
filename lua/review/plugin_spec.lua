@@ -66,7 +66,7 @@ describe('plugin/review.lua', function()
       assert.same({
         msg = 'review.nvim: unknown subcommand: bogus. '
           .. 'usage: :Review [start <base> [head] | pr <number|url> | list | '
-          .. 'comments | close | delete <id> | prompt [file] | clear]',
+          .. 'comments | pr-chat | submit | close | delete <id> | prompt [file] | clear]',
         level = vim.log.levels.WARN,
       }, notifications[1])
       assert.equals(1, #notifications)
@@ -75,10 +75,18 @@ describe('plugin/review.lua', function()
 
   it('Tab 補完はサブコマンド 8 種を返す (complete=customlist の結線)', function()
     dofile(plugin_path())
-    assert.same(
-      { 'start', 'pr', 'list', 'comments', 'close', 'delete', 'prompt', 'clear' },
-      vim.fn.getcompletion('Review ', 'cmdline')
-    )
+    assert.same({
+      'start',
+      'pr',
+      'list',
+      'comments',
+      'pr-chat',
+      'submit',
+      'close',
+      'delete',
+      'prompt',
+      'clear',
+    }, vim.fn.getcompletion('Review ', 'cmdline'))
     assert.same({ 'prompt' }, vim.fn.getcompletion('Review pro', 'cmdline'))
   end)
 end)

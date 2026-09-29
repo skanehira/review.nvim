@@ -896,3 +896,115 @@ describe('commentmarks.clear_tracked: close 収集と残骸 0', function()
     assert.equals(0, #marks(b2))
   end)
 end)
+
+describe(
+  'commentmarks: PR コメントの表示 (作者 / pending / ファイルレベル)',
+  function()
+    use_bufs()
+
+    local function pr_session(comments)
+      local s = session_of(comments)
+      s.mode = 'pr'
+      return s
+    end
+
+    local function thread_lines(buf)
+      for _, m in ipairs(marks(buf)) do
+        if m[4].virt_lines ~= nil then
+          return m[4].virt_lines
+        end
+      end
+      return {}
+    end
+
+    local function thread_text(buf)
+      return table.concat(vim.tbl_map(line_text, thread_lines(buf)), '\n')
+    end
+
+    it('gh コメントは作者 login を接頭辞に表示する', function()
+      local buf = mk_buf { 'line1', 'line2', 'line3' }
+      local gh_c = comment { origin = 'gh', gh_id = 10, gh_user = 'octocat' }
+      commentmarks.apply(pr_session { gh_c }, buf, 'a.lua')
+      local t = thread_text(buf)
+      assert.is_true(t:find('  [octocat] ', 1, true) ~= nil, t)
+      assert.is_true(t:find('first thought', 1, true) ~= nil, t)
+    end)
+
+    it('gh の未 submit コメントには ⚠ マーカーを付ける', function()
+      local buf = mk_buf { 'line1', 'line2', 'line3' }
+      local gh_pending =
+        comment { origin = 'gh', gh_id = 10, gh_user = 'octocat', gh_state = 'pending' }
+      commentmarks.apply(pr_session { gh_pending }, buf, 'a.lua')
+      local t = thread_text(buf)
+      assert.is_true(t:find('[octocat \u{26A0}]', 1, true) ~= nil, t)
+    end)
+
+    it(
+      'pr モードの local 未 push コメントには ⚠ を付ける (branch には付けない)',
+      function()
+        local buf = mk_buf { 'line1', 'line2', 'line3' }
+        local local_pending = comment { origin = 'local', id = 'c2' }
+        commentmarks.apply(pr_session { local_pending }, buf, 'a.lua')
+        local first = thread_text(buf)
+        assert.is_true(first:find('[c2 \u{26A0}]', 1, true) ~= nil, first)
+
+        -- branch モードでは local コメントに ⚠ を付けない (旧表示のまま)
+        local buf2 = mk_buf { 'line1', 'line2', 'line3' }
+        commentmarks.apply(session_of { comment { origin = 'local', id = 'c2' } }, buf2, 'a.lua')
+        local first2 = thread_text(buf2)
+        assert.is_true(first2:find('[c2] ', 1, true) ~= nil, first2)
+        assert.is_nil(first2:find('\u{26A0}', 1, true), first2)
+      end
+    )
+
+    it(
+      'ファイルレベルコメントは 1 行目上 (virt_lines_above) に [file] <path> 見出しで表示する',
+      function()
+        local buf = mk_buf { 'line1', 'line2' }
+        local fc = comment {
+          subject_type = 'file',
+          origin = 'gh',
+          gh_id = 20,
+          gh_user = 'alice',
+          line = nil,
+          end_line = nil,
+        }
+        commentmarks.apply(pr_session { fc }, buf, 'a.lua')
+        local above = {}
+        for _, m in ipairs(marks(buf)) do
+          if m[4].virt_lines_above == true and m[4].virt_lines ~= nil then
+            above = m[4].virt_lines
+          end
+        end
+        assert.is_true(#above > 0, 'ファイルレベル box が無い')
+        local t = table.concat(vim.tbl_map(line_text, above), '\n')
+        assert.is_true(t:find('[file] a.lua', 1, true) ~= nil, t)
+        assert.is_true(t:find('[alice]', 1, true) ~= nil, t)
+      end
+    )
+
+    it(
+      'ファイルレベルと outdated 集約は 1 行目上に 2 つスタックされる',
+      function()
+        local buf = mk_buf { 'line1', 'line2' }
+        local fc = comment {
+          subject_type = 'file',
+          origin = 'gh',
+          gh_id = 20,
+          gh_user = 'a',
+          line = nil,
+          end_line = nil,
+        }
+        local stale = comment { id = 'c9', line = 99, state = 'outdated' }
+        commentmarks.apply(pr_session { fc, stale }, buf, 'a.lua')
+        local above_marks = 0
+        for _, m in ipairs(marks(buf)) do
+          if m[4].virt_lines_above == true then
+            above_marks = above_marks + 1
+          end
+        end
+        assert.equals(2, above_marks)
+      end
+    )
+  end
+)

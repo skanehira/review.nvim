@@ -100,9 +100,15 @@ function M.reconcile_review_comments(session, gh_comments, reviews, files_by_pat
       added = added + 1
     end
   end
+  -- server から消えた gh コメントと、submit でサーバー側へ「採用」された
+  -- local コメント (gh_id が server の集合に載った = 重複を避けるため gh 版に
+  -- 置き換える) を削除する。local で gh_id を持たない pending は常に保持。
   for i = #(session.comments or {}), 1, -1 do
     local c = session.comments[i]
     if c.origin == 'gh' and c.gh_id ~= nil and not seen[c.gh_id] then
+      table.remove(session.comments, i)
+      removed = removed + 1
+    elseif c.origin ~= 'gh' and c.gh_id ~= nil and seen[c.gh_id] then
       table.remove(session.comments, i)
       removed = removed + 1
     end

@@ -3,7 +3,7 @@ local result = require 'review.core.result'
 local config = require 'review.config'
 
 local USAGE = 'usage: :Review [start <base> [head] | pr <number|url> | list | '
-  .. 'comments | close | delete <id> | prompt [file] | clear]'
+  .. 'comments | pr-chat | submit | close | delete <id> | prompt [file] | clear]'
 
 -- describe 間で共有する spy 復元先と一時 dir (file scope の local を明示する。
 -- 無宣言代入はグローバルになり lint / 他 spec の汚染になる)。
@@ -174,7 +174,7 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
   it(
     'complete は pr / prompt を prefix 一致で返す (サブコマンド表と結線の一致)',
     function()
-      assert.same({ 'pr', 'prompt' }, review.complete('pr', '', 0))
+      assert.same({ 'pr', 'pr-chat', 'prompt' }, review.complete('pr', '', 0))
     end
   )
 
@@ -561,7 +561,7 @@ describe(
       'file 補完は active 不在では空、2 引目ではサブコマンド補完を維持する',
       function()
         assert.same({}, review.complete('a', ':Review prompt a', 18))
-        assert.same({ 'pr', 'prompt' }, review.complete('p', ':Review p', 9))
+        assert.same({ 'pr', 'pr-chat', 'prompt' }, review.complete('p', ':Review p', 9))
       end
     )
   end
@@ -573,16 +573,24 @@ describe('review.complete', function()
   it(
     '空 arglead では DESIGN.md「API 一覧」のサブコマンドを宣言順で返す',
     function()
-      assert.same(
-        { 'start', 'pr', 'list', 'comments', 'close', 'delete', 'prompt', 'clear' },
-        review.complete('', '', 0)
-      )
+      assert.same({
+        'start',
+        'pr',
+        'list',
+        'comments',
+        'pr-chat',
+        'submit',
+        'close',
+        'delete',
+        'prompt',
+        'clear',
+      }, review.complete('', '', 0))
     end
   )
 
   it('prefix 一致に絞り込む', function()
     assert.same({ 'close', 'clear' }, review.complete('cl', '', 0))
-    assert.same({ 'pr', 'prompt' }, review.complete('p', '', 0))
+    assert.same({ 'pr', 'pr-chat', 'prompt' }, review.complete('p', '', 0))
   end)
 
   it('一致なしは空リスト (Tab 補完候補が出ない)', function()
@@ -722,9 +730,9 @@ describe(':Review start の base/head ref 補完 (cmdline)', function()
     end
   )
 
-  it('サブコマンド位置では refs を引かない (start 候補だけ)', function()
+  it('サブコマンド位置では refs を引かない (start / submit 候補だけ)', function()
     local captured = stub_refs(REFS)
-    assert.same({ 'start' }, review.complete('s', 'Review s', 0))
+    assert.same({ 'start', 'submit' }, review.complete('s', 'Review s', 0))
     assert.equals(0, captured.calls)
   end)
 end)
@@ -836,6 +844,6 @@ describe(':Review delete <id> と :Review pr <number> の補完', function()
   end)
 
   it('pr 2 引目従来 (サブコマンド候補) は維持', function()
-    assert.same({ 'pr', 'prompt' }, review.complete('pr', ':Review pr', 10))
+    assert.same({ 'pr', 'pr-chat', 'prompt' }, review.complete('pr', ':Review pr', 10))
   end)
 end)

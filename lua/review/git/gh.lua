@@ -228,6 +228,26 @@ function M.create_review(opts, cb)
   end)
 end
 
+--- 一般コメント (conversation) の投稿。POST repos/{o}/{r}/issues/{n}/comments。
+--- opts = { repo, number, body, cwd? }。cb(result) data = 作成されたコメント。
+function M.create_issue_comment(opts, cb)
+  local args = {
+    'api',
+    '--method',
+    'POST',
+    ('repos/%s/%s/issues/%s/comments'):format(opts.repo.owner, opts.repo.repo, opts.number),
+    '-F',
+    'body=' .. opts.body,
+  }
+  run_api(args, opts, function(res)
+    if not res.ok then
+      cb(res)
+      return
+    end
+    decode_json(res, 'gh api create issue comment', cb)
+  end)
+end
+
 --- pending レビューの submit。PUT repos/{o}/{r}/pulls/{n}/reviews/{review_id}。
 --- opts = { repo, number, review_id, event, body?, cwd? }。
 function M.submit_review(opts, cb)

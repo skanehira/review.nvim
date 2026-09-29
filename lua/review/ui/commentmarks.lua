@@ -119,11 +119,29 @@ local function side_lines(text, pad, budget, hl)
   return out
 end
 
+-- 1 コメントの表示ラベル: gh 由来は作者 login、push 済み local は自身の login、
+-- それ以外 (branch のローカル) は id。pending のときは ⚠ を添える。
+local function comment_label(c, pending)
+  local label
+  if c.origin == 'gh' then
+    label = c.gh_user or 'gh'
+  elseif c.gh_user ~= nil then
+    label = c.gh_user
+  else
+    label = c.id
+  end
+  if pending then
+    label = label .. ' \u{26A0}'
+  end
+  return label
+end
+
 -- 1 コメントの箱の中身行 (chunk 配列の配列。罫線は含まない)。inner = 箱の
--- 内側幅 (nil = 折り返さない)。1 表示行目は id 接頭辞 / 折り返し後と 2 行目以降
--- の本文行は continuation pad を付ける (pad 幅は id 接頭辞と同じ)。
-local function comment_lines(c, inner)
-  local prefix = ('  [%s] '):format(c.id)
+-- 内側幅 (nil = 折り返さない)。1 表示行目は id / 作者 接頭辞 / 折り返し後と
+-- 2 行目以降の本文行は continuation pad を付ける (pad 幅は接頭辞と同じ)。
+-- pending は ⚠ マーカーを接頭辞に添えるかどうか。
+local function comment_lines(c, inner, pending)
+  local prefix = ('  [%s] '):format(comment_label(c, pending))
   local pad = string.rep(' ', vim.fn.strchars(prefix))
   local prefix_hl = c.state == 'outdated' and OUTDATED_HEAD_HL or BODY_HL
   local out = {}
@@ -243,30 +261,41 @@ function M.apply(session, bufnr, path, opts)
 
   local line_count = line_count_count
   local width = opts ~= nil and opts.width or nil
+  -- pending 判定 (⚠ マーカー): pr モードの「まだ submit されていない」コメント
+  -- (local の未 push / gh の未 submit review 所属)。branch モードでは付けない。
+  local pr_mode = session.mode == 'pr'
+  local function pending(c)
+    return pr_mode and (c.gh_state == 'pending' or (c.origin ~= 'gh' and c.gh_id == nil))
+  end
   -- 群キー = 範囲の最終行 (end_line をバッファ末尾に clamp。end_line < line の
   -- 不正値は開始行に倒す — 下線 mark の end_row < row を作らない)。
   -- in-scope 判定は開始行のまま (開始行が解けるコメントは outdated に落とさない)。
   local groups = {} -- [最終行] = { comments }
   local group_order = {}
+  local file_level = {} -- ファイルレベル (head 窓 1 行目上に表示)
   local outdated_hidden = {}
   for _, c in ipairs(session.comments or {}) do
     local in_scope = (path == NO_CHANGES and c.state == 'outdated') or c.file == path
     if in_scope then
-      -- new 側の行番号 = head バッファの行番号そのもの (INV-2: 変換経路は無し)。
-      -- 解けない (= バッファ行数を超える / placeholder) outdated は 1 行目
-      -- virt_lines_above に集約する (diff-review「コメント表示」)。
-      local row = path ~= NO_CHANGES and c.line or nil
-      if row ~= nil and row >= 1 and row <= line_count then
-        local key = math.max(row, math.min(c.end_line or row, line_count))
-        local g = groups[key]
-        if g == nil then
-          g = {}
-          groups[key] = g
-          group_order[#group_order + 1] = key
+      -- ファイルレベルコメント (行を持たない) は 1 行目上に集約表示する。
+      -- 解ける行の無い outdated は従来どおり 1 行目の集約へ。
+      if c.subject_type == 'file' and c.state ~= 'outdated' and path ~= NO_CHANGES then
+        file_level[#file_level + 1] = c
+      else
+        -- new 側の行番号 = head バッファの行番号そのもの (INV-2: 変換経路は無し)。
+        local row = path ~= NO_CHANGES and c.line or nil
+        if row ~= nil and row >= 1 and row <= line_count then
+          local key = math.max(row, math.min(c.end_line or row, line_count))
+          local g = groups[key]
+          if g == nil then
+            g = {}
+            groups[key] = g
+            group_order[#group_order + 1] = key
+          end
+          g[#g + 1] = c
+        elseif c.state == 'outdated' then
+          outdated_hidden[#outdated_hidden + 1] = c
         end
-        g[#g + 1] = c
-      elseif c.state == 'outdated' then
-        outdated_hidden[#outdated_hidden + 1] = c
       end
     end
   end
@@ -289,13 +318,13 @@ function M.apply(session, bufnr, path, opts)
     if width == nil then
       natural = {}
       for _, c in ipairs(cs) do
-        natural[#natural + 1] = comment_lines(c, nil)
+        natural[#natural + 1] = comment_lines(c, nil, pending(c))
       end
     end
     local outer, inner = box_width(natural, width)
     local sections = {}
     for _, c in ipairs(cs) do
-      sections[#sections + 1] = comment_lines(c, inner)
+      sections[#sections + 1] = comment_lines(c, inner, pending(c))
     end
     local virt_lines = boxed(sections, outer, inner)
     -- nf-cod-comment (U+EA6B)。旧 💬 は廃止 (panel アイコンと同一グリフ)。
@@ -331,44 +360,48 @@ function M.apply(session, bufnr, path, opts)
     end
   end
 
-  -- 位置を解けない outdated の集約: 当該 head バッファ 1 行目の virt_lines_above
-  -- に、見出し「N outdated (prompt 除外中)」を箱 1 行目に置いた箱を描く。
-  -- 見出しは eol virt_text にしない — 1 行目が実ファイルの 1 行目なので編集で
-  -- 先頭に別行が足されると見出しがずれる。virt_lines_above はバッファ行に占有
-  -- されず行写像も不変 (AGENTS 実測の教訓)。
-  if #outdated_hidden > 0 then
-    -- 見出しは箱 1 行目で、先頭 comment とは区切り罫線を挟まず隣接させる。
-    -- 見出しも箱の中身行: 打ち切り文言行と同一流儀 (side_lines) で内側幅に
-    -- 折り返す (狭い width でも右辺からはみ出さない)。pad 幅は先頭 comment の
-    -- id 接頭辞と同じ (本文の continuation とインデントを揃える)
-    local function hidden_sections(inner)
-      local head_text = OUTDATED_HEAD_FMT:format(#outdated_hidden)
-      local sections = {}
-      for i, c in ipairs(outdated_hidden) do
+  -- 1 行目上の箱 (virt_lines_above) の共通描画: 見出しを箱 1 行目に置き、
+  -- 以降はコメント群を区切り罫線で並べる (ファイルレベル / outdated 集約で共用)。
+  -- virt_lines_above はバッファ行に占有されず行写像も不変 (AGENTS 実測の教訓)。
+  -- 見出しも箱の中身行: 打ち切り文言行と同一流儀 (side_lines) で内側幅に折り返す。
+  local function above_box(header, header_hl, comments)
+    local function sections(inner)
+      local out = {}
+      for i, c in ipairs(comments) do
         local lines = {}
         if i == 1 then
-          local prefix = ('  [%s] '):format(c.id)
+          local prefix = ('  [%s] '):format(comment_label(c, pending(c)))
           local pad = string.rep(' ', vim.fn.strchars(prefix))
           local budget = inner ~= nil and inner - vim.fn.strdisplaywidth(pad) or nil
-          for _, line in ipairs(side_lines(head_text, pad, budget, OUTDATED_HEAD_HL)) do
+          for _, line in ipairs(side_lines(header, pad, budget, header_hl)) do
             lines[#lines + 1] = line
           end
         end
-        for _, line in ipairs(comment_lines(c, inner)) do
+        for _, line in ipairs(comment_lines(c, inner, pending(c))) do
           lines[#lines + 1] = line
         end
-        sections[#sections + 1] = lines
+        out[#out + 1] = lines
       end
-      return sections
+      return out
     end
-    local natural = width == nil and hidden_sections(nil) or nil
+    local natural = width == nil and sections(nil) or nil
     local outer, inner = box_width(natural, width)
     -- virt_lines の 1 行 = chunk 配列、chunk = { text, hl } のネスト構造
     -- ({text,hl} フラットは "expected Array, got String" — AGENTS 実測の教訓)。
     vim.api.nvim_buf_set_extmark(bufnr, ns, 0, 0, {
-      virt_lines = boxed(hidden_sections(inner), outer, inner),
+      virt_lines = boxed(sections(inner), outer, inner),
       virt_lines_above = true,
     })
+  end
+
+  -- ファイルレベルコメント (行の無いコメント): 当該 head バッファ 1 行目の上に
+  -- 「[file] <path>」の見出し付き箱で表示する。
+  if #file_level > 0 then
+    above_box(('[file] %s'):format(path), BODY_HL, file_level)
+  end
+  -- 位置を解けない outdated の集約: 見出し「N outdated (prompt 除外中)」。
+  if #outdated_hidden > 0 then
+    above_box(OUTDATED_HEAD_FMT:format(#outdated_hidden), OUTDATED_HEAD_HL, outdated_hidden)
   end
 end
 

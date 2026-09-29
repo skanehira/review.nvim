@@ -218,6 +218,54 @@ function M.yank_current()
   prompt_handler.for_line(session, { c })
 end
 
+--- `r`: カーソル行のスレッドへ返信する (行スレッド / ファイルレベルの両対応 —
+--- comment-list「操作」r)。返信は local pending として追加し、submit で push。
+function M.reply_current()
+  local c, session = target_comment()
+  if c == nil then
+    return
+  end
+  local file = c.file
+  local line
+  if c.subject_type == 'file' then
+    line = nil
+  else
+    line = c.line
+  end
+  local thread_id = comment_model.reply_target(session.comments, file, line)
+  if thread_id == nil then
+    notify_warn 'no thread to reply to'
+    return
+  end
+  local hint
+  if c.subject_type == 'file' then
+    hint = ('reply to %s (file)'):format(file)
+  else
+    hint = ('reply to %s:%d'):format(file, line)
+  end
+  ui_input.open {
+    hint = hint,
+    on_confirm = function(body)
+      local attrs = {
+        file = file,
+        body = body,
+        origin = 'local',
+        in_reply_to = thread_id,
+        created_at = now(),
+      }
+      if c.subject_type == 'file' then
+        attrs.subject_type = 'file'
+      else
+        attrs.line = line
+        attrs.end_line = line
+      end
+      comment_model.add(session.comments, attrs)
+      session_handler.commit_comment_change()
+      vim.notify('review.nvim: reply saved (submit with s)', vim.log.levels.INFO)
+    end,
+  }
+end
+
 -- 一括削除 arming (D)。diff 窓 (handlers.comments) の arming とは共有しない一覧
 -- 専用の状態は単一削除の delete_armed とも別。対象は active セッションの全
 -- comments (state 無関係 = outdated も消す)、arming は「件数の変化」で無効化。

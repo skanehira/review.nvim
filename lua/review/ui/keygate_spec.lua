@@ -311,11 +311,11 @@ describe('keygate.install / uninstall', function()
           ours = ours + 1
         end
       end
-      -- config.keymaps.diff の n -mode 全キー = 19 (c/e/d/D/<Esc>/y/i/q/<F1>/<Tab>/
-      -- <S-Tab>/[F/]F/c[/c]/R/<leader>e/<leader>b/<leader>c) + g? 別名 = 20。v の c は別 mode。
-      -- focus_panel / toggle_panel / comments_list / help (<F1>・g?) は非 expr の
-      -- callback map (同期発火) で数える。
-      assert.equals(20, ours)
+      -- config.keymaps.diff の n -mode 全キー = 22 (c/e/d/D/<Esc>/y/i/q/<F1>/<Tab>/
+      -- <S-Tab>/[F/]F/c[/c]/R/r/s/<leader>e/<leader>b/<leader>c) + g? 別名 = 23。
+      -- v の c は別 mode。focus_panel / toggle_panel / comments_list / open_pr_chat /
+      -- help (<F1>・g?) は非 expr の callback map (同期発火) で数える。
+      assert.equals(23, ours)
     end
   )
 

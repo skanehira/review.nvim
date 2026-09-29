@@ -1170,3 +1170,59 @@ describe('comments_list の追随 (再 render)', function()
     assert.same({ 'src/deep/new.lua:1  [c2]  D' }, list_lines())
   end)
 end)
+
+describe('comments_list.reply_current (行スレッド / ファイルレベル)', function()
+  use_env()
+
+  it(
+    '行スレッドへの返信: in_reply_to=gh 根 id の local pending を追加し save',
+    function()
+      start_done()
+      add_comment {
+        body = 'gh root',
+        origin = 'gh',
+        gh_id = 101,
+        in_reply_to = nil,
+      }
+      comments_list.open()
+      focus_list_row(1)
+      comments_list.reply_current()
+      type_into_float 'reply to gh'
+
+      local sess = session_handler.active()
+      assert.equals(2, #sess.comments)
+      local c = sess.comments[2]
+      assert.equals('c2', c.id)
+      assert.equals('local', c.origin)
+      assert.equals(101, c.in_reply_to)
+      assert.equals(1, c.line)
+    end
+  )
+
+  it(
+    'ファイルレベルコメントへの返信: subject_type=file の local pending を追加',
+    function()
+      start_done()
+      add_comment {
+        body = 'file note',
+        subject_type = 'file',
+        line = nil,
+        end_line = nil,
+        origin = 'gh',
+        gh_id = 202,
+        in_reply_to = nil,
+      }
+      comments_list.open()
+      -- 一覧は `a.lua (file)  [c1]  file note` の 1 行
+      focus_list_row(1)
+      comments_list.reply_current()
+      type_into_float 'file reply'
+
+      local c = session_handler.active().comments[2]
+      assert.equals('file', c.subject_type)
+      assert.equals('local', c.origin)
+      assert.equals(202, c.in_reply_to)
+      assert.is_nil(c.line)
+    end
+  )
+end)

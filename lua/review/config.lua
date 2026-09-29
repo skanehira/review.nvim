@@ -45,6 +45,13 @@ M.defaults = {
       -- コメント一覧 (横断) を開く (:Review comments と同一。既に開いていれば
       -- その窓へ focus。非 expr の同期 mapping — DESIGN「既知の制約」キー)
       comments_list = '<leader>c',
+      -- カーソル行スレッドへ返信 (head 窓のみ。local pending として蓄積し
+      -- submit_review で GitHub へ一括 push — pr-comments)
+      reply_comment = 'r',
+      -- レビュー submit (event 選択 + 任意のサマリ本文 -> push -> 確定)
+      submit_review = 's',
+      -- PR 一般コメント (conversation) を開く (:Review pr-chat と同一)
+      open_pr_chat = 'p',
     },
     sidebar = {
       open_diff = '<CR>',
@@ -71,6 +78,9 @@ M.defaults = {
       help = '<F1>',
       -- コメント一覧 (横断) を開く (diff 窓と同じ。sidebar キーは filepanel が張る)
       comments_list = '<leader>c',
+      -- レビュー submit / PR 一般コメント (diff 窓と同じ操作)
+      submit_review = 's',
+      open_pr_chat = 'p',
     },
     sessionlist = {
       open = '<CR>',
@@ -86,6 +96,14 @@ M.defaults = {
       cancel_arming = '<Esc>',
       edit = 'e',
       yank = 'y',
+      reply = 'r',
+      submit = 's',
+      close = 'q',
+    },
+    -- PR 一般コメント (conversation, `:Review pr-chat`) の buffer-local キー。
+    prchat = {
+      reply = 'r',
+      submit = 's',
       close = 'q',
     },
   },

@@ -81,6 +81,10 @@ local function body_head(body)
 end
 
 local function loc_text(c)
+  if c.subject_type == 'file' then
+    -- ファイルレベルコメントは行を持たない (path (file) 形式 — comment-list)。
+    return ('%s (file)'):format(c.file)
+  end
   local line = c.line or 0
   local end_line = c.end_line or line
   if end_line > line then
@@ -132,8 +136,15 @@ function M.visible_comments(session, order)
     elseif a.c.file ~= b.c.file then
       return a.c.file < b.c.file
     end
-    if a.c.line ~= b.c.line then
-      return a.c.line < b.c.line
+    -- ファイルレベル (line=nil) は行コメントより先に出す (ファイル内の頭)
+    local al = a.c.line
+    local bl = b.c.line
+    if al == nil and bl ~= nil then
+      return true
+    elseif bl == nil and al ~= nil then
+      return false
+    elseif al ~= bl then
+      return al < bl
     end
     return a.seq < b.seq
   end)
@@ -155,6 +166,8 @@ local function paint_keymaps(buf)
     { k.cancel_arming, "require('review.handlers.comments_list').cancel_arming()" },
     { k.edit, "require('review.handlers.comments_list').edit_current()" },
     { k.yank, "require('review.handlers.comments_list').yank_current()" },
+    { k.reply, "require('review.handlers.comments_list').reply_current()" },
+    { k.submit, "require('review.handlers.submit').submit_review()" },
     { k.close, "require('review.handlers.comments_list').close_current()" },
   } do
     if kmap[1] ~= nil then

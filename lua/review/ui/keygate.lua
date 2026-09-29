@@ -27,6 +27,8 @@ local COMMENT_OPS = {
   -- 前 / 次のコメントへジャンプ (head 窓のみ。端では clamp = no-op)
   prev_comment = { mode = 'n', fn = 'prev_comment' },
   next_comment = { mode = 'n', fn = 'next_comment' },
+  -- カーソル行スレッドへ返信 (head 窓のみ。local pending として蓄積)
+  reply_comment = { mode = 'n', fn = 'reply_at_cursor' },
 }
 
 -- op -> (handler module, 関数名)。focus_panel (<leader>e) は panel への focus
@@ -42,6 +44,8 @@ local DISPATCH = {
   focus_panel = { 'review.handlers.session', 'focus_sidebar' },
   toggle_panel = { 'review.handlers.session', 'toggle_panel' },
   comments_list = { 'review.handlers.comments_list', 'open' },
+  submit_review = { 'review.handlers.submit', 'submit_review' },
+  open_pr_chat = { 'review.handlers.pr_chat', 'open' },
   -- comment ops は handlers.comments へ comment_dispatch で寄る
 }
 
@@ -263,6 +267,15 @@ function M.install(buf, session_id)
   install_sync(buf, k.first_file, 'first_file', k.first_file)
   install_sync(buf, k.last_file, 'last_file', k.last_file)
   install_one(buf, 'n', k.refresh, 'refresh')
+  if k.reply_comment ~= nil then
+    install_one(buf, 'n', k.reply_comment, 'reply_comment')
+  end
+  if k.submit_review ~= nil then
+    install_one(buf, 'n', k.submit_review, 'submit_review')
+  end
+  if k.open_pr_chat ~= nil then
+    install_sync(buf, k.open_pr_chat, 'open_pr_chat')
+  end
   if k.focus_panel ~= nil then
     install_sync(buf, k.focus_panel, 'focus_panel')
   end
