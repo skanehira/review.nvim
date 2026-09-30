@@ -26,6 +26,11 @@ describe('highlight.setup', function()
       'FloatBorder',
       vim.api.nvim_get_hl(0, { name = 'ReviewCommentBorder', link = true }).link
     )
+    -- 全文閲覧 float (`i`) の背景は透過 (bg NONE = nvim_get_hl では bg が nil)。
+    -- 他グループへ link していないことも確認 (Normal へ link すると背景を継承する)。
+    local view = vim.api.nvim_get_hl(0, { name = 'ReviewCommentView' })
+    assert.is_nil(view.link, 'ReviewCommentView が他グループへ link してはいけない')
+    assert.is_nil(view.bg, 'ReviewCommentView の背景が透過 (NONE) でない')
     assert.equals(
       'DiagnosticWarn',
       vim.api.nvim_get_hl(0, { name = 'ReviewCommentOutdated', link = true }).link

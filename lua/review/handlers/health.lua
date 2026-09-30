@@ -5,7 +5,8 @@
 --   * open + dir 消滅             -> 記録から worktree を外して save
 --                                    (復元時の作成判断で再生成 — DoD シナリオ 3)
 --   * open + dir 実在 + git 未登録  -> 孤児の作成分。掃除して記録を回収
---   * closed + dir 残骸            -> 「掃除してよい残骸」を通知し prune + dir 削除
+--   * closed + dir 実在            -> **触らない** (close は worktree を残す設計。
+--                                     削除は :Review delete / 一覧 d のみ)
 -- 処理は slug 昇順の逐次チェーン (掃除の完了を待ってから次。cb は全処理後 1 回)。
 local git_worktree = require 'review.git.worktree'
 local store = require 'review.store.session'
@@ -36,10 +37,8 @@ end
 -- dir を削って prune する。prune は dir 削除で孤児化した管理登録の掃除
 -- (DESIGN.md「既知の制約」worktree 残骸の回収)。失敗は WARN で scan を止めない
 -- (残った孤児登録は次回 add 衝突時の prune 回収に任せる)。
--- null_record は open の回復のみ true (復元時の作成判断へ渡す)。closed の残骸掃除で
--- save すると、:Review delete と競合したとき掃除側の save が delete 済み JSON を
--- 復活させる (E2E phase6 で検出した実バグ)。dir 消滅後の closed 記録は
--- classify==skip なのでそのまま残して無害。
+-- 対象は open の孤児のみ (closed は classify が skip に倒す — close は worktree
+-- を残す設計)。open の掃除は記録回収 (null_record=true) で復元時の再生成へ渡す。
 local function sweep_dir(session, on_done, null_record)
   local path = session.worktree.path
   -- dir を消す全経路の契約: remove/spawn より先に worktree 配下の実ファイル
@@ -74,7 +73,9 @@ local function classify(session, registered_set)
     return 'skip' -- closed + dir なし = 掃除完了済みの正常状態
   end
   if session.status == 'closed' then
-    return 'sweep' -- close 掃除の失敗残骸 (MUST 3 の異常終了側)
+    -- close は worktree を残す設計なので closed + dir 実在は正常状態。
+    -- 掃除しない (削除は :Review delete / 一覧 d が行う)。
+    return 'skip'
   end
   local real = vim.uv.fs_realpath(record.path) or record.path
   return registered_set[real] and 'keep' or 'sweep'
@@ -130,13 +131,15 @@ function M.sweep(repo, cb)
         step(i + 1)
         return
       end
-      local reason = (sess.status == 'closed') and 'leftovers from a failed close cleanup'
-        or 'not registered in git'
+      -- sweep は open の孤児 (dir 実在 + git 未登録) のみ。closed + dir 実在は
+      -- 正常状態 (close は worktree を残す) なので classify が skip に倒している。
       notify_warn(
-        ('cleaned up worktree leftovers %s: %s (%s)'):format(sess.id, sess.worktree.path, reason)
+        ('cleaned up worktree leftovers %s: %s (not registered in git)'):format(
+          sess.id,
+          sess.worktree.path
+        )
       )
-      -- open の孤児は記録回収 (save) して復元時の再生成へ渡す。closed は dir を
-      -- 消すだけ (save すると delete と競合して JSON を復活させ得る — 上の注記)。
+      -- open の孤児は記録回収 (save) して復元時の再生成へ渡す。
       sweep_dir(sess, function()
         step(i + 1)
       end, sess.status == 'open')

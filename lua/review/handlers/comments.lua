@@ -207,22 +207,33 @@ end
 
 --- `i`: カーソル行範囲のコメント全文を read-only float で閲覧 (UX 提案:
 --- virt_text は 40 字で切れ、編集 float は操作経路が編集なので閲覧に不向き)。
---- 対象行の path:line は表示済み。outdated は prompt 除外中である旨を添える。
+--- 1 コメントは **1 行目 = メタデータ行 `path:line [<author>]`** (outdated は
+--- 除外中の注記を添える。`[must]` 等の severity は本文の一部なのでここには載らない)、
+--- **2 行目から本文を左寄せ**で続ける。author 表記は行下スレッドの箱と同一
+--- (gh は login / local は id / pending ⚠ — core/comment.display_label)。
+--- コメント間は `├─…─┤` の区切り (commentview が内容幅に合わせて展開する)。
 function M.view_current()
   local target, found = comments_at_cursor()
   if target == nil then
     return
   end
+  local pr_mode = target.session.mode == 'pr'
   local lines = {}
   for i, c in ipairs(found) do
+    if i > 1 then
+      lines[#lines + 1] = '─' -- 区切り (commentview が ├─…─┤ に展開)
+    end
     local loc = ('%s:%d'):format(c.file, c.line)
     if (c.end_line or c.line) > c.line then
       loc = loc .. '-' .. c.end_line
     end
+    local pending = pr_mode and (c.gh_state == 'pending' or (c.origin ~= 'gh' and c.gh_id == nil))
+    local prefix = ('%s [%s]'):format(loc, comment_model.display_label(c, pending))
     local flag = c.state == 'outdated' and '  ! outdated (excluded from prompt)' or ''
-    lines[#lines + 1] = ('[%d] %s  %s%s'):format(i, c.id, loc, flag)
-    for _, body_line in ipairs(vim.split(c.body, '\n', { plain = true })) do
-      lines[#lines + 1] = '  ' .. body_line
+    lines[#lines + 1] = prefix .. flag
+    -- 本文は 2 行目から左寄せ (メタデータ行の indent を付けない)
+    for _, bl in ipairs(vim.split(c.body or '', '\n', { plain = true })) do
+      lines[#lines + 1] = bl
     end
   end
   ui_view.open(lines, {
@@ -329,33 +340,56 @@ function M.next_comment()
   jump_comment(1)
 end
 
---- `d`: カーソル行 (range 内) のコメントを arming 二重押しで削除 (状態定義は
---- ファイル冒頭側)。複数該当時は保持順の最初を対象にする。
+--- `d`: カーソル行 (range 内) のコメントを削除 (状態定義はファイル冒頭側)。
+--- 単一コメントは誤爆防止の arming 二重押し (1 回目 = arming、2 回目 = 削除)。
+--- 複数該当時 (スレッドの根と返信が同線に並ぶ等) は vim.ui.select で対象を明示
+--- 選択した時点で削除する (e と同じ選択 UX。picker 選択が確認の役割を果たすため
+--- arming は挟まない)。
 function M.delete_current()
   local target, found = comments_at_cursor()
   if target == nil then
     return
   end
-  local c = found[1]
   local t = now()
-  if
-    delete_armed ~= nil
-    and delete_armed.ref == c
-    and t - delete_armed.at <= DELETE_ARM_WINDOW_S
-  then
+  -- 2 回目 (単一コメントの arming): 窓内なら armed した対象がこの行のコメント
+  -- 集合に含まれているかを確認して削除する。
+  if delete_armed ~= nil and t - delete_armed.at <= DELETE_ARM_WINDOW_S then
+    for _, c in ipairs(found) do
+      if delete_armed.ref == c then
+        delete_armed = nil
+        local removed = comment_model.remove(target.session.comments, c.id)
+        session_handler.commit_comment_change()
+        vim.notify(('review.nvim: deleted comment %s'):format(removed.id), vim.log.levels.INFO)
+        return
+      end
+    end
+    -- armed 対象がこの行に無い (他行へ移動等) = 解除して 1 目からやり直す
     delete_armed = nil
-    local removed = comment_model.remove(target.session.comments, c.id)
-    session_handler.commit_comment_change()
-    vim.notify(('review.nvim: deleted comment %s'):format(removed.id), vim.log.levels.INFO)
+  end
+  if #found == 1 then
+    delete_armed = { ref = found[1], at = t }
+    notify_warn(
+      (
+        'to delete comment %s press d again on this line (cancel: move '
+        .. 'to another line / wait 2s / press <Esc>)'
+      ):format(found[1].id)
+    )
     return
   end
-  delete_armed = { ref = c, at = t }
-  notify_warn(
-    (
-      'to delete comment %s press d again on this line (cancel: move '
-      .. 'to another line / wait 2s / press <Esc>)'
-    ):format(c.id)
-  )
+  vim.ui.select(found, {
+    prompt = 'Comment to delete:',
+    format_item = function(c)
+      return ('[%s] %s'):format(c.id, c.body)
+    end,
+  }, function(choice)
+    if choice == nil then
+      return
+    end
+    delete_armed = nil
+    local removed = comment_model.remove(target.session.comments, choice.id)
+    session_handler.commit_comment_change()
+    vim.notify(('review.nvim: deleted comment %s'):format(removed.id), vim.log.levels.INFO)
+  end)
 end
 
 -- ============================================================================

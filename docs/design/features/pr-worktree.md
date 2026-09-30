@@ -39,19 +39,19 @@
 **セッションとレビューの終了 (`:Review close` / `q`)** — 順序の原則: ユーザーデータを失いうる操作の判定と確認を、状態変更より前に行う (`q` と `:Review close` は同一経路):
 
 0. comments > 0 なら «close the session with N comments (%s)?» [y/N] (キャンセル = 終了を最初から中止)。0 件なら確認しない
-1. worktree 作成済みなら `git -C <worktree-path> status --porcelain` で未コミット変更を検知し、worktree 配下に modified (未保存) なバッファがあることも併せて dirty 判定する (バッファ上の未保存編集はディスクに無い)。dirty なら `--force` で削除してよいか確認 (キャンセル = **close を最初から中止**。セッション・UI・保存状態は何も変わらない)。clean なら確認不要で続行
-2. 現セッションを save して status=closed、active を解除、**レビュー専有 tab を閉じる**。閉じる前に、このセッションが張った全バッファ (head 実ファイル・scratch) の extmark namespace を明示 clear (残骸 0)。repo 本体の実ファイルバッファはユーザーの所有物なので編集途中 (modified) を含め消さずに窓だけ閉じる。`created_by_us=true` の worktree を持つセッションでは、worktree 配下の実ファイルバッファ (`nvim_list_bufs()` を worktree path で走査・両側 `fs_realpath` 比較) を `nvim_buf_delete(force)` で**手順 3 の remove より先に破棄する** (Neovim 0.13 は loaded 全バッファに fs watcher を張るため、dir 消滅が先だと E211 が出る)
-3. worktree を `git worktree remove <path>` (1 で force 承認済みなら `--force`) で削除。**自前 ref (`review-nvim/pr-<n>`) は close では消さない** (再開時に fetch を省略して再利用するため)
-4. 掃除失敗 (`remove` の失敗等) は WARN を出し、**二段目として `git worktree prune` + 自前 dir の再帰削除で自己修復する** (登録と dir の対応が崩れた形 = `does not point back` は prune が正すのが git の手順)。dir 削除まで失敗した場合のみ追加 WARN し、close (save・タブクローズ) 自体は完了させる。残骸は起動 scan が closed + dir 残骸として回収する
+1. 現セッションを save して status=closed、active を解除、**レビュー専有 tab を閉じる**。閉じる前に、このセッションが張った全バッファ (head 実ファイル・scratch) の extmark namespace を明示 clear (残骸 0)。repo 本体の実ファイルバッファはユーザーの所有物なので編集途中 (modified) を含め消さずに窓だけ閉じる
+2. **worktree は削除しない** — close は save + UI 掃除のみで完結する。worktree dir・未コミット変更・未保存バッファはすべて残り、再レビュー時 (再開 / 同 refs の再開始) は作成済み worktree を再利用する。したがって close に status 検知や `--force` 確認は無い (削除しないので)。**worktree の削除は `:Review delete` / セッション一覧 `d` のみ**
+3. 自前 ref (`review-nvim/pr-<n>`) も close では消さない (再開時に fetch を省略して再利用するため)
 
-**worktree 登録操作の直列化**: 同じ dir path に対する `git worktree remove` (close / delete / 開始時の 0 差分掃除、掃除失敗時の prune 二段目を含む) と `git worktree add` (start / resume の作成判断〜作成) は、セッション内で 1 本ずつ直列に実行する。remove は管理登録の解除 + ツリー削除の重い git I/O で、その最中に同じ path へ add すると remove の中間状態を跨いで再登録となり、git が衝突しない管理名 (`main--issue-4` + `main--issue-41` の形) で同一 dir を二重登録することがある (以後の remove が "does not point back" で失敗し続け、close するたびに WARN が出る実測状態)。add 側は読み取り (diff 取得など) を待たず、**登録を作る経路 (resolve_worktree の判断〜作成〜完了、remove 連鎖の完了) だけが待機する**
+**worktree 登録操作の直列化**: 同じ dir path に対する `git worktree remove` (delete / 開始時の 0 差分掃除、掃除失敗時の prune 二段目を含む) と `git worktree add` (start / resume の作成判断〜作成) は、セッション内で 1 本ずつ直列に実行する。remove は管理登録の解除 + ツリー削除の重い git I/O で、その最中に同じ path へ add すると remove の中間状態を跨いで再登録となり、git が衝突しない管理名 (`main--issue-4` + `main--issue-41` の形) で同一 dir を二重登録することがある (以後の remove が "does not point back" で失敗し続け、削除するたびに WARN が出る実測状態の源)。add 側は読み取り (diff 取得など) を待たず、**登録を作る経路 (resolve_worktree の判断〜作成〜完了、remove 連鎖の完了) だけが待機する**。close は worktree を削除しないため、このレースは delete の remove と後続の start の add の間でのみ起こる
 
-**セッションの削除 (`:Review delete <id>`)**: 入力時に確認 (`コメント N 件を削除します`)。active と同じ id なら close の 1〜3 を先に実行してから、セッション JSON ファイルを削除し、このセッション用に作った `review-nvim/pr-<n>` ref があれば消す。closed でも `created_by_us=true` の worktree 残骸 (close の掃除失敗経路で発生しうる) があれば close と同じ dirty 判定 (git status に加えて worktree 配下の modified バッファも見る。いずれかで `--force` 確認。キャンセル = delete 中止・JSON 保持) を行い、close の 3〜4 と同等の掃除をしてからファイルを削除する (孤児 dir を残さない)。削除は不可逆で、undo は提供しない。
+**セッションの削除 (`:Review delete <id>`)**: 入力時に確認 (`コメント N 件を削除します`)。active と同じ id なら close (save + UI 掃除のみ。worktree は残る) を先に実行してから、自前 worktree を掃除する: `git -C <worktree-path> status --porcelain` で dirty 判定 (git status に加えて worktree 配下の modified バッファも見る。どちらかあれば `--force` 確認。キャンセル = delete 中止・JSON 保持) → `git worktree remove <path>` (承認済みなら `--force`) → 失敗時は `git worktree prune` + 自前 dir 再帰削除で回収。掃除が完遂できない場合は孤児 dir を残さないため JSON を残して中止 (closed + created_by_us 記録として起動 scan が回収できる状態を保つ)。掃除完了後にセッション JSON ファイルを削除し、このセッション用に作った `review-nvim/pr-<n>` ref があれば消す。closed でも `created_by_us=true` の worktree は close が残す設計なので通常ここに残っており、同一の掃除をしてからファイルを削除する。削除は不可逆で、undo は提供しない。
 
 **異常終了からの回復 (起動 scan、persistence-restore の scan を利用)**:
 
 - 記録上 open のセッションについて worktree path の実在を確認。実在して repo の `git worktree list` に載っていればそのまま復元で再利用する (crash 後でも worktree は使える)。記録にあるのにディレクトリが消えていれば worktree=null にして save し、復元時の作成判断 (persistence-restore「復元手順」) で作り直す
-- `created_by_us=true` の worktree のうち、セッション側が closed なのにディレクトリが残っている残骸を「掃除してよい残骸」として通知し、`git worktree prune` + ディレクトリ削除で回収する。dir を消す全経路の契約どおり、dir 削除より先に worktree 配下を指す loaded バッファを `nvim_buf_delete(force)` で破棄する (ユーザーが `:edit` 等で見ている分も含む — E211 対策)。**closed の掃除ではセッションファイルを書き戻さない** (dir 消滅後の記録は以後 scan に出ないため放置で無害。書き戻しは `:Review delete` の JSON 削除と競合してファイルを復活させ得る)
+- `created_by_us=true` の worktree のうち、**open で dir 実在 + git 未登録 (孤児の作成分)** を通知付きで掃除する (`git worktree prune` + ディレクトリ削除。記録は nil 化して save = 復元時の再生成へ渡す)。dir を消す全経路の契約どおり、dir 削除より先に worktree 配下を指す loaded バッファを `nvim_buf_delete(force)` で破棄する (ユーザーが `:edit` 等で見ている分も含む — E211 対策)
+- **closed + dir 実在の worktree は scan が触らない** — close は worktree を残す設計なので closed の dir は正常状態。削除は `:Review delete` / セッション一覧 `d` のみ (close 時の削除競合による JSON 復活事故も、closed を掃除しなくなったことで経路ごと消える)
 
 ## 実装の配置
 
@@ -70,7 +70,7 @@
 - gh が未 auth / 非ログイン: `E_GH` 通知。「`gh auth login` を実行してください」。PR 番号だけで repo 内実行時に remote 自動判定失敗時は URL 入力を促す
 - 既に同名 worktree がユーザーによって作られている: 触らず衝突エラー (`E_WORKTREE`)。自前作成分以外は削除対象外 (INV-3)
 - PR が closed/merged でもレビュー可能 (gh view は成功するため)。開始時に INFO で状態を添えるだけ
-- diff 取得後の close 時に worktree 内をユーザーが編集していた: dirty 判定はディスク (`git status`) に加えて worktree 配下の modified バッファも見る (バッファ上の未保存編集はディスクに無いため git status は clean を返す)。どちらかがあれば `--force` 確認を 1 回出し、承認したときだけ消える (ディスクの未コミット変更もバッファ上の未保存編集も破棄)。キャンセルは close 全体の中止。close が完走すると worktree ごと消えるため、編集が残るのは repo 本体 (branch モード) の実ファイルバッファのみ。v1 ではこの確認の 1 段階のみ。編集の取り込み (PR への push) は対象外
+- worktree 内をユーザーが編集していても close は何も捨てない (worktree を残すため。dirty 判定も確認も不要)。編集を破棄して消すのは `:Review delete` のときだけで、dirty 判定はディスク (`git status`) に加えて worktree 配下の modified バッファも見る (バッファ上の未保存編集はディスクに無いため git status は clean を返す)。どちらかがあれば `--force` 確認を 1 回出し、承認したときだけ消える (ディスクの未コミット変更もバッファ上の未保存編集も破棄)。キャンセルは delete 全体の中止。v1 ではこの確認の 1 段階のみ。編集の取り込み (PR への push) は対象外
 - 複数 fork remote: refs/pull/N/head を持つ remote を 1 つ選んで fetch (選択不能時にエラー)。head 内容解決は refs/pull ベースなので fork 名に依存しない
 - Windows プラットフォーム: worktree 対応とパス区切りは `vim.fs.joinpath` で吸収するが実機検証外 (v1 の検証済みは macOS/Linux のみ。DESIGN.md「既知の制約」参照)
 
@@ -81,5 +81,5 @@
 
 - 単体 (worktree アダプタ): `gh` と `git` を注入スタブに差し替えて、add/remove/fetch 引数の組み立てと結果型分岐 (成功・失敗・stderr 整形)
 - 単体 (handlers/pr): PR メタ→ref 解決→worktree add→diff(cwd=worktree) の呼び出し順と、worktree 作成失敗時の中断分岐。判断表の branch 行が「常に作らない」に変わったことの回帰 (従来「dirty なら作る」を期待する test は新契約の test に置換 — 検出能力ゼロの常時 PASS test にしない)
-- 単体 (close フロー): tab 消滅・extmark 残骸 0・modified ユーザーバッファ保持・worktree force 確認 (遅延 remove スタブで順序は既存契約)
-- E2E (golden path、gh スタブ + 実 git): fixture repo で `feature` に対する `:Review pr` → worktree 作成・専有 tab・**tab cwd==worktree・head 窓 buf file==worktree 内パス** → head 窓 `c` でコメント → worktree 実ファイルへ編集 `:w` → ±カウント・窓 diff 反映 (diffupdate) → `o` で前行儀 tab に worktree 基準パスの実ファイル → close → worktree dir 消滅 (ref は残る)・tab 消滅 → 別プロセス scan 残骸なし。もう 1 本、異常終了模擬 (close せずプロセス終了 → 次起動 scan 回収 → 復元で worktree 再生成)
+- 単体 (close フロー): tab 消滅・extmark 残骸 0・modified ユーザーバッファ保持・**close は worktree を残す (remove / status / force 確認を一切呼ばない)**。delete フロー: status → (dirty なら) --force 確認 → remove → 失敗時 prune + dir 削除の順序
+- E2E (golden path、gh スタブ + 実 git): fixture repo で `feature` に対する `:Review pr` → worktree 作成・専有 tab・**tab cwd==worktree・head 窓 buf file==worktree 内パス** → head 窓 `c` でコメント → worktree 実ファイルへ編集 `:w` → ±カウント・窓 diff 反映 (diffupdate) → `o` で前行儀 tab に worktree 基準パスの実ファイル → close → **status=closed で worktree dir は残る (keep。ref も残る)**・tab 消滅 → 別プロセス scan 無通知 (closed は keep)。もう 1 本、異常終了模擬 (close せずプロセス終了 → 次起動 scan 回収 → 復元で worktree 再生成)。worktree を編集して dirty のまま delete → --force 確認の cancel / approve を実 git で pin

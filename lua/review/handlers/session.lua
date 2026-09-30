@@ -200,11 +200,6 @@ local function worktree_of(session)
   return wt
 end
 
-local function owned_worktree(session)
-  local wt = worktree_of(session)
-  return wt ~= nil and wt.created_by_us == true
-end
-
 -- 同 dir を指す自前 (created_by_us=true) 記録かの述語。掃除後の記録 nil 化対象と
 -- 二段目掃除の recoverable (削除後 dir が起動 scan / :Review delete に回収されるか =
 -- INV-3 の削除許可と同一条件。health.classify と同形) の単一定義。非自前の
@@ -483,18 +478,65 @@ local function sweep_or_abort(repo, path, finalize)
   end)
 end
 
--- 終了手順の 2〜4 (pr-worktree.md「セッションとレビューの終了」):
--- save(closed) -> active 解除/UI クローズ -> worktree remove (1 の force 承認済なら
--- --force)。掃除の失敗は WARN のみで close 完了 (残骸は起動 scan / delete が回収)。
--- 自前 ref (review-nvim/pr-<n>) は close では消さない (再開時の fetch 省略用)。
+-- delete 用の worktree 掃除 (:Review delete / 一覧 d の active 同一 id と
+-- closed 残骸の両経路で共有 — pr-worktree.md「セッションの削除」)。
+-- このセッションの作成分 (created_by_us=true) の worktree を status 検知 ->
+-- (dirty なら) --force 確認 -> remove で消し、失敗時は prune + 自前 dir 再帰削除
+-- で回収する。全部失敗したら孤児 dir を残さないため finalize (JSON 削除) せず
+-- 中止する (JSON は closed + created_by_us 記録のまま残る = 起動 scan が回収できる
+-- 状態を保つ)。finalize は remove / 回収の完了後に 1 回呼ぶ。
+local function remove_worktree_then(repo, wt, finalize)
+  if wt == nil or wt.created_by_us ~= true or not dir_exists(wt.path) then
+    finalize()
+    return
+  end
+  local path = wt.path
+  git_worktree.status({ repo = repo, path = path }, function(sres)
+    -- dirty 判定は git status (ディスク) に加えて worktree 配下の modified
+    -- バッファも見る (旧 close 契約と同一。未保存編集を黙って force wipe しない)
+    local n_modified = wt_buffers.count_modified(path)
+    local dirty = (sres.ok and sres.data.dirty) or n_modified > 0
+    local function with_remove(force)
+      -- dir を消す全経路の契約: remove (非同期 vim.system) の spawn より先に
+      -- worktree 配下の実ファイルバッファを同期破棄する (E211 対策)。
+      wt_buffers.destroy(path)
+      wt_with_lock(path, function()
+        git_worktree.remove({ repo = repo, path = path, force = force }, function(rres)
+          if rres.ok then
+            wt_unlock(path)
+            finalize()
+            return
+          end
+          sweep_or_abort(repo, path, function()
+            wt_unlock(path)
+            finalize()
+          end)
+        end)
+      end)
+    end
+    if dirty then
+      confirm(force_prompt(path, n_modified), function(approved)
+        if approved then
+          with_remove(true)
+        end
+        -- キャンセル = 削除中止 (JSON 保持。dir もそのまま)
+      end)
+      return
+    end
+    with_remove(false)
+  end)
+end
+
+-- 終了手順の save + UI 掃除 (pr-worktree.md「セッションとレビューの終了」)。
+-- close は worktree を削除しない (削除は :Review delete / 一覧 d のみ —
+-- 再レビュー時は作成済み worktree を再利用する)。worktree dir・未コミット
+-- 変更・未保存バッファはすべて残るため、close に status 検知や --force 確認は
+-- 無い。自前 ref (review-nvim/pr-<n>) も close では消さない (再開時の fetch 省略用)。
 -- cb は save + detach 完了後 (状態変更が終わった時点) に呼ばれる。切替・復元は
--- 別 slug の別 path なので remove 完了を待たずに次の操作へ進んで無害。
--- delete の active 同一 id 経路は JSON+ref 削除を手順 3 の完了後へ回すため、
--- after_remove を remove 完了コールバック (skip / 失敗分岐含む) から呼ぶ。
--- vim.system は非同期なのでこれを待たないと削除が remove より先へ進み、remove
--- 失敗時に孤児 dir へ scan が触れなくなる (削除済み JSON の created_by_us を
--- 読めない — pr-worktree.md「セッションの削除」手順 1〜3)。
-local function finish_close(current, force, skip_remove, cb, after_remove)
+-- 別 slug の別 path なので worktree を触らず次の操作へ進んで無害。
+-- delete の active 同一 id 経路は JSON+ref 削除を close 後の掃除 (remove) の
+-- 完了後へ回すため、after_remove を掃除完了コールバックから呼ぶ。
+local function finish_close(current, cb, after_remove)
   current.session.status = 'closed'
   -- persist (全 save 経路の唯一の出口) を捕捉済み current で通す: status 確認の
   -- 非同期窓中に on_review_tab_closed が active を nil 化しても、save 対象は
@@ -507,81 +549,23 @@ local function finish_close(current, force, skip_remove, cb, after_remove)
   if cb ~= nil then
     cb()
   end
-  local wt = worktree_of(current.session)
-  local function finish_after_remove()
-    if after_remove ~= nil then
-      after_remove()
-    end
+  if after_remove ~= nil then
+    after_remove()
   end
-  if skip_remove or wt == nil or wt.created_by_us ~= true then
-    finish_after_remove()
-    return -- INV-3: created_by_us=true の自前作成分のみ削除対象
-  end
-  -- git worktree remove は非同期 (vim.system) のため、spawn より先に同期で
-  -- worktree 配下の実ファイルバッファを破棄する (dir 消滅が先だと fs watcher が
-  -- E211 を出す — Neovim 0.13 / 'autoread' 既定 on。detach 済みでレビュー窓は無い)。
-  wt_buffers.destroy(wt.path)
-  wt_with_lock(wt.path, function()
-    git_worktree.remove({
-      repo = current.session.repo,
-      path = wt.path,
-      force = force or nil,
-    }, function(rres)
-      if not rres.ok then
-        notify_warn(
-          ('worktree cleanup failed (the startup scan reclaims leftovers): %s'):format(rres.error)
-        )
-        -- current.session は closed + created_by_us 記録済みで save 済み
-        -- (起動 scan / delete が回収できる)
-        prune_and_rm_dir(current.session.repo, wt.path, true, function()
-          wt_unlock(wt.path)
-          finish_after_remove()
-        end)
-        return
-      end
-      wt_unlock(wt.path)
-      finish_after_remove()
-    end)
-  end)
 end
 
--- 終了手順 1: 自前 worktree の未コミット変更を検知し、必要なら確認する。
--- dirty 判定はディスク (git status) に加えて worktree 配下の modified バッファ
--- も見る (バッファ上の未保存編集はディスクに無いため git status は clean を返す。
--- 無告知の force wipe は未保存編集を黙って捨てる = E211 より悪い)。
--- キャンセルは close を最初から中止 (状態変更を一切走らせない)。
+-- close の共通手続き (q / :Review close / 切替 / force_close)。
+-- worktree は削除しない — close は save(closed) + UI 掃除のみで完結し、worktree
+-- dir・未コミット変更・未保存バッファはすべて残す (削除は :Review delete /
+-- 一覧 d が status -> (dirty なら) --force 確認 -> remove を行う)。
+-- after_remove は delete の active 同一 id 経路が close 後の worktree 掃除を
+-- 呼ぶためにある (close 自身は remove しない)。
 local function close_with_worktree(cb, after_remove)
   local current = active
   if current == nil then
     return
   end
-  if not owned_worktree(current.session) then
-    finish_close(current, false, false, cb, after_remove)
-    return
-  end
-  local wt_dir = current.session.worktree.path
-  git_worktree.status({
-    repo = current.session.repo,
-    path = wt_dir,
-  }, function(res)
-    if not res.ok then
-      -- 検知不能 (dir 消失 etc) を clean と混同しない: 掃除は走らせず WARN。
-      notify_warn(res.error)
-      finish_close(current, false, true, cb, after_remove)
-      return
-    end
-    local n_modified = wt_buffers.count_modified(wt_dir)
-    if res.data.dirty or n_modified > 0 then
-      confirm(force_prompt(wt_dir, n_modified), function(yes)
-        if yes then
-          finish_close(current, true, false, cb, after_remove)
-        end
-        -- キャンセル = close 中止 (セッション・UI・保存状態は何も変わらない)
-      end)
-      return
-    end
-    finish_close(current, false, false, cb, after_remove)
-  end)
+  finish_close(current, cb, after_remove)
 end
 
 -- ============================================================================
@@ -1488,7 +1472,8 @@ function M.start(opts)
 end
 
 --- `:Review close` / q。コメント 0 件なら無確認で閉じる。
---- worktree がある場合は状態検知 -> (必要なら) 確認 -> save/clean-up の順 (pr-worktree.md)。
+--- save(closed) + UI 掃除のみ (worktree は削除しない — pr-worktree.md
+--- 「セッションとレビューの終了」。削除は :Review delete / 一覧 d のみ)。
 function M.close()
   if active == nil then
     return result.err('review.nvim: no active session', result.codes.E_NOT_ACTIVE)
@@ -1513,9 +1498,8 @@ function M.close()
 end
 
 --- head/base/panel 窓の q キー。:Review close と同一 (tab を閉じる。ユーザー窓と
---- repo 本体の実ファイルバッファ (modified を含む) は消さない。created_by_us=true
---- の worktree 配下の実ファイルバッファのみ remove 前に破棄する — pr-worktree
---- 「セッションとレビューの終了」)。
+--- repo 本体の実ファイルバッファ (modified を含む) は消さない。worktree は残る
+--- (削除は :Review delete / 一覧 d のみ — pr-worktree「セッションとレビューの終了」)。
 function M.close_by_key()
   local res = M.close()
   if not res.ok then
@@ -1524,16 +1508,17 @@ function M.close_by_key()
 end
 
 --- 確認なし (フロー側の事前確認済み) で閉じる。復元 / 一覧からの再開で呼ぶ。
---- worktree の status 確認と --force 確認は close と同じ (ユーザーデータ保護は省略不可)。
+--- close は worktree を削除しない (削除は :Review delete / 一覧 d のみ)。
 function M.force_close(cb)
   close_with_worktree(cb)
 end
 
---- `:Review delete <id>`。確認 -> close 相当の掃除 -> JSON 削除 -> 自前 ref 削除
---- (pr-worktree.md「セッションの削除」。closed でも created_by_us 残骸があれば
---- 掃除してから消し、孤児 dir を残さない。active 同一 id では非同期の worktree
---- remove 完了を待ってから JSON+ref を消す。掃除が完遂できない場合は JSON を
---- 残して中止 = closed 記録として起動 scan が回収できる)。
+--- `:Review delete <id>`。確認 -> close (save + UI 掃除) -> 自前 worktree 掃除
+--- (status -> --force 確認 -> remove / 失敗時 prune + dir 削除) -> JSON 削除 ->
+--- 自前 ref 削除 (pr-worktree.md「セッションの削除」。closed でも created_by_us
+--- の worktree があれば掃除してから消し、孤児 dir を残さない。active 同一 id では
+--- 非同期の worktree remove 完了を待ってから JSON+ref を消す。掃除が完遂できない
+--- 場合は JSON を残して中止 = closed 記録として起動 scan が回収できる)。
 function M.delete(id)
   if id == nil or id == '' then
     notify_warn 'use the form :Review delete <id>'
@@ -1574,66 +1559,27 @@ function M.delete(id)
           end
         end
         if active ~= nil and active.session.id == id then
-          -- active と同じ id: close の 1〜3 を先に実行し、**非同期の worktree
-          -- remove (手順 3) の完了を待って**から JSON+ref を消す
+          -- active と同じ id: close (save + UI 掃除。worktree は残る) を先に実行し、
+          -- **非同期の worktree remove の完了を待って**から JSON+ref を消す
           -- (pr-worktree.md「セッションの削除」。remove 完了前に JSON を消すと
-          -- 失敗時に孤児 dir を scan が回収できない — closed 残骸側 (else 以下)
-          -- と同じ「孤児 dir を残さない」不変条件: dir が残るなら prune+remove_dir
-          -- で回収してから削除、それも失敗なら JSON を残して中止 = scan 回収可)。
+          -- 失敗時に孤児 dir を scan が回収できない — closed 残骸側 (else 以下) と
+          -- 同じ「孤児 dir を残さない」不変条件: dir が残るなら prune+remove_dir で
+          -- 回収してから削除、それも失敗なら JSON を残して中止 = scan 回収可)。
           local closing_wt = worktree_of(active.session)
           close_with_worktree(nil, function()
-            if
-              closing_wt == nil
-              or closing_wt.created_by_us ~= true
-              or not dir_exists(closing_wt.path)
-            then
-              finalize()
-              return
-            end
-            sweep_or_abort(repo, closing_wt.path, finalize)
+            remove_worktree_then(repo, closing_wt, finalize)
           end)
           return
         end
         local wt = worktree_of(sess)
-        if wt == nil or wt.created_by_us ~= true or not dir_exists(wt.path) then
+        if wt == nil or wt.created_by_us ~= true then
           finalize()
           return
         end
-        -- closed の作成分残骸 (close の掃除失敗経路): status -> remove ->
-        -- 失敗時 prune + dir 再帰削除。全部失敗したら孤児 dir を残さないため中止。
-        git_worktree.status({ repo = repo, path = wt.path }, function(sres)
-          -- dirty 判定は git status (ディスク) に加えて worktree 配下の modified
-          -- バッファも見る (close_with_worktree と同一契約。未保存編集を黙って
-          -- force wipe しない)
-          local n_modified = wt_buffers.count_modified(wt.path)
-          local dirty = (sres.ok and sres.data.dirty) or n_modified > 0
-          local function with_remove(force)
-            wt_buffers.destroy(wt.path)
-            wt_with_lock(wt.path, function()
-              git_worktree.remove({ repo = repo, path = wt.path, force = force }, function(rres)
-                if rres.ok then
-                  wt_unlock(wt.path)
-                  finalize()
-                  return
-                end
-                sweep_or_abort(repo, wt.path, function()
-                  wt_unlock(wt.path)
-                  finalize()
-                end)
-              end)
-            end)
-          end
-          if dirty then
-            confirm(force_prompt(wt.path, n_modified), function(approved)
-              if approved then
-                with_remove(true)
-              end
-              -- キャンセル = 削除中止 (close のキャンセルと同じ意味)
-            end)
-            return
-          end
-          with_remove(false)
-        end)
+        -- closed の作成分 worktree (close は削除しないので通常ここに残る):
+        -- status -> (dirty なら) --force 確認 -> remove -> 失敗時 prune + dir 削除。
+        -- 全部失敗したら孤児 dir を残さないため中止 (JSON 保持)。
+        remove_worktree_then(repo, wt, finalize)
       end
     )
   end)

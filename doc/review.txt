@@ -47,8 +47,8 @@ Everything runs through one command and its subcommands:
 	  open PR numbers (titles shown in the popup, only the number is inserted;
 	  gh runs synchronously). The head is expanded into a git worktree and the
 	  head side of the review windows (tcd done) becomes the real files under
-	  the worktree (worktree creation is pr mode only; cleanup:
-	  |review-sessions|)
+	  the worktree (worktree creation is pr mode only; removal only on session
+	  delete: |review-sessions|)
 
 	:Review list			saved-session list |review-list|
 
@@ -108,7 +108,7 @@ vim.notify.
 	resume({ id= })			restore a saved session by id
 
 	close()
-	  save the current session + close the windows + worktree cleanup
+	  save the current session + close the windows (worktree is kept)
 
 	delete({ id= })
 	  delete a saved session (includes worktree cleanup; may be active)
@@ -252,8 +252,11 @@ Review windows (head / base)			*review-keymaps-diff*
 	  delete the comment on the cursor line. mis-fire guard double-press:
 	  press once and it only arms + WARNs; press d again within 2s on the
 	  same line to confirm (so vim-style dd cannot silently delete several).
-	  The arming is cancelled by moving to another line, confirming an
-	  edit with e, waiting 2s or pressing <Esc>
+	  with several comments on the line (e.g. a thread root and a reply) a
+	  numbered prompt appears to pick which one to delete, and picking it
+	  deletes it right away (no second press needed). The arming is cancelled
+	  by moving to another line, confirming an edit with e, waiting 2s or
+	  pressing <Esc>
 
 	D
 	  delete all comments at once (same as :Review clear). mis-fire guard
@@ -308,7 +311,14 @@ Review windows (head / base)			*review-keymaps-diff*
 
 	i
 	  view the full comment text on the cursor line in a read-only
-	  (markdown) window (edit with e). q / <Esc> closes
+	  (markdown) window (edit with e). The box border is drawn by Neovim's
+	  float border (`╭title─╮` top / `│` sides / `╰─╯` bottom — a fixed
+	  frame: only the body scrolls when the text is taller than the
+	  window). Each comment starts with the metadata line
+	  `path:line [<author>]` (author = GitHub login for GH comments, id for
+	  local ones, ⚠ while pending — same as the thread box), then the body
+	  from the second line, left-aligned; long lines wrap to the inner
+	  width. A full-width `─` rule separates comments. q / <Esc> closes
 
 	r
 	  reply to the thread on the cursor line (head window only). The reply
@@ -475,10 +485,14 @@ SESSION state and recovery			*review-sessions*
 Saved sessions have two states, open / closed (1 line each in the list):
 
  The contractual "close" operations are q / `:Review close` (same procedure):
- save comments + completion marks and set closed, close the review tab and
- clean up plugin-made worktrees (closed sessions cannot be restored by
- `:Review` and are only reopened from `:Review list`; opening flips back to
- open and the worktree is regenerated).
+ save comments + completion marks and set closed, close the review tab.
+ Plugin-made PR worktrees are kept (the worktree dir, uncommitted changes
+ and unsaved buffer edits all survive, so a closed session can be reopened
+ quickly and the same worktree is reused). Closed sessions cannot be
+ restored by `:Review` and are only reopened from `:Review list`; opening
+ flips back to open. The worktree is removed only when the session is
+ deleted with `:Review delete {id}` or `d` in `:Review list` (with a
+ confirmation; uncommitted changes ask for `--force`).
 
 	Directly closing the review tab with `:tabclose` / `:tabonly` etc. is
 	distinct from close: comments and the open state stay saved
@@ -490,8 +504,9 @@ Saved sessions have two states, open / closed (1 line each in the list):
 
 	Neovim crash
 	  The JSON stays in the data dir with status=open and the next start
-	  sends the «you can resume…» notification (:Review restores it;
-	  worktree leftovers are swept by the startup scan)
+	  sends the «you can resume…» notification (:Review restores it; if the
+	  worktree dir is gone, the record is reclaimed by the startup scan and
+	  the worktree is recreated on restore)
 
 	Auto-apply on save
 	  Saved diffs are automatically reflected in the review. Saving a
@@ -589,9 +604,11 @@ The three review windows			*review-display-diff*
 	range + line-end `comment-icon N` on the last row; a mixed old/new
 	group keeps the count, outdated id prefixes go warning color). Bodies
 	render as a thread in a ruled box (`┌─┐ │ └─┘`) under the last row of
-	the range (GitHub-style. The box spans the head window's text width so
-	its right edge always aligns to the window's, bodies wrap inside, 10
-	lines then truncate; full text: the `i` window, filetype markdown).
+	the range (GitHub-style. Each comment shows its metadata line
+	(`[author]`) first, then its body left-aligned in the box. The box
+	spans the head window's text width so its right edge always aligns to
+	the window's, bodies wrap inside, 10 lines then truncate; full text:
+	the `i` window, filetype markdown).
 	Threads are visible in every window that shows the buffer (Neovim has
 	no window-local virt_lines; measured). Buffer lines are not consumed,
 	so the line-number mapping stays intact (narrower windows clip the

@@ -21,7 +21,7 @@
 
 1. cwd が git repo 内なら repo top を解決し、その repo の `status=open` セッションを scan
 2. 1 件以上あれば notify: `review.nvim: you can resume the review of <slug> (:Review to restore)` (複数なら個数と代表 slug)。自動で窓は開かない
-3. worktree 残骸の掃除は pr-worktree「異常終了からの回復」が同じ scan を読んで実行する
+3. worktree 残骸の掃除は pr-worktree「異常終了からの回復」が同じ scan を読んで実行する (open の作成分孤児のみ。**closed + dir 実在は close が worktree を残す設計の正常状態なので触らない** — 削除は `:Review delete` / 一覧 `d` のみ)
 4. 復元手順の UI 構築ではレビュー専有 tab を新規に作る (`:tabclose` 等で窓だけ失われた場合は、レビュー tab の直接消滅経路 (TabClosed: diff-review「レビュー tab の消滅経路」) が open 維持 + save で拾っており、close とは区別される。`:Review list` 経由でも `:Review` 経由でも同じ `resume_session` を通る
 
 **復元 `:Review` (引数なし)**:

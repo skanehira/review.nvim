@@ -530,12 +530,12 @@ pr_fail() { # $1=out file, $2=label
 }
 
 # (1)+(2) worktree 要セッション開始 -> o 実ファイル (head 窓経路 / #18 の最終キー) ->
-#      close (dir 消滅・ref 残存)
+#      close (status=closed・worktree dir は残る = keep・ref 残存)
 D_PR1="$WORK/d-pr1"
 OUTP1=$(mktemp "$WORK/pr1.out.XXXXXX")
 run_pr "$REPO_ROOT/tests/e2e/pr1.lua" "$D_PR1" >"$OUTP1" 2>&1 || pr_fail "$OUTP1" "pr phase1"
 grep -q 'E2E-PR1 wt-file=' "$OUTP1" || pr_fail "$OUTP1" 'pr phase1 (head が worktree 実ファイルでない)'
-[ ! -d "$(WT_OF "$D_PR1")" ] || { echo 'e2e: close 後に worktree dir が残っている' >&2; exit 1; }
+[ -d "$(WT_OF "$D_PR1")" ] || { echo 'e2e: close 後に worktree dir が消えた (keep が契約)' >&2; exit 1; }
 # show-ref --verify は短縮名を解決しないため rev-parse --verify で見る (0.13/git 実測)
 git -C "$REPO_PR" rev-parse --verify -q review-nvim/pr-7 >/dev/null || {
   echo 'e2e: close 後に自前 ref review-nvim/pr-7 が消えている (残すのが設計)' >&2
@@ -569,39 +569,25 @@ grep -q 'has disappeared;' "$WORK/pr-pr3.lua.log" || {
 }
 [ -d "$WT2" ] || { echo 'e2e: 復元時に worktree が再生成されていない' >&2; exit 1; }
 
-# (4) worktree を編集して close -> --force 確認 -> cancel 無変更 / approve dir 消滅
+# (4) worktree を編集して close (keep) -> :Review delete で --force 確認 ->
+#     cancel 無変更 / approve dir + JSON 消滅
 D_PR4="$WORK/d-pr4"
 OUTP4=$(mktemp "$WORK/pr4.out.XXXXXX")
 run_pr "$REPO_ROOT/tests/e2e/pr4.lua" "$D_PR4" >"$OUTP4" 2>&1 || pr_fail "$OUTP4" "pr phase4(force 確認)"
+grep -q 'E2E-PR4 close-kept=1' "$OUTP4" || pr_fail "$OUTP4" 'pr phase4(close keep)'
 grep -q 'E2E-PR4 cancel-kept=1' "$OUTP4" || pr_fail "$OUTP4" 'pr phase4(cancel)'
-grep -q 'E2E-PR4 forced-closed=1' "$OUTP4" || pr_fail "$OUTP4" 'pr phase4(approve)'
+grep -q 'E2E-PR4 forced-deleted=1' "$OUTP4" || pr_fail "$OUTP4" 'pr phase4(approve)'
 [ ! -d "$(WT_OF "$D_PR4")" ] || { echo 'e2e: --force 承認後に worktree dir が残っている' >&2; exit 1; }
 
-# (5) closed + created_by_us dir 残骸 -> :Review delete が dir + ref + JSON を一掃
+# (5) closed + kept worktree (close は keep が契約) -> :Review delete が dir + ref + JSON を一掃
 D_PR5="$WORK/d-pr5"
 OUTP5=$(mktemp "$WORK/pr5.out.XXXXXX")
 run_pr "$REPO_ROOT/tests/e2e/pr5.lua" "$D_PR5" >"$OUTP5" 2>&1 || pr_fail "$OUTP5" "pr phase5(delete fixture)"
 grep -q 'E2E-PR5 closed=1' "$OUTP5" || pr_fail "$OUTP5" 'pr phase5(delete fixture)'
 WT5=$(WT_OF "$D_PR5")
-# close 掃除が失敗して残った見立て: 同じ slug path に worktree を実作成し直す
-git -C "$REPO_PR" worktree add --detach "$WT5" review-nvim/pr-7 >/dev/null 2>&1 || {
-  echo 'e2e: delete fixture の残骸 worktree が作れない' >&2
-  exit 1
-}
-# pr6 は delete の残骸掃除経路 (dir 実在チェック -> バッファ破棄 -> remove) を pin
-# する。ただし JSON が closed のままだと pr6 起動時の worktree scan が残骸と分類
-# して先に dir を消す (health「closed + dir 残骸」) ため、delete の dir 実在分岐に
-# 到達できない。delete は status を読まないので、scan を沈めるためだけに status を
-# open に書き換える (delete の dir/ref/JSON 掃除契約は不変)。
-python3 - "$(JSON_OF "$D_PR5")" <<'PYEOF'
-import json, sys
-path = sys.argv[1]
-with open(path) as f:
-    data = json.load(f)
-data['status'] = 'open'
-with open(path, 'w') as f:
-    json.dump(data, f)
-PYEOF
+[ -d "$WT5" ] || { echo 'e2e: close 後に worktree dir が消えた (keep が契約)' >&2; exit 1; }
+# pr6 は delete の掃除経路 (dir 実在チェック -> バッファ破棄 -> remove) を pin する。
+# close は worktree を残すため dir は実在したまま (scan も closed は keep で触らない)。
 OUTP6=$(mktemp "$WORK/pr6.out.XXXXXX")
 run_pr "$REPO_ROOT/tests/e2e/pr6.lua" "$D_PR5" >"$OUTP6" 2>&1 || pr_fail "$OUTP6" "pr phase6(delete 掃除)"
 grep -q 'E2E-PR6 swept=1' "$OUTP6" || pr_fail "$OUTP6" 'pr phase6(delete 掃除)'
@@ -612,4 +598,4 @@ if git -C "$REPO_PR" rev-parse --verify -q review-nvim/pr-7 >/dev/null; then
 fi
 [ ! -f "$(JSON_OF "$D_PR5")" ] || { echo 'e2e: delete 後にセッション JSON が残っている' >&2; exit 1; }
 
-echo "e2e: OK — golden path line=$L1 + 未コミット反映 (E2E-R1/U1/U2/R2) + 横断コメント一覧 (E2E-CL1/CL2/CL3: 開く / ジャンプ / 削除追随) + セッション一覧の削除追随 (E2E-SL1) + head 解決フロー (switch / 縮退 / 縮退再開始 / 復元再評価) + tab 消滅 (open 維持・残骸 0) + PR worktree (o 実ファイル / close 掃除 / crash 回復 / --force 確認 / delete dir+ref)"
+echo "e2e: OK — golden path line=$L1 + 未コミット反映 (E2E-R1/U1/U2/R2) + 横断コメント一覧 (E2E-CL1/CL2/CL3: 開く / ジャンプ / 削除追随) + セッション一覧の削除追随 (E2E-SL1) + head 解決フロー (switch / 縮退 / 縮退再開始 / 復元再評価) + tab 消滅 (open 維持・残骸 0) + PR worktree (o 実ファイル / close keep / crash 回復 / delete の --force 確認 / delete dir+ref+JSON)"

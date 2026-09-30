@@ -68,10 +68,17 @@ end
 -- 呼び出し側は created_by_us=true の記録があるものだけに限る (INV-3)。
 -- vim.fs.delete は Neovim に存在せず (0.13 nightly 実測)、vim.fs.rm は runtime
 -- 下限 0.10 で保証がないため vim.uv のプリミティブで自前実装する。
+-- 判定は lstat (fs_lstat) で行い symlink は追わない: fs_stat で判定すると
+-- dir への symlink (pnpm の node_modules 等) を「directory」として辿り、
+-- 対象の内容を消したあと rmdir が ENOTDIR で失敗して掃除全体が落ちる。
+-- symlink は os.remove (unlink) で消す (追い先の実体には触れない)。
 function M.remove_dir(path)
-  local stat = vim.uv.fs_stat(path)
+  local stat = vim.uv.fs_lstat(path)
   if stat == nil then
     return true -- 目標状態 (不存在) そのもの
+  end
+  if stat.type == 'link' then
+    return os.remove(path) ~= nil
   end
   if stat.type ~= 'directory' then
     return os.remove(path) ~= nil

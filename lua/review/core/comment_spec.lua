@@ -313,6 +313,26 @@ describe('comment.is_file_level / thread_at / file_thread', function()
   end)
 
   it(
+    'display_label: gh は作者 login / local は id / pending は ⚠ (スレッド箱と i view 共通)',
+    function()
+      assert.equals('octocat', comment.display_label { origin = 'gh', gh_user = 'octocat' })
+      assert.equals('gh', comment.display_label { origin = 'gh', gh_user = nil })
+      -- push 済み local は自身の login
+      assert.equals(
+        'skanehira',
+        comment.display_label { origin = 'local', gh_user = 'skanehira', gh_id = 1 }
+      )
+      -- branch のローカルは id
+      assert.equals('c3', comment.display_label { id = 'c3', origin = 'local' })
+      -- pending (未 submit / 未 push) は ⚠
+      assert.equals(
+        'octocat \u{26A0}',
+        comment.display_label({ origin = 'gh', gh_user = 'octocat', gh_state = 'pending' }, true)
+      )
+    end
+  )
+
+  it(
     'thread_at は表示 anchor (range 最終行) を共有するコメント群を返す',
     function()
       local comments = {
@@ -448,5 +468,40 @@ describe('comment.from_gh', function()
     local c = comment.from_gh(gh, { id = 'c9' })
     assert.equals(3, c.line)
     assert.equals(3, c.end_line)
+  end)
+
+  it('line が vim.NIL (JSON null) でも line として扱わない', function()
+    -- vim.json.decode は JSON の null を vim.NIL (userdata) にするため
+    -- `~= nil` で拾えない。`comment.line > count` が userdata 比較で落ちる
+    -- (pr_comments の display_state) 事故の根絶をここで pin する。
+    local gh = {
+      id = 503,
+      path = 'a.lua',
+      body = 'null line',
+      line = vim.NIL,
+      original_line = vim.NIL,
+      user = { login = 'x' },
+      created_at = '2024-01-02T03:04:05Z',
+      subject_type = 'line',
+    }
+    local c = comment.from_gh(gh, { id = 'c10' })
+    assert.is_nil(c.line)
+    assert.is_nil(c.end_line)
+  end)
+
+  it('line が vim.NIL でも original_line があればそれを仮置きする', function()
+    local gh = {
+      id = 504,
+      path = 'a.lua',
+      body = 'null line with original',
+      line = vim.NIL,
+      original_line = 4,
+      user = { login = 'x' },
+      created_at = '2024-01-02T03:04:05Z',
+      subject_type = 'line',
+    }
+    local c = comment.from_gh(gh, { id = 'c11' })
+    assert.equals(4, c.line)
+    assert.equals(4, c.end_line)
   end)
 end)

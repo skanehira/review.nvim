@@ -2,7 +2,7 @@
 -- :Review pr 7 -> worktree 作成 -> 専有 tab はその worktree に tcd され、head 窓は
 -- worktree 内の実ファイル (content = head 実物・編集可) -> `o` はレビュー tab の外
 -- (前行儀) に worktree 基準パスの実ファイルを開く -> :Review close (clean) ->
--- worktree dir 消滅 (ref は残る側は shell assert)。
+-- status=closed になり worktree dir は残る (keep が契約。削除は delete のみ)。
 -- buffer/dir 比較は realpath (macOS /var -> /private/var 正規化)。
 -- 失敗は E2E-FAIL + cquit (raw error は headless でハングするため正規化)。
 
@@ -80,23 +80,20 @@ local run = function()
   print('E2E-PR1 wt-file=' .. fname)
 
   vim.cmd 'Review close'
+  -- close は worktree を削除しない (keep が契約。削除は :Review delete / 一覧 d のみ)
   wait_for(function()
-    return vim.uv.fs_stat(wt_root) == nil
-  end, 'close 後の worktree dir 消滅')
-  -- fs watcher (E211) は dir 消滅直後の非同期イベントなので少し待ってから見る。
-  -- バッファは remove spawn より先に同期破棄される契約なので、dir 消滅後に
-  -- E211 が出たら破棄漏れ (= issue #40 の回帰)。
-  vim.wait(500, function()
-    return false
-  end)
-  if vim.fn.bufexists(fname) == 1 then
-    fail 'close 後も worktree 内の実ファイルバッファが残っている (E211 の源)'
+    local json = assert(os.getenv 'REVIEW_E2E_JSON', 'REVIEW_E2E_JSON 未設定')
+    local ok, d = pcall(vim.json.decode, table.concat(vim.fn.readfile(json), '\n'))
+    return ok and d.status == 'closed'
+  end, 'close 後の status=closed')
+  if vim.uv.fs_stat(wt_root) == nil then
+    fail 'close で worktree dir が消えた (keep が契約)'
   end
+  -- 削除していないので E211 (dir 消滅) は起きない
   if vim.fn.execute('messages'):find('E211', 1, true) ~= nil then
     fail 'close 中に E211 (File no longer available) が出た'
   end
-  print 'E2E-PR1 bufs-wiped=1 no-e211=1'
-  print 'E2E-PR1 closed=1'
+  print 'E2E-PR1 kept=1 closed=1'
   vim.cmd 'qa'
 end
 

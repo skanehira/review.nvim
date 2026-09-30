@@ -1,5 +1,6 @@
 -- E2E delete fixture (DoD シナリオ 5 前半)。pr-7 を開始して clean close する。
--- close 後の dir 消滅まで待ってから終了 (shell 側が残骸を再作成する)。
+-- close は worktree を残す設計 (keep) なので、dir 実在 + status=closed を assert して
+-- 終了する (dir + ref + JSON の一掃は後続 pr6 の :Review delete が担う)。
 local function fail(why)
   print('E2E-FAIL: ' .. why)
   vim.cmd 'cquit!'
@@ -17,24 +18,24 @@ vim.defer_fn(function()
     then
       fail 'pr-7 開始 timeout'
     end
-    local fname = vim.uv.fs_realpath(vim.fs.joinpath(wt_root, 'a.lua'))
     vim.cmd 'Review close'
-    if not vim.wait(8000, function()
-      return vim.uv.fs_stat(wt_root) == nil
-    end, 20) then
-      fail 'close 後 dir 消滅 timeout'
+    if
+      not vim.wait(8000, function()
+        local json = assert(os.getenv 'REVIEW_E2E_JSON', 'REVIEW_E2E_JSON 未設定')
+        local okd, d = pcall(vim.json.decode, table.concat(vim.fn.readfile(json), '\n'))
+        return okd and d.status == 'closed'
+      end, 20)
+    then
+      fail 'close 後の status=closed timeout'
     end
-    -- E211 は dir 消滅直後の非同期イベントなので少し待ってから見る (issue #40)。
-    vim.wait(500, function()
-      return false
-    end)
-    if vim.fn.bufexists(fname) == 1 then
-      fail 'close 後も worktree 内の実ファイルバッファが残っている (E211 の源)'
+    if vim.uv.fs_stat(wt_root) == nil then
+      fail 'close で worktree dir が消えた (keep が契約)'
     end
+    -- 削除していないので E211 は起きない (dir が残る)
     if vim.fn.execute('messages'):find('E211', 1, true) ~= nil then
       fail 'close 中に E211 (File no longer available) が出た'
     end
-    print 'E2E-PR5 closed=1 bufs-wiped=1'
+    print 'E2E-PR5 closed=1 kept=1'
     vim.cmd 'qa'
   end)
   if not ok then

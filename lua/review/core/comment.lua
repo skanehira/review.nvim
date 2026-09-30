@@ -38,6 +38,24 @@ function M.is_file_level(c)
   return c.subject_type == 'file'
 end
 
+-- 表示用ラベル (行下スレッドの箱と `i` 全文閲覧 float で共通): gh 由来は作者
+-- login、push 済み local は自身の login、それ以外 (branch のローカル) は id。
+-- pending (未 submit / 未 push) のときは ⚠ を添える。
+function M.display_label(c, pending)
+  local label
+  if c.origin == 'gh' then
+    label = c.gh_user or 'gh'
+  elseif c.gh_user ~= nil then
+    label = c.gh_user
+  else
+    label = c.id
+  end
+  if pending then
+    label = label .. ' \u{26A0}'
+  end
+  return label
+end
+
 --- 公開: GitHub API の created_at (ISO8601) を epoch seconds に (突合側の
 --- 一般コメント正規化でも使う)。
 function M.gh_time(iso)
@@ -229,16 +247,27 @@ function M.from_gh(gh, opts)
     created_at = gh_created_at(gh.created_at),
     state = 'active',
   }
+  -- vim.json.decode は JSON の null を vim.NIL (userdata) にするため、
+  -- `~= nil` では拾えない。行を正規化してから nil 判定する
+  -- (display_state の `comment.line > count` が userdata 比較で落ちる事故の根絶)。
+  local line = gh.line
+  if line == vim.NIL then
+    line = nil
+  end
+  local original_line = gh.original_line
+  if original_line == vim.NIL then
+    original_line = nil
+  end
   if gh.subject_type == 'file' then
     c.subject_type = 'file'
-  elseif gh.line ~= nil then
-    c.line = gh.line
-    c.end_line = gh.line
+  elseif line ~= nil then
+    c.line = line
+    c.end_line = line
   else
     -- 現在の diff に対応行が無いコメント (outdated)。突合側が state を
     -- 再検証するため、行は original_line を仮置きする。
-    c.line = gh.original_line
-    c.end_line = gh.original_line
+    c.line = original_line
+    c.end_line = original_line
   end
   return c
 end

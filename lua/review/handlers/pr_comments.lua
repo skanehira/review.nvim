@@ -43,7 +43,9 @@ local function display_state(comment, files_by_path)
   if comment.subject_type == 'file' then
     return file ~= nil and 'active' or 'outdated'
   end
-  if file == nil or comment.line == nil then
+  -- line が vim.NIL (JSON null の userdata) のまま残った経路でも落ちないよう
+  -- 防御する (from_gh が正規化するが、他の代入経路の保険)。
+  if file == nil or comment.line == nil or comment.line == vim.NIL then
     return 'outdated'
   end
   local count = file_new_line_count(file)

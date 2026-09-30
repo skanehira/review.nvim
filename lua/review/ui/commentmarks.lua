@@ -13,6 +13,7 @@
 -- 幅そのもの。リサイズの再 apply は handlers/session 側の WinResized / VimResized)。
 -- 張ったバッファは tracked に集約し、セッション close / delete で全バッファの
 -- namespace を明示 clear する (残骸 0。同バッファの全窓に見える仕様と対)。
+local comment_model = require 'review.core.comment'
 local highlight = require 'review.ui.highlight'
 
 local M = {}
@@ -109,80 +110,58 @@ end
 
 -- 補助行 (打ち切り導線・集約見出し): pad を本文色、文言を hl 色の chunk で、
 -- budget で折り返す。全 piece に pad を付ける = 打ち切り文言行と同一流儀
--- (本文の id 接頭辞列に揃えたインデント。pad と文言の色が同じときだけ 1 chunk
--- に併合する)。
+-- (pad が空のときは chunk を省く = 本文が左寄せなら chunk を増やさない)。
 local function side_lines(text, pad, budget, hl)
   local out = {}
   for _, piece in ipairs(wrap_body(text, budget, budget)) do
-    out[#out + 1] = merge_chunks { { pad, BODY_HL }, { piece, hl } }
+    local chunks = {}
+    if pad ~= '' then
+      chunks[#chunks + 1] = { pad, BODY_HL }
+    end
+    chunks[#chunks + 1] = { piece, hl }
+    out[#out + 1] = merge_chunks(chunks)
   end
   return out
 end
 
--- 1 コメントの表示ラベル: gh 由来は作者 login、push 済み local は自身の login、
--- それ以外 (branch のローカル) は id。pending のときは ⚠ を添える。
-local function comment_label(c, pending)
-  local label
-  if c.origin == 'gh' then
-    label = c.gh_user or 'gh'
-  elseif c.gh_user ~= nil then
-    label = c.gh_user
-  else
-    label = c.id
-  end
-  if pending then
-    label = label .. ' \u{26A0}'
-  end
-  return label
-end
+-- 1 コメントの表示ラベル (共通ヘルパー: core/comment.display_label — スレッド箱と
+-- `i` 全文閲覧 float で同一表記を保つ。gh は login / local は id / pending ⚠)。
+local comment_label = comment_model.display_label
 
 -- 1 コメントの箱の中身行 (chunk 配列の配列。罫線は含まない)。inner = 箱の
--- 内側幅 (nil = 折り返さない)。1 表示行目は id / 作者 接頭辞 / 折り返し後と
--- 2 行目以降の本文行は continuation pad を付ける (pad 幅は接頭辞と同じ)。
--- pending は ⚠ マーカーを接頭辞に添えるかどうか。
+-- 内側幅 (nil = 折り返さない)。1 表示行目はメタデータ行 (id / 作者 ラベルのみ)、
+-- 2 行目以降の本文・折り返し行は左寄せ (pad なし) で内側幅いっぱいを使う
+-- (`i` 全文閲覧 float と同一形式)。pending は ⚠ マーカーを接頭辞に添えるかどうか。
 local function comment_lines(c, inner, pending)
-  local prefix = ('  [%s] '):format(comment_label(c, pending))
-  local pad = string.rep(' ', vim.fn.strchars(prefix))
+  local prefix = ('  [%s]'):format(comment_label(c, pending))
   local prefix_hl = c.state == 'outdated' and OUTDATED_HEAD_HL or BODY_HL
   local out = {}
   local truncated = false
-  local blines = vim.split(c.body or '', '\n', { plain = true })
-  local budget1 = inner ~= nil and inner - vim.fn.strdisplaywidth(prefix) or nil
-  local budget2 = inner ~= nil and inner - vim.fn.strdisplaywidth(pad) or nil
-  for i, bl in ipairs(blines) do
+  -- 1 行目: メタデータ行 (接頭辞のみ。長いラベルは内側幅で折り返す)
+  for _, piece in ipairs(wrap_body(prefix, inner, inner)) do
     if #out >= MAX_THREAD_LINES then
       truncated = true
       break
     end
-    local head, head_hl
-    if i == 1 then
-      head, head_hl = prefix, prefix_hl
-    else
-      head, head_hl = pad, BODY_HL
+    out[#out + 1] = merge_chunks { { piece, prefix_hl } }
+  end
+  -- 2 行目以降: 本文 (左寄せ)
+  for _, bl in ipairs(vim.split(c.body or '', '\n', { plain = true })) do
+    if #out >= MAX_THREAD_LINES then
+      truncated = true
+      break
     end
-    for j, piece in ipairs(wrap_body(bl, budget1, budget2)) do
+    for _, piece in ipairs(wrap_body(bl, inner, inner)) do
       if #out >= MAX_THREAD_LINES then
         truncated = true
         break
       end
-      local h, hh
-      if j == 1 then
-        h, hh = head, head_hl
-      else
-        -- 折り返し行にも continuation pad を付ける
-        h, hh = pad, BODY_HL
-      end
-      local chunks = { { h, hh } }
-      if piece ~= '' then
-        chunks[#chunks + 1] = { piece, BODY_HL }
-      end
-      out[#out + 1] = merge_chunks(chunks)
+      out[#out + 1] = merge_chunks { { piece, BODY_HL } }
     end
   end
   if truncated then
-    -- 打ち切り導線: pad は本文色、文言のみ警告色 (id 接頭辞と同じ扱い)。
-    -- 文言も箱の中身行なので内側幅で折り返す (右辺からはみ出さない)
-    for _, line in ipairs(side_lines('… (press i for full text)', pad, budget2, prefix_hl)) do
+    -- 打ち切り導線: 本文と同じく左寄せ。文言のみ警告色 (id 接頭辞と同じ扱い)。
+    for _, line in ipairs(side_lines('… (press i for full text)', '', inner, prefix_hl)) do
       out[#out + 1] = line
     end
   end
@@ -370,10 +349,8 @@ function M.apply(session, bufnr, path, opts)
       for i, c in ipairs(comments) do
         local lines = {}
         if i == 1 then
-          local prefix = ('  [%s] '):format(comment_label(c, pending(c)))
-          local pad = string.rep(' ', vim.fn.strchars(prefix))
-          local budget = inner ~= nil and inner - vim.fn.strdisplaywidth(pad) or nil
-          for _, line in ipairs(side_lines(header, pad, budget, header_hl)) do
+          -- 見出しも箱の中身行: 本文と同じく左寄せで内側幅に折り返す
+          for _, line in ipairs(side_lines(header, '', inner, header_hl)) do
             lines[#lines + 1] = line
           end
         end

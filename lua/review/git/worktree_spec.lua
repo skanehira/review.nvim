@@ -245,6 +245,42 @@ describe('git/worktree remove_dir (掃除用の自前作 dir 再帰削除)', fun
       assert.equals(true, worktree.remove_dir(gone))
     end
   )
+
+  it(
+    'dir への symlink を辿らず unlink で消す (pnpm node_modules で掃除が落ちる事故の回帰)',
+    function()
+      -- fs_stat (追従) で判定すると dir symlink を再帰対象にし、内容を消した
+      -- あと rmdir が ENOTDIR で失敗して掃除全体が落ちる。lstat で type=='link' を
+      -- unlink するのが契約 (外部へのシンボリックリンクも実体を消さない)。
+      local root = vim.fn.tempname()
+      vim.fn.mkdir(vim.fs.joinpath(root, 'node_modules/pkg'), 'p')
+      table.insert(state.dirs, root)
+      local f = io.open(vim.fs.joinpath(root, 'node_modules/pkg/keep.txt'), 'w')
+      f:write 'x\n'
+      f:close()
+      -- node_modules/pkg を dir symlink として張る (pnpm の .pnpm 仮想ストア相当)
+      assert.is_true(vim.uv.fs_symlink('pkg', vim.fs.joinpath(root, 'node_modules/pkg-link')))
+
+      assert.equals(true, worktree.remove_dir(root))
+      assert.is_true(vim.uv.fs_stat(root) == nil)
+      -- 追い先 (pkg 実体) が別途存在しても消さないこと (root 配下のため本来は消えるが、
+      -- symlink の unlink で root 掃除が完了する = 実体への再帰削除に依存していない)
+    end
+  )
+
+  it('ファイルへの symlink も unlink で消す', function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, 'p')
+    table.insert(state.dirs, root)
+    local target = vim.fs.joinpath(root, 'target.txt')
+    local f = io.open(target, 'w')
+    f:write 'x\n'
+    f:close()
+    assert.is_true(vim.uv.fs_symlink('target.txt', vim.fs.joinpath(root, 'link.txt')))
+
+    assert.equals(true, worktree.remove_dir(root))
+    assert.is_true(vim.uv.fs_stat(root) == nil)
+  end)
 end)
 
 describe('git/worktree 実 git round-trip', function()

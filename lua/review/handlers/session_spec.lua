@@ -1182,8 +1182,10 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
           and row:find('├', 1, true) == nil
           and row:find('└', 1, true) == nil
         then
-          if row:find('ghost', 1, true) ~= nil then
-            break -- 見出し行はここまで (以降は本文)
+          -- 見出し以降はコメント側 (メタデータ行 `  [c1]` (警告色) → 本文 'ghost')。
+          -- どちらかで打ち切る (メタデータ行も警告色なので混入させない)
+          if row:find('ghost', 1, true) ~= nil or row:find('[c1]', 1, true) ~= nil then
+            break
           end
           for _, chunk in ipairs(line) do
             if chunk[2] == 'ReviewCommentOutdated' then
@@ -3078,118 +3080,58 @@ describe(
   end
 )
 
-describe('close の worktree クリーンアップ (セッション終了 1-4)', function()
+describe('close の worktree 保持 (セッション終了 / 削除は delete のみ)', function()
   use_env()
 
   it(
-    'worktree clean => 確認なしで save(closed) -> `git worktree remove` まで走る',
+    'worktree があっても close は remove しない (save(closed) + UI 掃除のみ、dir は残る)',
     function()
       started_with_worktree()
-
-      install_git {
-        git_ok, -- status clean
-        git_ok, -- remove ok
-      }
-      session_handler.close()
-
-      assert.same({ 'git', '-C', wt_path(), 'status', '--porcelain' }, state.git_calls[1])
-      assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[2])
-      assert.equals('closed', load_saved().status)
-      assert.is_nil(session_handler.active())
-      assert.equals(0, #state.inputs)
-    end
-  )
-
-  it(
-    'worktree 未コミット変更あり: --force 確認。キャンセル = close 中止 (save なし・UI 維持)',
-    function()
-      started_with_worktree()
-      state.input_answer = 'n'
-      install_git {
-        function()
-          return { code = 0, stdout = ' M a.lua\n', stderr = '' }
-        end,
-      }
-
-      session_handler.close()
-
-      assert.equals(1, #state.inputs)
-      assert.equals(
-        (
-          'review.nvim: worktree %s has uncommitted changes. delete and close? '
-          .. '(git worktree remove --force — disk edits are discarded) [y/N]: '
-        ):format(wt_path()),
-        state.inputs[1].prompt
-      )
-      assert.equals('open', load_saved().status)
-      assert.equals(SLUG, session_handler.active().id)
-      assert.equals(1, vim.fn.bufexists(SIDEBAR_NAME))
-      assert.equals(1, #state.git_calls) -- status 之後何も走らない
-    end
-  )
-
-  it(
-    '--force 承認 => save(closed) -> remove --force。worktree 記録は JSON に残る (ref も残る: update-ref なし)',
-    function()
-      started_with_worktree()
-      install_git {
-        function()
-          return { code = 0, stdout = ' M a.lua\n', stderr = '' }
-        end,
-        git_ok, -- remove --force ok
-      }
-
-      session_handler.close()
-
-      assert.same({ 'git', 'worktree', 'remove', '--force', wt_path() }, state.git_calls[2])
-      assert.equals('closed', load_saved().status)
-      assert.same({ path = wt_path(), created_by_us = true }, load_saved().worktree)
-      assert.is_nil(session_handler.active())
-    end
-  )
-
-  it(
-    'remove 失敗は WARN + 二段目自己修復 (prune + 自前 dir 削除) で close を完走させる',
-    function()
-      started_with_worktree()
-      local wt = wt_path()
-      vim.fn.mkdir(wt, 'p')
-      install_git {
-        git_ok, -- status clean
-        function()
-          return { code = 128, stdout = '', stderr = 'fatal: remove boom\n' }
-        end,
-        git_ok, -- prune (二段目)
-      }
+      vim.fn.mkdir(wt_path(), 'p')
+      install_git {} -- 予期しない git 呼び出しは stub が error
 
       session_handler.close()
 
       assert.equals('closed', load_saved().status)
       assert.is_nil(session_handler.active())
-      assert.same({
-        msg = 'review.nvim: worktree cleanup failed (the startup '
-          .. 'scan reclaims leftovers): fatal: remove boom',
-        level = vim.log.levels.WARN,
-      }, state.notifications[1])
-      -- 孤児 dir を残さない (does not point back 系の崩れ登録は prune + dir rm が正攻)
-      assert.is_true(vim.uv.fs_stat(wt) == nil)
-      assert.equals(1, #state.notifications)
+      assert.equals(0, #state.git_calls, 'close に status / remove が走った (keep が契約)')
+      assert.is_true(vim.uv.fs_stat(wt_path()) ~= nil, 'close で worktree dir が消えた')
     end
   )
 
   it(
-    'close -> 即 begin (pr) で add は remove 完了待ち (同一 path 直列化 = 二重登録防止)',
+    '未コミット変更があっても close は確認なしで閉じる (削除しないので worktree・バッファも残る)',
+    function()
+      make_real_worktree()
+      started_with_worktree()
+      local head_buf = vim.api.nvim_win_get_buf(ui_windows.win 'head')
+      vim.api.nvim_buf_set_lines(head_buf, 1, 2, false, { 'USER EDIT' })
+      install_git {}
+
+      session_handler.close()
+
+      assert.equals(0, #state.inputs, 'close に --force 確認は無い (削除しない)')
+      assert.equals('closed', load_saved().status)
+      assert.is_nil(session_handler.active())
+      assert.equals(0, #state.git_calls)
+      assert.is_true(vim.api.nvim_buf_is_valid(head_buf))
+      assert.equals(true, vim.bo[head_buf].modified) -- 未保存編集も残る
+      assert.is_true(vim.uv.fs_stat(wt_path()) ~= nil)
+    end
+  )
+
+  it(
+    'close -> 即 begin (pr) は remove を挟まず既存 worktree を再利用する (二重登録レースの根絶)',
     function()
       started_with_worktree()
-      -- close(q, 0 件=無確認): status -> remove(deferred)。pr begin(継承y)は
-      -- resolve_worktree が最先頭なので lock 待ち = add も diff も remove 完了後。
-      install_git_deferred_remove {
-        git_ok, -- status (close)
-        git_ok, -- remove (deferred: placeholder)
-        git_ok, -- add (begin: remove 完了後に再開)
+      vim.fn.mkdir(wt_path(), 'p')
+      install_git {
+        function()
+          return { code = 0, stdout = 'worktree ' .. wt_path() .. '\n', stderr = '' }
+        end, -- worktree list (再利用判定)
         function()
           return diff_ok(RAW_DIFF_A_B)
-        end,
+        end, -- diff
       }
       state.input_answer = 'y'
 
@@ -3203,184 +3145,43 @@ describe('close の worktree クリーンアップ (セッション終了 1-4)',
       }
 
       for _, c in ipairs(state.git_calls) do
-        if c[3] == 'add' or c[2] == 'diff' then
-          error(
-            'remove 完了前に worktree add / diff が走った (race = main--x + main--x1 二重登録の源)',
-            0
-          )
+        if c[2] == 'worktree' and (c[3] == 'add' or c[3] == 'remove') then
+          error('close->begin で worktree add/remove が走った (再利用が契約)', 0)
         end
       end
-      assert.is_true(state.deferred ~= nil)
-
-      state.deferred { code = 0, stdout = '', stderr = '' }
-
-      local has_add = false
-      for _, c in ipairs(state.git_calls) do
-        if c[3] == 'add' then
-          has_add = true
-        end
-      end
-      assert.is_true(has_add, 'remove 完了後も add が再開しない')
-      assert.same(add_cmd(), state.git_calls[3])
-      assert.same({ 'git', 'diff', 'main' }, state.git_calls[4])
+      assert.same({ 'git', 'worktree', 'list', '--porcelain' }, state.git_calls[1])
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[2])
+      assert.equals('open', load_saved().status)
       assert.equals(SLUG, session_handler.active().id)
     end
   )
 
   it(
-    'status 検知不能 (dir 消失 etc の git 失敗) は remove を呼ばず WARN で close 完走',
-    function()
-      started_with_worktree()
-      install_git {
-        git_fail("fatal: cannot change to '" .. wt_path() .. "'\n"),
-      }
-
-      session_handler.close()
-
-      assert.equals('closed', load_saved().status)
-      assert.equals(1, #state.git_calls)
-      assert.equals(vim.log.levels.WARN, state.notifications[1].level)
-    end
-  )
-
-  it(
-    'close の非同期窓中の tab 消滅 (active=nil 化) でも finish_close は捕捉済み session を保存し完遂する',
-    function()
-      make_real_worktree()
-      started_with_worktree()
-      -- status を非同期化: 応答待つ間の窓で review tab を消滅させ、
-      -- on_review_tab_closed (唯一の finish_close を通らない active=nil 経路) を
-      -- 挟み込む (実 vim.system は status も非同期)
-      install_git_deferred({
-        git_ok, -- status (deferred: placeholder)
-        git_ok, -- remove ok
-      }, function(cmd)
-        return cmd[2] == '-C' and cmd[4] == 'status'
-      end)
-
-      session_handler.close() -- 0 comments -> 確認なしで status spawn まで進む
-
-      vim.api.nvim_set_current_tabpage(review_tab())
-      vim.cmd 'tabclose!'
-      vim.wait(300, function()
-        return session_handler.active() == nil
-      end)
-      assert.is_nil(session_handler.active())
-      assert.equals('open', load_saved().status) -- tab 消滅側の save (status は開いたまま)
-
-      -- status 応答到着 -> finish_close(current 捕捉)。active は既に nil。
-      local ok, err = pcall(function()
-        state.deferred { code = 0, stdout = '', stderr = '' }
-      end)
-      assert.is_true(ok, 'finish_close が active=nil で中断した: ' .. tostring(err))
-      -- 捕捉済み current.session が closed で保存され、掃除 (remove) まで進む
-      -- (active.session を参照する実装では nil index error で以降が全中止される)
-      assert.equals('closed', load_saved().status)
-      assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[2])
-    end
-  )
-
-  it(
-    'close は remove spawn 前に worktree 配下の実ファイルバッファを破棄する (E211 防止)',
+    'close は worktree 配下の実ファイルバッファを破棄しない (dir が残るので E211 は起きない)',
     function()
       local wt = make_real_worktree()
       started_with_worktree()
-      -- UI 開通で head 実ファイル (a.lua) が bufadd / bufload 済み。加えて
-      -- ユーザーが別ファイル (b.lua) を :edit / LSP ジャンプした体で loaded
-      -- バッファを足す (open_head_real 経由外も走査対象であることの前提)。
-      local user_buf = vim.fn.bufadd(vim.fs.joinpath(wt, 'b.lua'))
-      vim.fn.bufload(user_buf)
       local fname = vim.uv.fs_realpath(vim.fs.joinpath(wt, 'a.lua'))
       assert.equals(
         1,
         vim.fn.bufexists(fname),
         '前提: close 前に head 実ファイルバッファがある'
       )
-      assert.equals(
-        1,
-        vim.fn.bufexists(user_buf),
-        '前提: ユーザー開きの worktree 内バッファがある'
-      )
+      local user_buf = vim.fn.bufadd(vim.fs.joinpath(wt, 'b.lua'))
+      vim.fn.bufload(user_buf)
+      install_git {}
 
-      -- remove は deferred (未完了) のままでもバッファは既に消えていること:
-      -- git worktree remove は非同期 (vim.system) なので spawn より前の同期破棄が契約。
-      install_git_deferred_remove {
-        git_ok, -- status clean
-        git_ok, -- remove (deferred)
-      }
       session_handler.close()
 
       assert.equals('closed', load_saved().status)
       assert.is_nil(session_handler.active())
       assert.equals(
-        0,
+        1,
         vim.fn.bufexists(fname),
-        'worktree 配下のバッファが残ったまま (E211 の源)'
+        'close で worktree 配下のバッファが消えた (dir は残る = keep が契約)'
       )
-      assert.equals(
-        0,
-        vim.fn.bufexists(user_buf),
-        'open_head_real 経由外の worktree 内バッファも走査対象'
-      )
-      state.deferred { code = 0, stdout = '', stderr = '' } -- remove 完了 (後始末)
-    end
-  )
-
-  it(
-    'worktree 配下に modified なバッファがあると close 前に確認プロンプト (キャンセル = close 中止)',
-    function()
-      make_real_worktree()
-      started_with_worktree()
-      local head_buf = vim.api.nvim_win_get_buf(ui_windows.win 'head')
-      vim.api.nvim_buf_set_lines(head_buf, 1, 2, false, { 'USER EDIT' }) -- 未保存 (ディスクに無い)
-      state.input_answer = 'n'
-      install_git {
-        git_ok, -- status: clean (バッファ上の編集は git status に現れない)
-      }
-
-      session_handler.close()
-
-      -- git status は clean でもバッファ上の未保存編集を force 確認に乗せる
-      -- (無告知の force wipe は未保存編集を黙って捨てる = E211 より悪い)。
-      assert.equals(1, #state.inputs)
-      assert.equals(
-        (
-          'review.nvim: worktree %s has uncommitted changes or unsaved buffer edits (%d buffers).'
-          .. ' delete and close? (git worktree remove --force '
-          .. '— disk and buffer edits are discarded) [y/N]: '
-        ):format(wt_path(), 1),
-        state.inputs[1].prompt
-      )
-      assert.equals('open', load_saved().status)
-      assert.equals(SLUG, session_handler.active().id)
-      assert.equals(1, #state.git_calls) -- status のあと remove は走らない
-      assert.is_true(vim.api.nvim_buf_is_valid(head_buf))
-      assert.equals(true, vim.bo[head_buf].modified) -- バッファと編集も残る
-    end
-  )
-
-  it(
-    'modified バッファありの close を承認すると remove --force で進みバッファも破棄される',
-    function()
-      local wt = make_real_worktree()
-      started_with_worktree()
-      local head_buf = vim.api.nvim_win_get_buf(ui_windows.win 'head')
-      vim.api.nvim_buf_set_lines(head_buf, 1, 2, false, { 'USER EDIT' })
-      state.input_answer = 'y'
-      install_git {
-        git_ok, -- status: clean (ディスク)
-        git_ok, -- remove --force ok
-      }
-
-      session_handler.close()
-
-      assert.same({ 'git', 'worktree', 'remove', '--force', wt_path() }, state.git_calls[2])
-      assert.equals('closed', load_saved().status)
-      assert.equals(
-        0,
-        vim.fn.bufexists(vim.uv.fs_realpath(vim.fs.joinpath(wt, 'a.lua'))),
-        '承認経路でも worktree 配下のバッファを破棄する'
-      )
+      assert.equals(1, vim.fn.bufexists(user_buf))
+      assert.is_true(vim.uv.fs_stat(wt) ~= nil)
     end
   )
 
@@ -3618,9 +3419,10 @@ describe('delete の worktree / ref 掃除', function()
   )
 
   it(
-    'active 同一 id の delete は close 相当の掃除 (status -> save -> remove) -> JSON 削除',
+    'active 同一 id の delete: close (save) -> 自前 worktree の status -> remove -> JSON 削除',
     function()
       started_with_worktree()
+      vim.fn.mkdir(wt_path(), 'p') -- add は stub なので dir は自前で作る (掃除対象の実在)
       install_git {
         top_ok,
         git_ok, -- worktree status clean
@@ -3649,6 +3451,7 @@ describe('delete の worktree / ref 掃除', function()
     'active 同一 id の delete: JSON+ref 削除は remove (手順 3) の投入より先へ進まず、完了を待って実行する',
     function()
       started_with_worktree()
+      vim.fn.mkdir(wt_path(), 'p')
       install_git_deferred_remove { top_ok, git_ok, git_ok }
       state.input_answer = 'y'
 
@@ -3671,7 +3474,7 @@ describe('delete の worktree / ref 掃除', function()
   )
 
   it(
-    'active 同一 id の delete で remove 失敗: closed 残骸と同一の掃除で回収してから削除完了 (孤児 dir なし)',
+    'active 同一 id の delete で remove 失敗: prune + 自前 dir 削除で回収してから削除完了 (孤児 dir なし)',
     function()
       started_with_worktree()
       local wt = wt_path()
@@ -3682,11 +3485,8 @@ describe('delete の worktree / ref 掃除', function()
       session_handler.delete(SLUG)
       state.deferred { code = 255, stdout = '', stderr = 'fatal: remove boom\n' }
 
-      assert.same({
-        msg = 'review.nvim: worktree cleanup failed (the startup '
-          .. 'scan reclaims leftovers): fatal: remove boom',
-        level = vim.log.levels.WARN,
-      }, state.notifications[1])
+      -- 回収は WARN なしで完遂 (close の旧経路のような "cleanup failed" はもう出ない)
+      assert.equals(0, #state.notifications)
       assert.same({ 'git', 'worktree', 'prune' }, state.git_calls[4])
       assert.is_true(vim.uv.fs_stat(wt) == nil)
       assert.is_true(vim.uv.fs_stat(json_path()) == nil)
@@ -3713,11 +3513,6 @@ describe('delete の worktree / ref 掃除', function()
       state.deferred { code = 255, stdout = '', stderr = 'fatal: remove boom\n' }
 
       assert.same({ 'git', 'worktree', 'prune' }, state.git_calls[4])
-      assert.same({
-        msg = 'review.nvim: worktree cleanup failed (the startup '
-          .. 'scan reclaims leftovers): fatal: remove boom',
-        level = vim.log.levels.WARN,
-      }, state.notifications[1])
       local function has_msg(pat)
         for _, n in ipairs(state.notifications) do
           if n.msg:find(pat, 1, true) ~= nil then
@@ -3726,8 +3521,9 @@ describe('delete の worktree / ref 掃除', function()
         end
         return false
       end
-      assert.is_true(has_msg 'failed to delete the worktree dir')
       assert.is_true(has_msg 'failed to remove the orphaned worktree dir')
+      assert.is_false(has_msg 'worktree cleanup failed') -- close の旧経路文言はもう無い
+      assert.is_false(has_msg 'failed to delete the worktree dir')
       -- JSON を消さない = closed + created_by_us=true の記録が残る (起動 scan 回収可)。
       assert.is_true(vim.uv.fs_stat(json_path()) ~= nil)
       assert.equals('closed', load_saved().status)

@@ -42,7 +42,7 @@ The `main..current branch` diff opens in three windows. The review target is the
 
 **2. Write comments**
 
-Move between files with `<Tab>` / `<S-Tab>` and press `c` on a changed line to enter the body (select lines in visual-line for a range comment). Confirmed comments show as a thread box under the line; edit with `e`, delete with a confirmation double-press of `d`. Every comment is saved when confirmed.
+Move between files with `<Tab>` / `<S-Tab>` and press `c` on a changed line to enter the body (select lines in visual-line for a range comment). Confirmed comments show as a thread box under the line; edit with `e`, delete with a confirmation double-press of `d` (when several comments share the line — e.g. a thread root and a reply — pick one with a prompt and it is deleted right away). Every comment is saved when confirmed.
 
 `:w` in the head window refetches the diff and updates the ±counts, comment positions and the prompt against the saved content.
 
@@ -77,7 +77,7 @@ Comments you no longer need after copying can be removed with `:Review clear` (o
 
 **5. Close**
 
-`q` (or `:Review close`) saves the comments and closes. Worktrees created by `:Review pr` are cleaned up at the same time.
+`q` (or `:Review close`) saves the comments and closes. Worktrees created by `:Review pr` are kept (so a closed session reopens quickly, reusing the same worktree, including any uncommitted edits). To remove a worktree, delete the session with `:Review delete {id}` (or `d` in `:Review list`); it asks for confirmation and a `--force` confirmation if the worktree has uncommitted changes.
 
 ## Keymaps
 

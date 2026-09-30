@@ -405,6 +405,72 @@ describe('comments e / d (編集・削除 arming)', function()
     assert.equals(1, #saved().comments)
     assert.equals('x1', saved().comments[1].body)
   end)
+
+  it(
+    'd: 複数該当 (根 + リプライ同線) は picker で選んだ時点でそのコメントだけ削除',
+    function()
+      focus_head_row(2)
+      comments_handler.add_normal()
+      type_into_float 'root'
+      table.insert(state.session.comments, {
+        id = 'c2',
+        file = 'a.lua',
+        line = 2,
+        end_line = 2,
+        body = 'reply',
+        anchor = vim.NIL,
+        state = 'active',
+        origin = 'local',
+        in_reply_to = 'c1',
+        created_at = 4321,
+      })
+      -- メモリ上の active セッションに根 + リプライが並ぶ (disk 反映は削除確定時の
+      -- persist で確認する — INV-4 は「効果直後にディスクを読んで判定」)
+      assert.equals(2, #state.session.comments)
+
+      -- picker でリプライ (2 件目) を選ぶ -> 明示選択 = 即削除 (arm 不要)
+      local seen = nil
+      local real_select = vim.ui.select
+      vim.ui.select = function(items, _opts, on_choice)
+        seen = #items
+        on_choice(items[2])
+      end
+      focus_head_row(2)
+      comments_handler.delete_current()
+      vim.ui.select = real_select
+      assert.equals(2, seen, 'ui.select に複数件が渡っていない')
+      assert.equals(1, #saved().comments) -- 選んだリプライだけが消え、根は残る
+      assert.equals('c1', saved().comments[1].id)
+      assert.equals('root', saved().comments[1].body)
+    end
+  )
+
+  it('d: 複数該当の picker をキャンセル (Esc) すると何も削除しない', function()
+    focus_head_row(2)
+    comments_handler.add_normal()
+    type_into_float 'root'
+    table.insert(state.session.comments, {
+      id = 'c2',
+      file = 'a.lua',
+      line = 2,
+      end_line = 2,
+      body = 'reply',
+      anchor = vim.NIL,
+      state = 'active',
+      origin = 'local',
+      in_reply_to = 'c1',
+      created_at = 4321,
+    })
+    assert.equals(2, #state.session.comments)
+
+    vim.ui.select = function(_items, _opts, on_choice)
+      on_choice(nil) -- キャンセル
+    end
+    focus_head_row(2)
+    comments_handler.delete_current()
+
+    assert.equals(2, #state.session.comments) -- 何も消えない
+  end)
 end)
 
 describe('comments D / clear_by_command (一括削除)', function()
@@ -627,6 +693,12 @@ end)
 describe('comments y / i', function()
   use_env()
 
+  -- 右寄せ pad を除いた中身 (表示行)。罫線は nvim の float border が描くため
+  -- buffer 行の比較は padding だけを剥がす (幅は columns 依存)。
+  local function view_content(line)
+    return (line:gsub('%s+$', ''))
+  end
+
   local function seed_at(row, body)
     focus_head_row(row)
     comments_handler.add_normal()
@@ -647,22 +719,71 @@ describe('comments y / i', function()
     end
   )
 
-  it('i: 全文閲覧 float を開く', function()
-    seed_at(2, 'view me\nsecond line')
+  it(
+    'i: 全文閲覧 float を開く (メタデータ行 + 本文は 2 行目から左寄せ)',
+    function()
+      seed_at(2, 'view me\nsecond line')
 
-    focus_head_row(2)
-    state.notifications = {}
-    comments_handler.view_current()
-    local wins = vim.api.nvim_tabpage_list_wins(ui_windows.state().tab)
-    assert.equals(4, #wins, '閲覧 float が開かない (3 レビュー窓 + float)')
-    local buf = vim.api.nvim_get_current_buf()
-    assert.same(
-      { '[1] c1  a.lua:2', '  view me', '  second line' },
-      vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    )
-    assert.equals('markdown', vim.bo[buf].filetype)
-    assert.equals(0, #state.notifications)
-  end)
+      focus_head_row(2)
+      state.notifications = {}
+      comments_handler.view_current()
+      local wins = vim.api.nvim_tabpage_list_wins(ui_windows.state().tab)
+      -- 3 レビュー窓 + 閲覧 float (罫線は nvim border) = 4
+      assert.equals(4, #wins, '閲覧 float が開かない (3 レビュー窓 + float)')
+      local buf = vim.api.nvim_get_current_buf()
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      -- 罫線は nvim の float border (rounded + title)。buffer は中身だけで、
+      -- 1 コメント = メタデータ行 + 本文 (2 行目から左寄せ)
+      local cfg = vim.api.nvim_win_get_config(vim.api.nvim_get_current_win())
+      assert.same({ '╭', '─', '╮', '│', '╯', '─', '╰', '│' }, cfg.border)
+      assert.equals(' Comment a.lua q close ', cfg.title[1][1])
+      assert.equals('a.lua:2 [c1]', view_content(lines[1]))
+      assert.equals('view me', view_content(lines[2]))
+      assert.equals('second line', view_content(lines[3]))
+      -- buffer に罫線文字は無い (カーソルが罫線に乗らない)
+      for _, line in ipairs(lines) do
+        assert.is_true(line:find('│', 1, true) == nil, 'buffer に罫線 │ がある')
+      end
+      assert.equals('markdown', vim.bo[buf].filetype)
+      assert.equals(0, #state.notifications)
+    end
+  )
+
+  it(
+    'i: gh コメントは作者 login をメタデータ行に表示し、コメント間に全幅 ─ 区切りを入れる',
+    function()
+      seed_at(2, 'root')
+      table.insert(state.session.comments, {
+        id = 'c2',
+        file = 'a.lua',
+        line = 2,
+        end_line = 2,
+        body = '[must]\ntext',
+        anchor = vim.NIL,
+        state = 'active',
+        origin = 'gh',
+        gh_id = 10,
+        gh_user = 'skanehira',
+        gh_state = 'submitted',
+        created_at = 4321,
+      })
+      focus_head_row(2)
+      comments_handler.view_current()
+
+      local lines = vim.api.nvim_buf_get_lines(vim.api.nvim_get_current_buf(), 0, -1, false)
+      -- c1: メタデータ / 本文。c2: メタデータ / [must] / text (severity は本文の一部)
+      assert.equals('a.lua:2 [c1]', view_content(lines[1]))
+      assert.equals('root', view_content(lines[2]))
+      assert.equals('a.lua:2 [skanehira]', view_content(lines[4]))
+      assert.equals('[must]', view_content(lines[5]))
+      assert.equals('text', view_content(lines[6]))
+      -- 区切りは内容幅いっぱいの `─` 罫線行 (左右は nvim border の │ が残る)。
+      -- マルチバイト ─ の繰り返しは Lua パターンの + では扱えないため gsub で判定。
+      assert.equals('', (lines[3]:gsub('─', '')))
+      assert.is_true(vim.fn.strchars(lines[3]) > 3, '区切りが全幅展開されていない')
+      assert.is_true(lines[3]:find('│', 1, true) == nil, 'buffer に罫線 │ がある')
+    end
+  )
 
   it('i: outdated コメントは prompt 除外中と表示する', function()
     seed_at(2, 'drifted')
@@ -672,7 +793,9 @@ describe('comments y / i', function()
     focus_head_row(2)
     comments_handler.view_current()
     local lines = vim.api.nvim_buf_get_lines(vim.api.nvim_get_current_buf(), 0, -1, false)
-    assert.same({ '[1] c1  a.lua:2  ! outdated (excluded from prompt)', '  drifted' }, lines)
+    -- メタデータ行に除外中の注記が載り、本文は次の行 (左寄せ)
+    assert.equals('a.lua:2 [c1]  ! outdated (excluded from prompt)', view_content(lines[1]))
+    assert.equals('drifted', view_content(lines[2]))
   end)
 end)
 

@@ -1,5 +1,7 @@
 -- E2E PR 追加 assert (pr-worktree.md テスト方針: close 後の別プロセス起動で
 -- 残骸 scan 通知が出ないこと)。scan / VimEnter が走った上で無通知のまま進む。
+-- close は worktree を残す設計 (keep) なので、closed セッションの dir は scan が
+-- 触らない (削除は :Review delete / 一覧 d のみ)。
 local run = function()
   local json = assert(os.getenv 'REVIEW_E2E_JSON', 'REVIEW_E2E_JSON 未設定')
   if vim.uv.fs_stat(json) == nil then
@@ -7,8 +9,8 @@ local run = function()
     vim.cmd 'cquit!'
   end
   local wt = assert(os.getenv 'REVIEW_E2E_WT', 'REVIEW_E2E_WT 未設定')
-  if vim.uv.fs_stat(wt) ~= nil then
-    print('E2E-FAIL: close 済み worktree dir が残っている: ' .. wt)
+  if vim.uv.fs_stat(wt) == nil then
+    print('E2E-FAIL: close 済み worktree dir が残っていない (keep が契約): ' .. wt)
     vim.cmd 'cquit!'
   end
   print 'E2E-PR1B idle=1'

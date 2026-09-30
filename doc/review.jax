@@ -44,7 +44,7 @@ USAGE						*review-usage_ja*
 	  補完できる (pum にタイトル併記、挿入されるのは番号のみ。gh を同期
 	  実行)。head を git worktree に展開し、レビュー窓 (tcd 済み) の head
 	  側が worktree 内の実ファイルになる (worktree 作成は pr モードのみ。
-	  掃除は |review-sessions_ja|)
+	  削除はセッション削除時のみ |review-sessions_ja|)
 
 	:Review list			保存済みセッション一覧 |review-list_ja|
 
@@ -97,7 +97,7 @@ git/gh を伴う実行の成否は非同期に UI 開閉か vim.notify で返る
 	resume({ id= })			保存済みセッションを id で復元
 
 	close()
-	  現セッションの save + 窓を閉じる + worktree 掃除
+	  現セッションの save + 窓を閉じる (worktree は削除しない)
 
 	delete({ id= })
 	  保存済みセッションを削除 (worktree 掃除含む。active な id も可)
@@ -235,8 +235,10 @@ KEYMAPS						*review-keymaps_ja*
 	d
 	  カーソル行のコメントを削除。誤爆防止の二重押し: 1 回目は armed + WARN
 	  だけを発し、同じ行で 2 秒以内に続けて d で削除が確定する (vim 筋の dd
-	  で複数件が消えないため)。arming は他行移動・e での編集確定・2 秒経過・
-	  <Esc> で解除
+	  で複数件が消えないため)。その行に複数のコメントがある場合 (スレッドの
+	  根と返信など) は、番号プロンプト (既定の vim.ui.select = `番号入力 +
+	  <Enter>`) で対象を選ぶとその場で削除される (再押下不要)。arming は
+	  他行移動・e での編集確定・2 秒経過・<Esc> で解除
 
 	D
 	  全コメントを一括削除 (:Review clear と同じ)。誤爆防止の二重押し:
@@ -288,7 +290,12 @@ KEYMAPS						*review-keymaps_ja*
 
 	i
 	  カーソル行のコメント全文を read-only 窓 (markdown) で閲覧 (編集は e)。
-	  q / <Esc> で閉じる
+	  罫線は Neovim の float border (`╭タイトル─╮` / `│` / `╰─╯`。固定の枠で、
+	  中身が窓より高ければ buffer だけがスクロールする)。各コメントは 1 行目が
+	  メタデータ行 `path:line [<作者>]` (作者は gh なら login / ローカルは
+	  id / pending は ⚠ — スレッド箱と同一) で、2 行目から本文を左寄せで
+	  表示する。コメント間は内容幅いっぱいの `─` 罫線で区切る。長い本文は
+	  内側幅で折り返す。q / <Esc> で閉じる。
 
 	r
 	  カーソル行のスレッドへ返信する (head 窓のみ)。返信は local pending
@@ -424,9 +431,13 @@ SESSION 状態と復旧				*review-sessions_ja*
 保存済みセッションには open / closed の 2 状態がある (list で 1 行表示):
 
  契約化された「閉じる」操作は q / `:Review close` の 2 つ (同じ手順): comments +
- 完了マークを保存して closed にし、レビュー tab を閉じ、plugin が作った worktree を
- 掃除する (closed は `:Review` では復元できず、`:Review list` からのみ再開できる。
- 開くと自動的に open に戻り worktree は再生成される)。
+  完了マークを保存して closed にし、レビュー tab を閉じる。plugin が作った PR
+  worktree は残す (worktree dir・未コミット変更・未保存バッファ編集はすべて残る
+  ので、closed セッションは素早く再開でき、同じ worktree を再利用する)。
+  closed は `:Review` では復元できず、`:Review list` からのみ再開できる。
+  開くと自動的に open に戻る。worktree が削除されるのは、`:Review delete {id}`
+  または `:Review list` の `d` でセッションを削除したときだけ (確認付き。
+  未コミット変更があると `--force` を確認する)。
 
 	ユーザーがレビュー tab を `:tabclose` / `:tabonly` 等で直接閉じるのは close
 	と区別される: コメントと open 状態は保存されたまま (status=open)、extmark と
@@ -437,7 +448,8 @@ SESSION 状態と復旧				*review-sessions_ja*
 
 	Neovim 異常終了
 	  open のまま JSON が data dir に残り、次回起動時に«you can resume…»通知
-	  (:Review で復元 / worktree 残骸は起動 scan が掃除)
+	  (:Review で復元 / worktree dir が消えていれば記録は起動 scan が回収し、
+	  復元時に worktree を再生成)
 
 	保存時自動反映
 	  保存した差分は自動でレビューに反映される。レビュー対象ファイルの保存
@@ -490,9 +502,11 @@ outdated 認定 (差分の揺れで対象行を特定できないコメント) �
 	コメントは head 実バッファの extmark (範囲全体の下線 + 範囲の最終行の
 	行末 `コメントアイコン N`。outdated 混在でも件数は変えず、outdated は
 	行下スレッドの id 接頭辞を警告色にする)。本文は **範囲の最終行の下に
-	罫線の箱** (`┌─┐ │ └─┘`) で囲んだスレッドで表示する (GitHub 風。箱の
-	幅は head 窓のテキスト幅いっぱいに広がり右辺は常に窓右端で揃い、本文は
-	箱の内側で折り返し、10 行で打ち切り、全文は markdown filetype の `i` 窓)。
+	罫線の箱** (`┌─┐ │ └─┘`) で囲んだスレッドで表示する (GitHub 風。各
+	コメントはメタデータ行 (`[作者]`) の次から本文を左寄せで箱の内側に
+	表示する。箱の幅は head 窓のテキスト幅いっぱいに広がり右辺は常に窓右端
+	で揃い、本文は箱の内側で折り返し、10 行で打ち切り、全文は markdown
+	filetype の `i` 窓)。
 	スレッドはそのバッファを見る全窓に
 	見える (窓単位で抑える API が Neovim に無い実測。バッファ行を占有しない
 	ので行番号写像は不変。他窓が head 窓より狭いときは右辺が切れる)。

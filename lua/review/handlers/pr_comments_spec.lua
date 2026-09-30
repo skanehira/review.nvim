@@ -186,6 +186,22 @@ describe('pr_comments.reconcile_review_comments', function()
     )
     assert.equals('outdated', s.comments[1].state)
   end)
+
+  it('line が vim.NIL (JSON null) の行コメントは落ちず outdated になる', function()
+    -- vim.json.decode は JSON の null を vim.NIL (userdata) にする。旧実装は
+    -- display_state の `comment.line > count` が "attempt to compare number with
+    -- userdata" で vim.schedule コールバックを落としていた (Bug: pr_comments.lua:50)。
+    local s = session_with {}
+    pr_comments.reconcile_review_comments(
+      s,
+      { gh_comment { id = 23, line = vim.NIL, original_line = vim.NIL } },
+      {},
+      { ['src/a.lua'] = diff_file('src/a.lua', 20) }
+    )
+    assert.equals(1, #s.comments)
+    assert.equals('outdated', s.comments[1].state)
+    assert.is_nil(s.comments[1].line)
+  end)
 end)
 
 describe('pr_comments.reconcile_general', function()
