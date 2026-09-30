@@ -360,6 +360,12 @@ local function use_env()
     end)
     session_handler._reset()
     vim.notify = function(msg, level)
+      -- worktree 作成中の過渡 notify は完了時に nvim_echo クリアで消える実態を
+      -- モデル化し、最終的な notifications に残さない (shown はフラグで観測)。
+      if type(msg) == 'string' and msg:find('creating the review worktree', 1, true) then
+        state.worktree_notify_shown = true
+        return
+      end
       table.insert(state.notifications, { msg = msg, level = level })
     end
     vim.ui.input = function(opts, cb)

@@ -249,20 +249,27 @@ end
 
 -- add -> (衝突時) prune 再試行 -> (自前記録あり) dir 削除して再々試行。
 -- 「衝突した残骸が自前作成分でない限り自動削除しない」(INV-3 / pr-worktree.md)。
+-- 作成中は過渡 notify を出し、全終了経路 (成功 / 失敗) で消す (既定の vim.notify
+-- は echo のみで id 非表示が無いため、完了は nvim_echo のクリアで実現する)。
 local function add_with_recovery(args, path, record, cb)
+  vim.notify('review.nvim: creating the review worktree...', vim.log.levels.INFO)
+  local function finish(res)
+    vim.api.nvim_echo({}, false, {})
+    cb(res)
+  end
   local function add(reason_cb)
     git_worktree.add({ repo = args.repo, path = path, ref = args.head }, reason_cb)
   end
   add(function(res)
     if res.ok then
-      cb(result.ok { path = path, created_by_us = true })
+      finish(result.ok { path = path, created_by_us = true })
       return
     end
     local first_err = res
     git_worktree.prune({ repo = args.repo }, function()
       add(function(res2)
         if res2.ok then
-          cb(result.ok { path = path, created_by_us = true })
+          finish(result.ok { path = path, created_by_us = true })
           return
         end
         if record ~= nil and record.created_by_us == true then
@@ -270,14 +277,14 @@ local function add_with_recovery(args, path, record, cb)
           git_worktree.remove_dir(path)
           add(function(res3)
             if res3.ok then
-              cb(result.ok { path = path, created_by_us = true })
+              finish(result.ok { path = path, created_by_us = true })
               return
             end
-            cb(result.err(res3.error, result.codes.E_WORKTREE))
+            finish(result.err(res3.error, result.codes.E_WORKTREE))
           end)
           return
         end
-        cb(
+        finish(
           result.err(
             (
               'cannot create the worktree: %s. if a worktree with the same name is left over, '

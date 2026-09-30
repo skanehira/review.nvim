@@ -63,6 +63,12 @@ local function use_env()
     end)
     session_handler._reset()
     vim.notify = function(msg, level)
+      -- worktree 作成中の過渡 notify は完了時に nvim_echo クリアで消える実態を
+      -- モデル化し、最終的な notifications に残さない (shown はフラグで観測)。
+      if type(msg) == 'string' and msg:find('creating the review worktree', 1, true) then
+        state.worktree_notify_shown = true
+        return
+      end
       table.insert(state.notifications, { msg = msg, level = level })
     end
     vim.ui.input = function(opts, cb)
@@ -706,6 +712,22 @@ describe('restore の worktree 解决 (mode=pr は resume でも常時作成/再
       assert.equals('pr-7', session_handler.active().id)
       local wt = require('review.store.paths').worktree_path(REPO_TOP, 'pr-7')
       assert.same({ path = wt, created_by_us = true }, store.load(REPO_TOP, 'pr-7').data.worktree)
+    end
+  )
+
+  it(
+    '復元時の worktree 作成でも過渡 notify を出し、完了後は notifications に残らない',
+    function()
+      pr_session()
+
+      restore.resume_session(store.load(REPO_TOP, 'pr-7').data)
+
+      assert.is_true(state.worktree_notify_shown)
+      for _, n in ipairs(state.notifications) do
+        if type(n.msg) == 'string' then
+          assert.is_nil(n.msg:find('creating the review worktree', 1, true))
+        end
+      end
     end
   )
 

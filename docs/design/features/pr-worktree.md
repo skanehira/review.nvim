@@ -25,6 +25,8 @@
 
 作成失敗 (パス衝突) は既存同名ディレクトリを `git worktree prune` で回収試行 → 改善しなければ `E_WORKTREE` 通知で開始を中断。**衝突した残骸が自分の作成分 (`created_by_us=true` の記録あり) でない限り自動削除しない** (INV-3)。
 
+**作成中の過渡 notify**: `git worktree add` を走らせている間は `vim.notify` で «creating the review worktree...» を表示し、全終了経路 (成功 / 失敗) で消す (既定の `vim.notify` は echo のみで id 非表示が無いため、完了は `nvim_echo({}, false, {})` のメッセージエリアクリアで実現する。カスタム notify プロバイダ向けの `{hide=id}` は使わない)。
+
 **0 差分・差分取得失敗時の掃除 (開始 / 復元)**: pr 開始で差分 0 ファイルなら «No changes» INFO で開かず save しないが、作成は diff に先行するので作りたて／再利用の自前 worktree を `git worktree remove` で掃除する (**close / delete と同じ直列化 lock 下**。失敗は WARN で記録は残し、起動 scan が回収できる状態を保つ)。既存保存セッションの記録を再利用 (旧記録と同じ path の作成分を含む) していた場合は、掃除成功後にそのセッション JSON の worktree 記録を nil 化して save する (実在しない dir を指した記録を残さない。comments / refs / status はそのまま。nil 化 save は直前にディスク上の JSON 存在を再確認し、掃除の窓中に :Review delete が完了していたら復活させない — persistence-restore「存在再確認」)。nil 化の対象も自前記録のみ (`created_by_us=true` かつ同 path。legacy の非自前記録を黙って消さない)。**diff 取得が失敗した場合も同じ掃除を走る** (開始 / 復元どちらの経路も `fetch_prepared` の diff 失敗分岐。放置すると作りたて worktree が記録なしの孤児になる)。掃除が remove・prune+dir 削除とも失敗したとき、その dir を指す created_by_us 記録が JSON に残らない場合は「起動 scan が回収」ではなく**手动削除を案内する WARN を出す** (INV-3: 記録のない dir を scan は触れないため、回収を約束しない)。
 
 **head 窓と実ファイル (`o`)**:
