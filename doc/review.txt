@@ -44,10 +44,11 @@ Everything runs through one command and its subcommands:
 
 	:Review pr {number|url}
 	  Start a PR review (gh integration). {number} is <Tab>-completed with
-	  open PR numbers (gh runs synchronously). The head is expanded into a
-	  git worktree and the head side of the review windows (tcd done)
-	  becomes the real files under the worktree (worktree creation is pr
-	  mode only; cleanup: |review-sessions|)
+	  open PR numbers (titles shown in the popup, only the number is inserted;
+	  gh runs synchronously). The head is expanded into a git worktree and the
+	  head side of the review windows (tcd done) becomes the real files under
+	  the worktree (worktree creation is pr mode only; cleanup:
+	  |review-sessions|)
 
 	:Review list			saved-session list |review-list|
 

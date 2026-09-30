@@ -234,34 +234,6 @@ local function session_id_candidates(lead)
   return out
 end
 
--- :Review pr の <number> 補完。open PR の番号 (GitHub 一覧と同じ newest 25)。
--- 标题は候補に混ぜない (customlist の返り値は挿入語そのものになる = 実測
--- 前提の契約。番号のみの挿入が期待挙動)。pr list は状態が動きやすいので
--- cache なし (run_sync の timeout がコスト上限)。gh 失敗は候補 0・無通知。
-local function pr_number_candidates(lead)
-  local cli = require 'review.git.cli'
-  local res = cli.run_sync(
-    config.get().gh_bin,
-    { 'pr', 'list', '--state', 'open', '--limit', '25', '--json', 'number' },
-    { cwd = vim.fn.getcwd(), err_code = 'E_PR' }
-  )
-  if not res.ok then
-    return {}
-  end
-  local ok, items = pcall(vim.json.decode, res.data.stdout or '')
-  if not ok or type(items) ~= 'table' then
-    return {}
-  end
-  local out = {}
-  for _, item in ipairs(items) do
-    local n = tostring(item.number or '')
-    if n ~= '' and (#lead == 0 or n:sub(1, #lead) == lead) then
-      out[#out + 1] = n
-    end
-  end
-  return out
-end
-
 --- complete=customlist 用。base / head の refs 候補 (branches -> tags、
 -- diff-review.md「開始」手順 1) を cmdline customlist から返す。customlist は
 -- 同期関数なので取得は同期 (git/ref.refs_sync の待機上限 + ここでの TTL cache が
@@ -312,6 +284,65 @@ local function start_ref_candidates(lead)
     end
   end
   return out
+end
+
+-- :Review pr の <number> 補完。open PR の番号 + タイトル (GitHub 一覧と同じ
+-- newest 25)。customlist の候補は dict ({word=番号, menu=タイトル}) で返し、
+-- 挿入されるのは word (番号) だけ、pum には menu (タイトル) を併記する
+-- (:h complete-items)。gh pr list は実測 ~0.6s と run_sync 既定 timeout (250ms)
+-- では間に合わないため、pr 専用の timeout (PR_TIMEOUT_MS) を指定し、cwd キーの
+-- TTL cache (成功 30s / 失敗 5s) で繰り返し Tab のコストを抑える (start ref
+-- 補完と同じ契約。cache 30s の stale は許容)。gh 失敗は候補 0・無通知。
+local PR_TIMEOUT_MS = 2000
+local PR_TTL_S, PR_FAIL_TTL_S = 30.0, 5.0
+local pr_cache = {
+  key = nil,
+  list = {},
+  expires = 0,
+}
+
+local function pr_number_candidates(lead)
+  local cwd = vim.uv and vim.uv.cwd() or vim.fn.getcwd()
+  if pr_cache.key ~= cwd or now_fn() >= pr_cache.expires then
+    local cli = require 'review.git.cli'
+    local res = cli.run_sync(
+      config.get().gh_bin,
+      { 'pr', 'list', '--state', 'open', '--limit', '25', '--json', 'number,title' },
+      { cwd = cwd, err_code = 'E_PR', timeout_ms = PR_TIMEOUT_MS }
+    )
+    local list = {}
+    local ok = res.ok
+    if ok then
+      local ok_decode, items = pcall(vim.json.decode, res.data.stdout or '')
+      if not ok_decode or type(items) ~= 'table' then
+        ok = false
+      else
+        list = items
+      end
+    end
+    pr_cache = {
+      key = cwd,
+      list = ok and list or {},
+      expires = now_fn() + (ok and PR_TTL_S or PR_FAIL_TTL_S),
+    }
+  end
+  local out = {}
+  for _, item in ipairs(pr_cache.list) do
+    local n = tostring(item.number or '')
+    if n ~= '' and (#lead == 0 or n:sub(1, #lead) == lead) then
+      out[#out + 1] = { word = n, menu = tostring(item.title or '') }
+    end
+  end
+  return out
+end
+
+--- テストフック: pr cache の強制無効化。
+function M._reset_pr_completion_cache()
+  pr_cache = {
+    key = nil,
+    list = {},
+    expires = 0,
+  }
 end
 
 --- complete=customlist 用。2 引目はサブコマンド、`start` の 3 引目以降は

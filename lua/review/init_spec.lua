@@ -753,21 +753,27 @@ describe(':Review delete <id> と :Review pr <number> の補完', function()
     cli._set_executable(function()
       return 1
     end)
+    review._reset_pr_completion_cache()
+    review._set_now(nil)
   end)
   after_each(function()
     cli._set_system(nil)
     cli._set_executable(nil)
     paths._set_data_dir(nil)
     store._set_notify(nil)
+    review._set_now(nil)
     vim.fn.delete(data_dir, 'rf')
   end)
 
   -- run_sync 経路の handle を模す。cmd 結合文字列 -> {code, stdout}。
+  -- 戻り値の captured は pattern ごとのマッチ回数 (cache 動作の検証用)。
   local function stub(responses)
+    local captured = {}
     cli._set_system(function(cmd)
       local key = table.concat(cmd, ' ')
       for pattern, r in pairs(responses) do
         if key:match(pattern) then
+          captured[pattern] = (captured[pattern] or 0) + 1
           return {
             wait = function()
               return { code = r.code or 0, stdout = r.stdout or '', stderr = '' }
@@ -783,6 +789,7 @@ describe(':Review delete <id> と :Review pr <number> の補完', function()
         kill = function() end,
       }
     end)
+    return captured
   end
 
   local function seed(ids)
@@ -821,21 +828,96 @@ describe(':Review delete <id> と :Review pr <number> の補完', function()
     assert.same({ 'delete' }, review.complete('delete', ':Review delete', 14))
   end)
 
-  it('pr 3 引目は gh open PR の番号 (lead prefix 一致)', function()
-    stub {
-      ['gh.*pr'] = {
-        stdout = ' [{"number":41},{"number":7}] ',
-      },
+  it(
+    'pr 3 引目は gh open PR の番号 + タイトル (word/menu。lead prefix 一致)',
+    function()
+      stub {
+        ['gh.*pr'] = {
+          stdout = ' [{"number":41,"title":"fix login"},{"number":7,"title":"docs"}] ',
+        },
+      }
+      assert.same({
+        { word = '41', menu = 'fix login' },
+        { word = '7', menu = 'docs' },
+      }, review.complete('', ':Review pr ', 11))
+      assert.same({ { word = '41', menu = 'fix login' } }, review.complete('4', ':Review pr 4', 12))
+    end
+  )
+
+  it(
+    'pr 補完は 2 回目以降 cache が効き gh を再取得しない (TTL 30s 内)',
+    function()
+      local captured = stub {
+        ['gh.*pr'] = { stdout = ' [{"number":41,"title":"x"}] ' },
+      }
+      assert.same({ { word = '41', menu = 'x' } }, review.complete('', ':Review pr ', 11))
+      assert.equals(1, captured['gh.*pr'])
+      assert.same({ { word = '41', menu = 'x' } }, review.complete('', ':Review pr ', 11))
+      assert.equals(1, captured['gh.*pr'])
+    end
+  )
+
+  it('pr 補完 TTL 経過後は gh を再取得する (針は _set_now 注入)', function()
+    local captured = stub {
+      ['gh.*pr'] = { stdout = ' [{"number":41,"title":"x"}] ' },
     }
-    assert.same({ '41', '7' }, review.complete('', ':Review pr ', 11))
-    assert.same({ '41' }, review.complete('4', ':Review pr 4', 12))
+    local t = 1000.0
+    review._set_now(function()
+      return t
+    end)
+    review.complete('', ':Review pr ', 11)
+    assert.equals(1, captured['gh.*pr'])
+    t = t + 31.0
+    review.complete('', ':Review pr ', 11)
+    assert.equals(2, captured['gh.*pr'])
   end)
+
+  it(
+    'gh 失敗 (timeout 含む) は候補 0・無通知、失敗 TTL (5s) 中は再取得せず、失効後に回復',
+    function()
+      local captured = { calls = 0 }
+      local fail = true
+      cli._set_system(function()
+        captured.calls = captured.calls + 1
+        return {
+          wait = function()
+            if fail then
+              return nil -- timeout kill 相当 (run_sync は wait=nil で err)
+            end
+            return { code = 0, stdout = ' [{"number":41,"title":"x"}] ', stderr = '' }
+          end,
+          kill = function() end,
+        }
+      end)
+      cli._set_executable(function()
+        return 1
+      end)
+      local t = 1000.0
+      review._set_now(function()
+        return t
+      end)
+
+      assert.same({}, review.complete('', ':Review pr ', 11))
+      assert.same({}, notifications)
+      assert.equals(1, captured.calls)
+
+      t = t + 4.0
+      assert.same({}, review.complete('', ':Review pr ', 11))
+      assert.equals(1, captured.calls)
+
+      t = t + 2.0
+      fail = false
+      assert.same({ { word = '41', menu = 'x' } }, review.complete('', ':Review pr ', 11))
+      assert.equals(2, captured.calls)
+    end
+  )
 
   it('pr 補完は gh 失敗・gh 不在で空候補 (通知しない)', function()
     stub { ['gh.*pr'] = { code = 1, stdout = '' } }
     assert.same({}, review.complete('', ':Review pr ', 11))
     assert.equals(0, #notifications)
 
+    review._reset_pr_completion_cache()
     cli._set_system(nil)
     cli._set_executable(function()
       return 0

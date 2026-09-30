@@ -142,7 +142,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | --- | --- | --- |
 | `:Review` | open セッションの復元 (複数あれば選択) | persistence-restore |
 | `:Review start <base> [head]` | ブランチレビュー開始。`<base>` / `[head]` は cmdline `<Tab>` で branches → tags 順に補完。**head 省略 = `rev-parse --abbrev-ref HEAD` を自動採用・保存** (「データスキーマ」)。head 指定時は現在の HEAD と違えば switch 提案、不可なら scratch 縮退 (決定表) | diff-review |
-| `:Review pr <number\|url>` | PR レビュー開始 (gh 連携 + worktree + `tcd`)。`<number>` は cmdline `<Tab>` で gh の open PR 番号を補完 | pr-worktree |
+| `:Review pr <number\|url>` | PR レビュー開始 (gh 連携 + worktree + `tcd`)。`<number>` は cmdline `<Tab>` で gh の open PR 番号 + タイトルを補完 (pum にタイトル併記、挿入は番号のみ) | pr-worktree |
 | `:Review list` | 保存済みセッションの一覧表示 (既に開いていればその窓へ focus。再分割しない) | persistence-restore |
 | `:Review comments` | active セッションのコメント (絞り込み適用後) を横断一覧 (`<leader>c` と同一。active 0 件は WARN、handler は `E_NOT_ACTIVE`) | comment-list |
 | `:Review close` | 現セッションの save + worktree クリーンアップ (pr のみ) (実ファイル窓と張った extmark の掃除もここ) | pr-worktree (セッションとレビューの終了) |
@@ -245,7 +245,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 - リネームファイル: 差分のパスは新旧 2 つ。head 実窓 = **新パス**の実ファイル、base scratch = `git show <base>:<旧パス>`。抽出は上の `rename to` 経路に一本化する
 - `nvim_create_user_command` の customlist 補完 API がバージョンで変わった: 0.10 系は `complete="customlist"` + `completion=fn`、0.13 系は `complete=fn` (`completion` は invalid key)。plugin/review.lua は pcall フォールバックで両対応
 - 既定の `vim.ui.input` は opts を `vim.fn.input` へそのまま渡す。 opts に Lua 関数を混ぜる形状は E467 となり既定実装が黙って `on_confirm(nil)` に変換する (既知)。cmdline に渡せる補完は文字形式 `completion='customlist,{Vim script 関数名}'` のみ
-- cmdline の customlist 補完は同期 API なのでコールバックを待てない。同期実行を許可するのは **外部実行 (vim.system) を伴う** cmdline 候補の出所 3 系統のみ (ref 補完 run_sync + TTL cache 成功 30s/失敗 5s、`:Review delete` id 補完 (`rev-parse --show-toplevel`、cache 無し = FS 読取のみ)、`:Review pr` 番号補完 run_sync)。メモリ/状態読取のみで完結する候補源 (`:Review prompt` の file 引数 = active セッションのファイル一覧) は外部実行を伴わないのでこの制約の外。待機上限 250ms、timeout は kill + 候補 0・無通知。それ以外の `:wait()` ブロッキングは禁止。補完関数には補完中の語でなく cmdline 全体と `cursorpos` が渡る。位置判定は語数 + 末尾空白で行う
+- cmdline の customlist 補完は同期 API なのでコールバックを待てない。同期実行を許可するのは **外部実行 (vim.system) を伴う** cmdline 候補の出所 3 系統のみ (ref 補完 run_sync + TTL cache 成功 30s/失敗 5s、`:Review delete` id 補完 (`rev-parse --show-toplevel`、cache 無し = FS 読取のみ)、`:Review pr` 番号補完 run_sync + TTL cache 成功 30s/失敗 5s)。メモリ/状態読取のみで完結する候補源 (`:Review prompt` の file 引数 = active セッションのファイル一覧) は外部実行を伴わないのでこの制約の外。待機上限は **250ms 既定だが、`:Review pr` 補完は gh の実測レイテンシ (~0.6s) に合わせ timeout 2000ms を指定する** (cache 無しでは 250ms で必ず timeout して動かないため)。timeout は kill + 候補 0・無通知。それ以外の `:wait()` ブロッキングは禁止。補完関数には補完中の語でなく cmdline 全体と `cursorpos` が渡る。位置判定は語数 + 末尾空白で行う
 - `vim.system` の spawn 失敗の取り扱いがバージョン差あり: bin 不存在はスケジュール内 error 扱い、cwd 不正は同期 throw。git/cli.lua は `vim.fn.executable(bin)` 事前判定 + pcall で結果型へ変換
 - `git/cli` の既定の注入スタブは `on_exit` を**同期**で呼ぶため、完了順序を contract に待つ処理の spec は同期スタブでは作れない。順序を pin する spec は遅延発火スタブを使う
 - クリップボード provider 検出 Lua API (`clipboard.provider()`) は 0.13-nightly に存在しない。provider 無しでも `setreg('+', ...)` は内部選択に成功するため書込前に `g:clipboard` / `exists('*clipboard#copy')` / `require('clipboard').provider()` の順で検出し、無いは register 0 のみ + WARN
