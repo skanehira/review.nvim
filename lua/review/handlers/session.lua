@@ -2014,7 +2014,8 @@ local function next_file_entry(buf, from_row)
   return nil
 end
 
---- panel x: viewed 切替 -> 直後に save (INV-4)。
+--- panel x: viewed 切替 -> 直後に save (INV-4)。カーソルは表示順の次のファイルへ移り、
+--- diff 窓もそのファイルへ開き直す (両方向。focus は panel のまま = <CR>/<Tab> と同一)。
 function M.toggle_viewed_current()
   if active == nil then
     notify_warn 'no active session'
@@ -2038,10 +2039,18 @@ function M.toggle_viewed_current()
   persist()
 
   -- カーソルは移動したファイル (Reviewed 末尾) へ追従せず、表示順 (全セクション) の
-  -- 「下の次のファイル」を指す (最後なら先頭へ戻る — diff-review「file panel」)。
-  -- 旧バッファの行写像から捕まえるのは、新レイアウトでは旧行位置が空行/ヘッダに化け、
-  -- 新表示スキャンだと移動したファイル自身に当たるため (実質同じ位置の「次のファイル」)。
-  refresh_panel(next_file_entry(buf, row))
+  -- 「下の次のファイル」を指す (最後なら先頭へ戻る — diff-review「file panel」)。diff
+  -- 窓もそのファイルへ開き直し、レビュー済みにしたファイルの表示が据え置きにならない
+  -- ようにする (両方向・focus は panel のまま = <CR>/<Tab> と同じ契約)。既に同じ
+  -- ファイルを表示中なら再バインドしない (スクロール位置を保つ)。旧バッファの行写像
+  -- から捕まえるのは、新レイアウトでは旧行位置が空行/ヘッダに化け、新表示スキャンだと
+  -- 移動したファイル自身に当たるため (実質同じ位置の「次のファイル」)。
+  local next_entry = next_file_entry(buf, row)
+  if next_entry == nil or next_entry.path == current_path() then
+    refresh_panel(next_entry)
+    return
+  end
+  open_file_keep_focus(next_entry.path)
 end
 
 -- ============================================================================

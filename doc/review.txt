@@ -355,6 +355,9 @@ Review windows (head / base)			*review-keymaps-diff*
 	A file is «reviewed» by moving it to the Reviewed section with the
 	panel's x (saved in the session and restored after restarts). Never
 	moved by open/movement — only x toggles it (Changes ⇄ Reviewed).
+	After x the cursor moves to the next file in display order (wrapping
+	to the first) and the head/base windows open that file, so the diff
+	never stays on the file you just marked.
 
 	<CR>
 	  file row = open the file in the head/base windows. focus and cursor
@@ -392,7 +395,9 @@ Review windows (head / base)			*review-keymaps-diff*
 	x
 	  move the file to/from the Reviewed section (Changes ⇄ Reviewed;
 	  no-op on dir / header rows; open and movement never move it
-	  automatically)
+	  automatically). the cursor moves to the next file in display order
+	  (wrapping to the first) and the head/base windows open that file
+	  (focus stays in the panel; no rebind when that file is already shown)
 
 	/
 	  filter the list. input = case-insensitive substring match on paths

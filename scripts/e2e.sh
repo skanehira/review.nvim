@@ -105,8 +105,8 @@ grep -q 'E2E-T1 thread=eol+virtlines' "$OUT1" || { echo 'e2e: コメント行下
 grep -q 'E2E-O1 fileview=real-editable' "$OUT1" || { echo 'e2e: phase1 head 窓が実ファイル (編集可) でない' >&2; exit 1; }
 grep -qF 'E2E-CN c[]=jump' "$OUT1" || { echo 'e2e: phase1 `[c`/`]c` コメントジャンプが効かない' >&2; exit 1; }
 grep -q 'E2E-PD C-f/C-b=page' "$OUT1" || { echo 'e2e: phase1 panel `<C-f>`/`<C-b>` の diff 窓スクロールが効かない' >&2; exit 1; }
-grep -q 'E2E-M1 S-Tab=prev' "$OUT1" || {
-  echo 'e2e: phase1 `<S-Tab>` 前ファイル移動が効かない (最終キー表 #18)' >&2
+grep -q 'E2E-M1 Tab=next' "$OUT1" || {
+  echo 'e2e: phase1 x 後の diff 張替直後の `<Tab>` 次ファイル移動が効かない (最終キー表 #18)' >&2
   exit 1
 }
 grep -qF 'E2E-M2 ]F=last' "$OUT1" || {
@@ -192,7 +192,7 @@ if [ "$L1" != "$L2" ]; then
   exit 1
 fi
 grep -q 'mark=1(a=0)' "$OUT2" || { echo 'e2e: 完了マーク復元なし (b.lua=1 / a.lua=0 の期待)' >&2; exit 1; }
-grep -q 'E2E-VW x=reviewed' "$OUT1" || { echo 'e2e: phase1 の x で Reviewed セクションへの移動に失敗' >&2; exit 1; }
+grep -q 'E2E-VW x=reviewed' "$OUT1" || { echo 'e2e: phase1 の x で Reviewed 移動 + カーソル位置ファイルの diff 張替に失敗' >&2; exit 1; }
 # q (close) 経路の掃除: レビュー tab 消滅 + 実ファイル extmark 残骸 0 + closed
 grep -q 'E2E-Q1 cleared=1 tabclosed=1 status=closed' "$OUT2" || {
   echo 'e2e: phase2 q close で tab 消滅 / extmark clear / status=closed が確認できない' >&2

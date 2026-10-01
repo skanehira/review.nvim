@@ -359,7 +359,8 @@ local function run()
     fail 'head 実ファイルが read-only (編集可でなければならない)'
   end
   print 'E2E-O1 fileview=real-editable'
-  -- b.lua に x でマーク付与 (focus は head 窓へ戻す)
+  -- b.lua に x でマーク付与。x 後はカーソルが表示順の次のファイル (b.lua は末尾なので
+  -- 先頭 = src/deep/new.lua) へ移り、diff 窓もそのファイルへ張り替わる (focus は panel)
   vim.api.nvim_set_current_win(panel_win)
   vim.api.nvim_win_set_cursor(panel_win, { brow, 0 })
   vim.cmd 'normal x'
@@ -381,19 +382,25 @@ local function run()
     end
     return in_reviewed and not in_changes
   end, 'x で b.lua が Reviewed セクションへ移動')
+  wait_for(function()
+    return win_buf_name(windows.win 'head') == realpath(vim.fs.joinpath(top, 'src/deep/new.lua'))
+      and windows.role_of(vim.api.nvim_get_current_win()) == 'panel'
+  end, 'x 後の diff 窓がカーソル位置の src/deep/new.lua へ張替 + focus panel 維持')
   vim.api.nvim_set_current_win(head_win)
-  print 'E2E-VW x=reviewed'
+  print 'E2E-VW x=reviewed+next-open'
 
-  -- 移動キー (最終キー表 #18 の表示順版): <S-Tab> で a.lua -> ]F 最後 (b.lua) ->
+  -- 移動キー (最終キー表 #18 の表示順版): <Tab> で a.lua -> ]F 最後 (b.lua) ->
   -- [F 最初 (src/deep/new.lua, ツリーは dir 先行) -> <Tab>/<S-Tab> 往復
   -- -> i で閲覧 float -> 閉じる -> <leader>e で panel focus
+  -- x 後の diff は既に表示順先頭 new.lua。次の <Tab> で a.lua へ。
   vim.api.nvim_set_current_win(windows.win 'head')
+  local tab_key = vim.api.nvim_replace_termcodes('<Tab>', true, false, true)
   local stab = vim.api.nvim_replace_termcodes('<S-Tab>', true, true, true)
-  vim.cmd('normal ' .. stab)
+  vim.cmd('normal 0' .. tab_key)
   wait_for(function()
     return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'a.lua'))
-  end, '<S-Tab> で a.lua head 実ファイル')
-  print 'E2E-M1 S-Tab=prev'
+  end, '<Tab> で a.lua head 実ファイル')
+  print 'E2E-M1 Tab=next'
   vim.cmd 'normal ]F'
   wait_for(function()
     return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'b.lua'))
@@ -423,7 +430,6 @@ local function run()
   print 'E2E-A1 diffoff=newfile'
   -- <Tab> 次ファイル (押下は 0 接頭で渡す = :normal の引数先頭 whitespace 回避。
   -- 実測で 0<Tab> 注入の発火を確認済み)。表示順 [new.lua, a.lua, b.lua] を辿る。
-  local tab_key = vim.api.nvim_replace_termcodes('<Tab>', true, false, true)
   vim.cmd('normal 0' .. tab_key)
   wait_for(function()
     return win_buf_name(vim.api.nvim_get_current_win()) == realpath(vim.fs.joinpath(top, 'a.lua'))

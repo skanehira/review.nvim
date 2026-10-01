@@ -101,8 +101,8 @@ local SECTIONS = {
       { 'toggle_style', 'toggle list view (full path 1 line) / tree view' },
       {
         'toggle_viewed',
-        'move the file to/from the Reviewed section (Changes ⇄ Reviewed; '
-          .. 'open never moves it)',
+        'move the file to/from the Reviewed section (Changes ⇄ Reviewed; the diff '
+          .. 'opens the file the cursor moves to; open never moves it)',
       },
       { 'filter', 'filter the list (empty input clears)' },
       { 'help', 'this help (g? also works in the panel)' },

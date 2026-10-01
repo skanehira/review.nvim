@@ -329,6 +329,8 @@ KEYMAPS						*review-keymaps_ja*
 	ファイルの「レビュー済み」はパネルの x で Reviewed セクションへ移動させて
 	表現する (行頭 [✓] は廃止。セッションに保存され再起動後も復元)。open や
 	移動では決して Reviewed に移らず、x だけが Changes ⇄ Reviewed を切り替える。
+	x 後はカーソルが表示順の次のファイル (最後なら先頭) へ移り、head/base 窓も
+	そのファイルを開く (レビュー済みにしたファイルが diff に据え置きにならない)。
 
 	<CR>
 	  file 行 = そのファイルを head/base 窓に開く。focus とカーソルは file
@@ -363,7 +365,10 @@ KEYMAPS						*review-keymaps_ja*
 
 	x
 	  Reviewed セクションへ移動する / そこから Changes へ戻す (Changes ⇄
-	  Reviewed。dir / ヘッダ行では無動作。open や移動では自動で移らない)
+	  Reviewed。dir / ヘッダ行では無動作。open や移動では自動で移らない)。
+	  カーソルは表示順の次のファイル (最後なら先頭) へ移り、head/base 窓も
+	  そのファイルを開く (focus は panel のまま。既に同じファイルを表示中なら
+	  開き直さない)
 
 	/
 	  一覧を絞り込む。入力 = paths の大文字小文字無視の部分一致で再描画。

@@ -144,7 +144,7 @@ describe('help.open', function()
       has_line(
         lines,
         '- **x** move the file to/from the Reviewed section (Changes ⇄ Reviewed; '
-          .. 'open never moves it)'
+          .. 'the diff opens the file the cursor moves to; open never moves it)'
       )
     )
     -- コメント一覧への導線は diff 節と同一文にすると has_line が節を区別できず

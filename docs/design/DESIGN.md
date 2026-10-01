@@ -176,7 +176,7 @@ Lua 公開 API とキーバインドの正本はここ。各機能の挙動は d
 | file panel | `<Tab>` / `<S-Tab>` / `[F` / `]F` | 次 / 前 / 最初 / 最後のファイル (panel 起点では開いたあとも focus とカーソルを panel に維持 — `<CR>` と同一。head/base 窓起点では focus は head 窓に残る) |
 | file panel | `<C-f>` / `<C-b>` | panel に focus したまま head (diff) 窓を半ページ分下 / 上へスクロール (diff 窓で `<C-d>`/`<C-u>` を押すのと同じ。base 窓は scrollbind で連動。実装は diffview.nvim の `scroll_view` と同方式 = `<C-e>`/`<C-y>` スクロールコマンドを head 窓へ `nvim_win_call` で発火 — カーソルを動かさずビューポートだけを動かし、**fold 状態を一切変えない** (旧実装の `nvim_win_set_cursor` + `zv` + `zt`/`zb` は diff モードでビューが進まない実測があり、`zv` が押下ごとにカーソル位置の fold を開く副作用があった)。カーソルは画面外に出そうなときだけ追従。端は無動作 = clamp) |
 | file panel | `i` | list 表示 (フルパス 1 行) と tree 表示の切替 (view state。session JSON に載せない) |
-| file panel | `x` | viewed 切替 = ファイルを Changes ⇄ Reviewed セクション間で移動 (open / 移動系では決して Reviewed に移らない。dir / ヘッダ行は無動作)。カーソルは移動したファイルを追わず表示順の次のファイルを指す (最後なら先頭へ) |
+| file panel | `x` | viewed 切替 = ファイルを Changes ⇄ Reviewed セクション間で移動 (open / 移動系では決して Reviewed に移らない。dir / ヘッダ行は無動作)。カーソルは移動したファイルを追わず表示順の次のファイルを指す (最後なら先頭へ)。diff 窓もそのファイルへ開き直す (両方向。focus は panel のまま。既に同じファイルを表示中なら再バインドしない) |
 | file panel | `/` | 絞り込み (大文字小文字無視の path 部分一致。空入力 = 解除、キャンセル = 現状維持。`<Tab>`/`[F`/`]F` と `<CR>` は絞り込み後の集合だけを辿る) |
 | file panel | `R` | 差分再取得 (レビュー窓の `R` と同一) |
 | file panel | `q` | `:Review close` 相当 (diff 窓の `q` と同じ) |

@@ -2353,7 +2353,27 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
   )
 
   it(
-    'x で Reviewed セクションへ移動し、再 x で Changes へ戻る (再描画 + 両方向)',
+    'x 後は diff 窓がカーソル位置の次のファイルへ張り替わる (移動済みファイルの表示が残らない)',
+    function()
+      start_done('main', 'feature') -- a.lua 開始 open
+      assert.equals(state.repo .. '/a.lua', head_buf_name())
+
+      focus_panel_file 'a.lua'
+      session_handler.toggle_viewed_current() -- a.lua -> Reviewed、カーソルは次 = b.lua
+
+      assert.equals(true, load_saved().files['a.lua'].viewed)
+      assert.equals(state.repo .. '/b.lua', head_buf_name())
+      -- focus は panel に残る (<CR>/<Tab> と同じ契約)
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+      assert.equals(
+        panel_row_for('file', 'b.lua'),
+        vim.api.nvim_win_get_cursor(ui_windows.win 'panel')[1]
+      )
+    end
+  )
+
+  it(
+    'x で Reviewed セクションへ移動し、再 x で Changes へ戻る (再描画 + 両方向 + 両方向とも diff 追随)',
     function()
       start_done('main', 'feature') -- 開封だけでは Reviewed に移らない前提
       focus_panel_file 'b.lua'
@@ -2370,9 +2390,10 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
 
       -- カーソルは Reviewed に追従せず「表示上の次のファイル」= a.lua (b.lua は最後
-      -- だったので先頭へ戻る) を指す
+      -- だったので先頭へ戻る) を指す。diff 窓も同じ a.lua へ張り替わる
       local pw = ui_windows.win 'panel'
       assert.equals(panel_row_for('file', 'a.lua'), vim.api.nvim_win_get_cursor(pw)[1])
+      assert.equals(state.repo .. '/a.lua', head_buf_name())
 
       -- 解除方向も同様: b.lua (Reviewed) で x -> 次のファイルロジックで a.lua を指す
       focus_panel_file 'b.lua'
@@ -2386,6 +2407,8 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
         'Reviewed (0)',
       }, vim.api.nvim_buf_get_lines(sb, 0, -1, false))
       assert.equals(panel_row_for('file', 'a.lua'), vim.api.nvim_win_get_cursor(pw)[1])
+      -- 解除方向でも diff はカーソル位置の a.lua のまま (既に表示中 = 再バインドなし)
+      assert.equals(state.repo .. '/a.lua', head_buf_name())
     end
   )
 
@@ -4833,6 +4856,10 @@ describe('file panel ツリー / view state (issue-17)', function()
       -- app/y.lua の下は dir cmd/ を跨いで cmd/main.go (表示順の次のファイル)
       assert.equals(panel_row_for('file', 'cmd/main.go'), vim.api.nvim_win_get_cursor(pw)[1])
       assert.equals(true, load_saved().files['app/y.lua'].viewed)
+      -- diff 窓も同じ cmd/main.go へ張り替わる (focus は panel のまま)。cmd/main.go は
+      -- fixture 上ディスク未実在の A なので head は削除告知 scratch になる
+      assert.equals('review://deleted/' .. SLUG .. '/cmd/main.go', head_buf_name())
+      assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
     end
   )
 
