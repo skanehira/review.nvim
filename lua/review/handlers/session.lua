@@ -614,7 +614,8 @@ end
 
 -- head 窓 winbar (diff-review「窓装飾 (chrome)」)。告知窓 (binary/deleted) は
 -- +a -d / 件数を持たないので告知語に差し替える。追加 (A) は既定要素の末尾に
--- 種別マーク ` · new file` を足す (base winbar の `(new file)` と同文言)。
+-- 種別マーク ` · new file` を足す (base 窓を閉じるため、このマークが種別表示の
+-- 唯一の正本)。
 local function head_winbar_text(session, cur)
   local refs = ('%s..%s'):format(session.base or '', session.head or '')
   if cur.kind == 'no-changes' then
@@ -639,15 +640,14 @@ local function head_winbar_text(session, cur)
   return bar
 end
 
+-- base 窓 winbar。追加 (A) は base 窓を閉じるためここには来ない (head 側の
+-- ` · new file` マークが種別表示の唯一の正本)。
 local function base_winbar_text(cur)
   if cur.kind == 'no-changes' then
     return 'No changes'
   end
   if cur.kind == 'binary' then
     return ('base · %s (binary)'):format(cur.path)
-  end
-  if cur.kind_base_null == true then
-    return ('base · %s (new file)'):format(cur.path)
   end
   return ('base · %s (git show)'):format(cur.path)
 end
@@ -875,25 +875,15 @@ local function fill_show(bufnr, ref, path, token, move_line)
   end)
 end
 
--- base 窓 = git show <base>:<リゾルブ後 path> scratch。追加ファイル (A) は中身
--- 0 行の同 scratch (名前は変更ファイルと同じ review://base、種別は winbar の
--- (new file) = cur.kind_base_null)、rename は旧パスの中身、旧パス自体が新規なら
--- git 失敗で空 (0 行) になる (diff-review「head / base 窓の中身」)。
+-- base 窓 = git show <base>:<リゾルブ後 path> scratch。削除は旧内容、rename は旧
+-- パスの中身、旧パス自体が新規なら git 失敗で空 (0 行) になる (diff-review「head /
+-- base 窓の中身」)。追加 (A) は base 窓を閉じるためここには来ない (resolve_and_open
+-- の A 分岐)。
 local function open_base_scratch(cur, file, token)
   local sid = active.session.id
-  if file ~= nil and file.status == 'A' then
-    cur.kind_base_null = true
-    cur.base_buf = ui_scratchwin.buffer { kind = 'base', session_id = sid, path = cur.path }
-    -- buffer() は同名バッファを再利用して内容を触らない。M として開いて git show
-    -- 済みの scratch が hide で残っている状態 (tab close 後の開き直し等) で同じ
-    -- path が A に変わると旧内容が残るため、空へ正規化する (追加 = base は空)。
-    ui_scratchwin.set_content(cur.base_buf, {})
-    track_scratch(cur.base_buf)
-    return
-  end
   cur.base_buf = ui_scratchwin.buffer { kind = 'base', session_id = sid, path = cur.path }
-  -- 窓の中身表 «filetype detect» (内容と同じ名前の path から判定)。追加 (A) は
-  -- 0 行なので detect しない。告知窓 (deleted/binary) も告知 1 行のまま。
+  -- 窓の中身表 «filetype detect» (内容と同じ名前の path から判定)。告知窓
+  -- (deleted/binary) は告知 1 行のまま。
   ui_scratchwin.detect_filetype(cur.base_buf, cur.path)
   track_scratch(cur.base_buf)
   local base_path = (file ~= nil and file.old_path) or cur.path
@@ -975,6 +965,36 @@ local function resolve_and_open(path, opts)
     cur.head_buf = hb
     open_base_scratch(cur, file, token)
     ui_windows.bind(cur.base_buf, hb, { diffoff = 'both' })
+  elseif file ~= nil and file.status == 'A' then
+    -- 追加 (A): base が存在しない = 「差分ウィンドウ」に意味がないため base 窓を
+    -- 閉じ、head (実ファイル / 縮退 scratch) だけを全幅で見せる (base scratch も
+    -- 作らない)。kind_base_null は head winbar の ` · new file` マーク用。
+    cur.kind_base_null = true
+    if active.degraded then
+      cur.kind = 'degraded'
+      local hb = ui_scratchwin.buffer { kind = 'head', session_id = session.id, path = path }
+      ui_scratchwin.detect_filetype(hb, path)
+      track_scratch(hb)
+      cur.head_buf = hb
+      fill_show(hb, session.head, path, token, move_line)
+      ui_windows.bind_head_only(hb)
+    else
+      local full = vim.fs.joinpath(review_dir(), path)
+      if vim.uv.fs_stat(full) == nil then
+        -- head 解決後は通常実在するが、外部で消された場合のみ告知窓へ倒す
+        -- (:edit すると :w で空ファイルが復活する経路を作らない — 削除と同型)。
+        cur.kind = 'deleted'
+        local hb = ui_scratchwin.buffer { kind = 'deleted', session_id = session.id, path = path }
+        ui_scratchwin.set_content(hb, ui_scratchwin.NOTIFY.deleted)
+        track_scratch(hb)
+        cur.head_buf = hb
+        ui_windows.bind_head_only(hb)
+      else
+        cur.kind = 'real'
+        cur.head_buf = open_head_real(full)
+        ui_windows.bind_head_only(cur.head_buf)
+      end
+    end
   else
     open_base_scratch(cur, file, token)
     if active.degraded then
@@ -985,12 +1005,7 @@ local function resolve_and_open(path, opts)
       track_scratch(hb)
       cur.head_buf = hb
       fill_show(hb, session.head, path, token, move_line)
-      if file ~= nil and file.status == 'A' then
-        -- 縮退でも追加 (A) の base は 0 行 scratch なので窓 diff を張らない
-        ui_windows.bind(cur.base_buf, hb, { diffoff = 'both' })
-      else
-        ui_windows.bind(cur.base_buf, hb)
-      end
+      ui_windows.bind(cur.base_buf, hb)
     else
       local full = vim.fs.joinpath(review_dir(), path)
       if vim.uv.fs_stat(full) == nil then
@@ -1005,13 +1020,7 @@ local function resolve_and_open(path, opts)
       else
         cur.kind = 'real'
         cur.head_buf = open_head_real(full)
-        local bind_opts = { head_kind = 'real' }
-        if file ~= nil and file.status == 'A' then
-          -- 追加 (A): base = 0 行 scratch とのペアだと全行が DiffAdd になるため
-          -- 両窓 diffoff で素の色で読めるようにする (winbar の種別マークは head 側)
-          bind_opts.diffoff = 'both'
-        end
-        ui_windows.bind(cur.base_buf, cur.head_buf, bind_opts)
+        ui_windows.bind(cur.base_buf, cur.head_buf, { head_kind = 'real' })
       end
     end
   end

@@ -203,10 +203,22 @@ end
 --- base/head 窓のペアを確保する。どちらかの窓が消えていれば panel (または
 --- 専有 tab 内の生き窓) を基準に再建する。内容が差し替わっただけの
 --- drift は窓そのものが生きているので set_buf の張り直しで復旧する (再建不要)。
+--- base だけ消えている (追加 (A) の head-only 状態) ときは head の左に base を
+--- 差し込み、head 窓 id を維持する (呼び出し側の窓参照を stale にしない)。
 local function ensure_pair()
   local base_ok = valid_win(st.base_win) and vim.api.nvim_win_get_tabpage(st.base_win) == st.tab
   local head_ok = valid_win(st.head_win) and vim.api.nvim_win_get_tabpage(st.head_win) == st.tab
   if base_ok and head_ok then
+    return
+  end
+  if head_ok and not base_ok then
+    -- base だけ再建: head の左へ差し込む (head 窓 id を維持する = 追加 (A) の
+    -- head-only から M / R のペアへ戻る主経路で呼び出し側の窓参照を stale に
+    -- しない。leftabove は splitright に依らず head の左に入る)
+    vim.api.nvim_set_current_win(st.head_win)
+    vim.cmd 'leftabove vsplit'
+    st.base_win = vim.api.nvim_get_current_win()
+    apply_pair_opts(st.base_win)
     return
   end
   for _, role in ipairs { 'base', 'head' } do
@@ -251,9 +263,10 @@ local function ensure_pair()
   apply_pair_opts(st.head_win)
 end
 
---- base / head 窓にバッファを張り、役割 gate 窓変数を更新する。
---- opts = { diffoff? = 'both' (binary 注釈・no-changes の共有窓 / 追加 (base 0 行
----          scratch) ペア / 削除告知ペア — 窓 diff ペアを作らない窓),
+--- base / head 窓にバッファを張り、役割 gate 窓変数を更新する。追加 (A) は
+--- bind_head_only (base 窓を閉じる) を使うためここには来ない。
+--- opts = { diffoff? = 'both' (binary 注釈・no-changes の共有窓 / 削除告知ペア —
+---         窓 diff ペアを作らない窓),
 ---          head_kind? = 'real' (head が実ファイル = gate の内容指紋は bufnr) }。
 --- 呼び出し側 (handlers/session.open_file) が中身の充填を終えた後に呼ぶ。
 --- 前回張り付いていた別 buf の窓変数 (stale gate) は set_buf 前に消し、
@@ -290,8 +303,8 @@ function M.bind(base_buf, head_buf, opts)
   vim.api.nvim_win_set_buf(bw, base_buf)
   vim.api.nvim_win_set_buf(hw, head_buf)
   if opts.diffoff ~= nil then
-    -- 窓 diff ペアを作らない窓 (binary 注釈共有・no-changes・追加 (0 行 base) ペア・
-    -- 削除告知ペア): 両窓を退避させる
+    -- 窓 diff ペアを作らない窓 (binary 注釈共有・no-changes・削除告知ペア): 両窓を
+    -- 退避させる (追加 (A) は base 窓ごと閉じるのでここに来ない — bind_head_only)
     apply_diffoff(bw)
     apply_diffoff(hw)
   else
@@ -304,6 +317,35 @@ function M.bind(base_buf, head_buf, opts)
   vim.w[hw].review_gate_buf = head_buf
   vim.api.nvim_set_current_win(hw)
   return bw, hw
+end
+
+--- head 窓だけにバッファを張る (追加 (A) ファイル)。base が存在しない = 窓 diff に
+--- 意味がないため base 窓を閉じ、head を全幅で見せる (panel + head の 2 窓)。base 窓
+--- は次に M / R のペアを開くとき bind の ensure_pair が再建する。gate 更新と
+--- diffoff 退避 (ペアなし) は bind と同じ契約。
+function M.bind_head_only(head_buf)
+  if st == nil then
+    error('windows.bind_head_only: review tab not open', 2)
+  end
+  local head_ok = valid_win(st.head_win) and vim.api.nvim_win_get_tabpage(st.head_win) == st.tab
+  if not head_ok then
+    ensure_pair()
+  end
+  local bw, hw = st.base_win, st.head_win
+  if valid_win(bw) then
+    pcall(vim.api.nvim_win_close, bw, true)
+  end
+  st.base_win = nil
+
+  vim.w[hw].review_key_gate = nil
+  vim.w[hw].review_gate_buf = nil
+  vim.api.nvim_win_set_buf(hw, head_buf)
+  -- base 相手のいない窓: 窓 diff / scrollbind / diff fold から退避する
+  apply_diffoff(hw)
+  vim.w[hw].review_key_gate = hw
+  vim.w[hw].review_gate_buf = head_buf
+  vim.api.nvim_set_current_win(hw)
+  return hw
 end
 
 --- panel 窓に sidebar buf を張るrender 側を載せる (窓が不要になる前兆 drift も
@@ -405,11 +447,13 @@ function M.sweep()
   if st == nil then
     return
   end
-  local keep = {
-    [st.panel_win] = true,
-    [st.base_win] = true,
-    [st.head_win] = true,
-  }
+  local keep = {}
+  -- 追加 (A) は base 窓を閉じている (nil) ため nil key を作らない
+  for _, w in ipairs { st.panel_win, st.base_win, st.head_win } do
+    if w ~= nil then
+      keep[w] = true
+    end
+  end
   for _, w in ipairs(vim.api.nvim_tabpage_list_wins(st.tab)) do
     if vim.api.nvim_win_is_valid(w) and not keep[w] then
       local b = vim.api.nvim_win_get_buf(w)

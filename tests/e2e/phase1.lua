@@ -63,7 +63,8 @@ local function run()
     return vim.fn.bufexists 'review://sidebar/main--feature' == 1
   end, 'sidebar buffer')
 
-  -- 専有 tab 3 窓 (panel│base│head)
+  -- 専有 tab: 初期 open は追加 (A) の src/deep/new.lua = base が存在しないため
+  -- base 窓を閉じ panel│head の 2 窓 (M ファイルへ移ると 3 窓ペアに戻る)。
   local st = windows.state()
   if st == nil or not vim.api.nvim_tabpage_is_valid(st.tab) then
     fail 'レビュー専有 tab が開いていない'
@@ -71,12 +72,14 @@ local function run()
   if st.tab == user_tab then
     fail 'レビューがユーザー tab に開いた (専有 tabpage でない)'
   end
-  if #vim.api.nvim_tabpage_list_wins(st.tab) ~= 3 then
+  if #vim.api.nvim_tabpage_list_wins(st.tab) ~= 2 then
     fail(
-      'レビュー tab の窓数が ' .. #vim.api.nvim_tabpage_list_wins(st.tab) .. ' (期待 3)'
+      '追加ファイル初期 open の窓数が '
+        .. #vim.api.nvim_tabpage_list_wins(st.tab)
+        .. ' (期待 2: panel + head)'
     )
   end
-  local panel_win, base_win, head_win = windows.win 'panel', windows.win 'base', windows.win 'head'
+  local panel_win, head_win = windows.win 'panel', windows.win 'head'
 
   -- tcd == repo (レビュー tab のみ。ユーザー tab に漏れない)
   local top =
@@ -105,17 +108,12 @@ local function run()
   -- 編集可 (実ファイル :edit 経路 / MUST 3) と read-only でないこと
   expect(vim.bo[n_buf].modifiable, 'head 実ファイル窓が modifiable でない')
   expect(not vim.bo[n_buf].readonly, 'head 実ファイル窓が read-only')
-  if win_buf_name(base_win) ~= 'review://base/main--feature/src/deep/new.lua' then
-    fail('base 窓 scratch でない: ' .. win_buf_name(base_win))
+  -- 追加 (A) は base 窓を閉じた head のみ (窓 diff に意味がないため)
+  if windows.win 'base' ~= nil then
+    fail '追加ファイル (new.lua) で base 窓が残っている (2 窓でない)'
   end
-  local n_base = vim.api.nvim_win_get_buf(base_win)
-  -- 追加 (A) ファイルは base = 0 行 (空) scratch (issue #39)。両窓 diffoff (issue #38)。
-  local n_lines = vim.api.nvim_buf_get_lines(n_base, 0, -1, false)
-  if not (#n_lines == 0 or (#n_lines == 1 and n_lines[1] == '')) then
-    fail('new.lua base 窓が 0 行 (空) でない: ' .. table.concat(n_lines, ' / '))
-  end
-  if vim.wo[head_win].diff or vim.wo[base_win].diff then
-    fail '追加ファイル (new.lua) で窓 diff が有効 (diffoff 契約違反)'
+  if vim.wo[head_win].diff then
+    fail '追加ファイル (new.lua) で窓 diff が有効 (head のみで diffoff 契約違反)'
   end
   -- 開通 focus は file panel (カーソルはファイルパネルのまま)
   expect(panel_win == vim.api.nvim_get_current_win(), '開通 focus が file panel でない')
@@ -127,10 +125,20 @@ local function run()
   wait_for(function()
     return win_buf_name(head_win) == realpath(vim.fs.joinpath(top, 'a.lua'))
   end, '<Tab> で a.lua head 実ファイル (コメントフロー用)')
-  -- a.lua (M) のペア: head 実ファイル / base は review://base scratch
+  -- a.lua (M) のペア: head 実ファイル / base は review://base scratch。
+  -- A から M へ移ったので base 窓が再建され 3 窓ペアに戻る (E2E-L1 の陰性対照)
   local a_buf = vim.api.nvim_win_get_buf(head_win)
   expect(vim.bo[a_buf].modifiable, 'a.lua head 実ファイル窓が modifiable でない')
   expect(not vim.bo[a_buf].readonly, 'a.lua head 実ファイル窓が read-only')
+  local base_win = windows.win 'base'
+  if base_win == nil then
+    fail 'M ファイル (a.lua) で base 窓が再建されない'
+  end
+  if #vim.api.nvim_tabpage_list_wins(st.tab) ~= 3 then
+    fail(
+      'M ファイル (a.lua) の窓数が 3 でない: ' .. #vim.api.nvim_tabpage_list_wins(st.tab)
+    )
+  end
   if win_buf_name(base_win) ~= 'review://base/main--feature/a.lua' then
     fail('a.lua base 窓 scratch でない: ' .. win_buf_name(base_win))
   end
@@ -412,22 +420,26 @@ local function run()
       == realpath(vim.fs.joinpath(top, 'src/deep/new.lua'))
   end, '[F で最初のファイル src/deep/new.lua (ツリーは dir 先行)')
   print 'E2E-M3 [F=first'
-  -- 追加ファイル (A) は base = 0 行 scratch とのペアなので両窓 diffoff
-  -- (全行 DiffAdd の塗りつぶしを作らない — issue #38。a.lua (M) の窓 diff 有効が
-  -- 上の L1 ループで陰性対照になる)。名前は変更ファイルと同じ review://base
-  -- (issue #39。種別は winbar の (new file) で分かる)
-  local nbase = windows.win 'base'
-  if win_buf_name(nbase) ~= 'review://base/main--feature/src/deep/new.lua' then
-    fail('new.lua base 窓の scratch 名が不正: ' .. win_buf_name(nbase))
+  -- 追加ファイル (A) は base 窓を閉じ head のみ (窓 diff に意味がないため)。
+  -- 全行 DiffAdd の塗りつぶしを作らない。a.lua (M) の窓 diff 有効が上の L1 ループで
+  -- 陰性対照になる。種別は head winbar の (new file) で分かる。
+  if windows.win 'base' ~= nil then
+    fail '追加ファイル (new.lua) で base 窓が残っている (2 窓でない)'
   end
-  if vim.wo[windows.win 'head'].diff or vim.wo[nbase].diff then
-    fail '追加ファイル (new.lua) で窓 diff が有効 (diffoff 契約違反)'
+  if #vim.api.nvim_tabpage_list_wins(0) ~= 2 then
+    fail(
+      '追加ファイル (new.lua) の窓数が 2 でない: '
+        .. #vim.api.nvim_tabpage_list_wins(0)
+    )
+  end
+  if vim.wo[windows.win 'head'].diff then
+    fail '追加ファイル (new.lua) で窓 diff が有効 (head のみで diffoff 契約違反)'
   end
   local nbar = vim.w[windows.win 'head'].review_winbar or ''
   if nbar:find('new file', 1, true) == nil then
     fail('head winbar に new file マークが無い: ' .. nbar)
   end
-  print 'E2E-A1 diffoff=newfile'
+  print 'E2E-A1 newfile=head-only'
   -- <Tab> 次ファイル (押下は 0 接頭で渡す = :normal の引数先頭 whitespace 回避。
   -- 実測で 0<Tab> 注入の発火を確認済み)。表示順 [new.lua, a.lua, b.lua] を辿る。
   vim.cmd('normal 0' .. tab_key)

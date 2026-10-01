@@ -117,9 +117,9 @@ grep -qF 'E2E-M3 [F=first' "$OUT1" || {
   echo 'e2e: phase1 `[F` 最初のファイル移動が効かない' >&2
   exit 1
 }
-# 追加ファイル (A) の両窓 diffoff + head winbar の new file マーク (issue #38)
-grep -q 'E2E-A1 diffoff=newfile' "$OUT1" || {
-  echo 'e2e: 追加ファイル (new.lua) で両窓 diffoff / winbar マークが効いていない' >&2
+# 追加ファイル (A) は base 窓を閉じ head のみ + head winbar の new file マーク
+grep -q 'E2E-A1 newfile=head-only' "$OUT1" || {
+  echo 'e2e: 追加ファイル (new.lua) で base 窓が閉じない / winbar マークが効いていない' >&2
   exit 1
 }
 grep -q 'E2E-M4 Tab=next' "$OUT1" || {

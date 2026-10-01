@@ -269,6 +269,40 @@ describe('windows.bind / set_panel_buf: role 導出', function()
   )
 
   it(
+    'bind_head_only: base 窓を閉じ head だけの 2 窓 (連続呼びでも増えない / bind でペア再建)',
+    function()
+      windows.bind(base_buf, head_buf)
+      assert.equals(3, #vim.api.nvim_tabpage_list_wins(windows.state().tab))
+
+      local h = scratch_buf 'review://head/sx/only.lua'
+      windows.bind_head_only(h)
+      assert.is_nil(windows.win 'base')
+      assert.equals(2, #vim.api.nvim_tabpage_list_wins(windows.state().tab))
+      assert.equals(h, vim.api.nvim_win_get_buf(windows.win 'head'))
+      assert.equals('head', windows.role_of(windows.win 'head'))
+      -- 相手のいない窓: 窓 diff / scrollbind から退避する
+      assert.equals(false, vim.wo[windows.win 'head'].diff)
+      assert.equals(false, vim.wo[windows.win 'head'].scrollbind)
+
+      -- 連続の head-only open でも窓は増えない (base 無しで ensure_pair を呼ばない)
+      windows.bind_head_only(scratch_buf 'review://head/sx/only2.lua')
+      assert.equals(2, #vim.api.nvim_tabpage_list_wins(windows.state().tab))
+      assert.is_nil(windows.win 'base')
+
+      -- 陰性対照: 通常 bind は base を再建して 3 窓ペアに戻し、head 窓 id を保つ
+      -- (A の head-only から M への遷移で呼び出し側の head 参照を stale にしない)
+      local hw = windows.win 'head'
+      windows.bind(base_buf, head_buf)
+      assert.is_not_nil(windows.win 'base')
+      assert.equals(hw, windows.win 'head')
+      assert.equals(3, #vim.api.nvim_tabpage_list_wins(windows.state().tab))
+      assert.equals(true, vim.wo[windows.win 'head'].diff)
+      -- base は head の左 (panel│base│head の順を崩さない)
+      assert.is_true(vim.fn.win_screenpos(windows.win 'base')[2] < vim.fn.win_screenpos(hw)[2])
+    end
+  )
+
+  it(
     'diffoff 退避は foldclosed()==-1 で観測できる (窓 diff folded の陽性対照付き)',
     function()
       -- foldmethod=diff は同一領域を閉じる (変更行は常に見える)。40 行中 20 行目

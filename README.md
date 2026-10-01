@@ -4,7 +4,7 @@
 
 A Neovim plugin to review branch (git ref) and PR diffs the way GitHub's Files changed page does — collect comments and export them as a **prompt for your AI agent**.
 
-Diffs open in a dedicated tabpage with three windows (file panel │ base │ head). The head window is the real file, so editing and LSP keep working while you review. Comments are persisted to disk automatically and a Neovim restart is recovered with one `:Review`. Zero runtime dependencies (Neovim core API only).
+Diffs open in a dedicated tabpage with three windows (file panel │ base │ head). Added files have no base side, so the base window is closed and only the head is shown, full width. The head window is the real file, so editing and LSP keep working while you review. Comments are persisted to disk automatically and a Neovim restart is recovered with one `:Review`. Zero runtime dependencies (Neovim core API only).
 
 ## Requirements
 
@@ -38,7 +38,7 @@ Four steps from zero to reviewing the current branch against `main`:
 :Review start main
 ```
 
-The `main..current branch` diff opens in three windows. The review target is the working tree of the current checkout, so uncommitted changes are included. To state the head explicitly use `:Review start main feature` (review `feature` against `main`). For a PR: `:Review pr 42`.
+The `main..current branch` diff opens in three windows (added files close the base window and show only the head). The review target is the working tree of the current checkout, so uncommitted changes are included. To state the head explicitly use `:Review start main feature` (review `feature` against `main`). For a PR: `:Review pr 42`.
 
 **2. Write comments**
 

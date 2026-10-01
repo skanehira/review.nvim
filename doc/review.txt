@@ -579,8 +579,10 @@ DISPLAY characteristics				*review-display*
 The three review windows			*review-display-diff*
 
 	Reviews open in a dedicated tabpage as file panel (left; default width
-	35) │ base │ head. The tab is tcd'ed to the repo / worktree (for LSP
-	spawn cwd and relative-path resolution).
+	35) │ base │ head. Added files have no base (nothing to compare), so
+	the base window is closed and only the head is shown, full width. The
+	tab is tcd'ed to the repo / worktree (for LSP spawn cwd and
+	relative-path resolution).
 
 	head window
 	  the new side of the diff = the real file itself (:edit). Editable,
@@ -590,12 +592,12 @@ The three review windows			*review-display-diff*
 	  in the review windows (the built-in hunk movement remains in your own
 	  windows). Added and deleted files exit the window diff and open in
 	  plain colors; the type is told by the winbar marks (` · new file` /
-	  ` · deleted`).
+	  ` · deleted`). Added files additionally close the base window.
 
 	base window
-	  the read-only scratch of `git show <base>:<path>`. Added files get a
-	  0-line scratch; deleted / binary files are replaced by a notice
-	  scratch; such pairs leave the window diff in both windows (diffoff).
+	  the read-only scratch of `git show <base>:<path>`. Deleted / binary
+	  files are replaced by a notice scratch; such pairs leave the window
+	  diff in both windows (diffoff). Added files have no base window.
 
 	comments-list window
 	  the cross-file list opened by `<leader>c` / `:Review comments`.
@@ -603,7 +605,8 @@ The three review windows			*review-display-diff*
 	  joins the window diff (details: |review-keymaps-commentlist|).
 
 	head/base degradation (scratch degradation)
-	  both windows become read-only git show (INFO notified).
+	  both windows become read-only git show (INFO notified, added files
+	  still show the head only).
 
 	Comments live as extmarks in the head buffer (an underline across the
 	range + line-end `comment-icon N` on the last row; a mixed old/new

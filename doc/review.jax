@@ -479,8 +479,9 @@ outdated 認定 (差分の揺れで対象行を特定できないコメント) �
 レビューの 3 窓				*review-display-diff_ja*
 
 	レビューは専有 tabpage に file panel (左・既定幅 35)│base│head の横 3 窓で
-	開く。tab は repo / worktree へ tcd される (LSP server の spawn cwd と
-	相対パス解決用)。
+	開く。追加ファイルは base が存在しない (比較対象なし) ため base 窓を閉じ、
+	head だけを全幅表示する。tab は repo / worktree へ tcd される (LSP server
+	の spawn cwd と相対パス解決用)。
 
 	head 窓
 	  差分の new 側 = 実ファイルそのもの (:edit)。編集可・filetype / LSP が
@@ -489,12 +490,12 @@ outdated 認定 (差分の揺れで対象行を特定できないコメント) �
 	  はレビュー窓ではコメント移動に割り当てている (標準の hunk 移動は
 	  自分の窓ではそのまま使える)。追加・削除ファイルは窓 diff を無効化
 	  して素の色で開き、種別は winbar のマーク (` · new file` / ` ·
-	  deleted`) で判別する。
+	  deleted`) で判別する。追加ファイルはさらに base 窓を閉じる。
 
 	base 窓
-	  `git show <base>:<path>` の読み取り専用 scratch。追加ファイルは 0 行
-	  scratch、削除 / binary ファイルは告知 scratch に置き換わり、これらの
-	  ペアは両窓で窓 diff から退避する (diffoff)。
+	  `git show <base>:<path>` の読み取り専用 scratch。削除 / binary
+	  ファイルは告知 scratch に置き換わり、これらのペアは両窓で窓 diff から
+	  退避する (diffoff)。追加ファイルは base 窓を開かない。
 
 	コメント一覧窓
 	  `<leader>c` / `:Review comments` で開く横断一覧。tab の最下部に全幅
@@ -502,7 +503,8 @@ outdated 認定 (差分の揺れで対象行を特定できないコメント) �
 	  |review-keymaps-commentlist_ja|)。
 
 	head/base の縮退 (scratch 縮退)
-	  両窓 git show の読み取り専用になる (INFO 通知済み)。
+	  両窓 git show の読み取り専用になる (INFO 通知済み。追加ファイルは
+	  head のみの表示のまま)。
 
 	コメントは head 実バッファの extmark (範囲全体の下線 + 範囲の最終行の
 	行末 `コメントアイコン N`。outdated 混在でも件数は変えず、outdated は

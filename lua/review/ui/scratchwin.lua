@@ -31,7 +31,8 @@ function M.buffer(opts)
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
   vim.api.nvim_buf_set_name(buf, name)
-  -- 新規作成時に内容を空へ正規化してから返す (追加ファイルの base = 空が契約。
+  -- 新規作成時に内容を空へ正規化してから返す (base scratch は空が契約。追加 (A)
+  -- は base 窓を開かないが、rename で旧パスが base に無いときは空の base になる。
   -- vim の空バッファは 1 個の空行として表現される。再利用時は内容を触らない =
   -- 呼び出し側が set_content で全面置換する)。
   vim.bo[buf].modifiable = true

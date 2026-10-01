@@ -310,8 +310,9 @@ describe('comments_list.open', function()
       local res = comments_list.open()
 
       assert.same({ __class = 'review.Result', ok = true }, res)
-      -- 開いた直後は一覧窓が current (focus 済み)
-      assert.equals(4, #vim.api.nvim_tabpage_list_wins(review_tab()))
+      -- 開いた直後は一覧窓が current (focus 済み)。初期開きは追加 (A) = panel+head
+      -- の 2 窓なので +リストで 3 窓
+      assert.equals(3, #vim.api.nvim_tabpage_list_wins(review_tab()))
       local w = list_win()
       assert.is_not_nil(w)
       assert.equals(w, vim.api.nvim_get_current_win())
@@ -337,7 +338,7 @@ describe('comments_list.open', function()
 
       assert.equals(true, res.ok)
       assert.equals(w, list_win())
-      assert.equals(4, #vim.api.nvim_tabpage_list_wins(review_tab()))
+      assert.equals(3, #vim.api.nvim_tabpage_list_wins(review_tab()))
       assert.same({ 'a.lua:1  [c1]  one', 'a.lua:2  [c2]  two' }, list_lines())
     end
   )
@@ -574,9 +575,11 @@ describe('comments_list.jump_current', function()
     assert.same({ 'deep1', 'deep2', 'deep3' }, vim.api.nvim_buf_get_lines(hb, 0, -1, false))
     assert.equals(3, vim.api.nvim_win_get_cursor(hw)[1])
 
-    -- 同一バッファ (a.lua) への <CR>: 行 2 へ
+    -- 同一バッファ (a.lua) への <CR>: 行 2 へ。A (head のみ) から M へ移ると
+    -- base が head の左に再建される (head 窓 id は維持される)
     focus_list_row(2)
     comments_list.jump_current()
+    hw = ui_windows.win 'head'
     assert.equals(
       'review://head/' .. SLUG .. '/a.lua',
       vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(hw))
@@ -704,7 +707,8 @@ describe('comments_list の閉じ方と窓の掃除', function()
     comments_list.close_current()
 
     assert.is_nil(list_win())
-    assert.equals(3, #vim.api.nvim_tabpage_list_wins(review_tab()))
+    -- 初期開きは追加 (A) = panel+head の 2 窓 (リストを閉じた後)
+    assert.equals(2, #vim.api.nvim_tabpage_list_wins(review_tab()))
     assert.equals(-1, vim.fn.bufnr(COMMENTS_BUF))
     assert.equals(false, vim.api.nvim_buf_is_valid(buf))
     assert.is_not_nil(session_handler.active())
@@ -729,7 +733,7 @@ describe('comments_list の閉じ方と窓の掃除', function()
       local buf2 = vim.api.nvim_win_get_buf(list_win())
       assert.is_not.equals(buf1, buf2)
       assert.is_not_nil(commentlist.row_comment(buf2, 1))
-      assert.equals(4, #vim.api.nvim_tabpage_list_wins(review_tab()))
+      assert.equals(3, #vim.api.nvim_tabpage_list_wins(review_tab()))
     end
   )
 
@@ -748,7 +752,7 @@ describe('comments_list の閉じ方と窓の掃除', function()
       assert.equals(moved, vim.api.nvim_get_current_tabpage())
       assert.equals(list_win(), vim.api.nvim_get_current_win())
       assert.equals(1, #vim.api.nvim_tabpage_list_wins(moved))
-      assert.equals(3, #vim.api.nvim_tabpage_list_wins(review_tab()))
+      assert.equals(2, #vim.api.nvim_tabpage_list_wins(review_tab()))
     end
   )
 
