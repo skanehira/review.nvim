@@ -26,12 +26,13 @@ local function valid_win(w)
 end
 
 --- 窓 diff ペアの opts (base/head 窓ローカル)。`diffopt` は world option なので
---- 触らない (DESIGN「既知の制約」)。wrap=off は virt_text 干渉回避 (同左)。
+--- 触らない (DESIGN「既知の制約」)。wrap は長い行を折り返して読むため有効
+--- (virt_text との干渉は許容 — 同左)。panel は別関数で wrap=off のまま。
 --- foldcolumn は 0.10 (number) / 0.13 (string) で API 型が変わるため、両版で
 --- 安定な :setl (窓ローカル) 経路で一括設定する。
 local function apply_pair_opts(w)
   vim.api.nvim_win_call(w, function()
-    vim.cmd 'setl diff scrollbind cursorbind foldmethod=diff foldlevel=0 foldcolumn=1 nowrap'
+    vim.cmd 'setl diff scrollbind cursorbind foldmethod=diff foldlevel=0 foldcolumn=1 wrap'
   end)
 end
 
@@ -42,7 +43,7 @@ end
 -- 保証する。告知 1 行窓が fold で跳ぶ事故も同時に防ぐ。
 local function apply_diffoff(w)
   vim.api.nvim_win_call(w, function()
-    vim.cmd 'setl nodiff noscrollbind nocursorbind foldmethod=manual foldcolumn=0 nowrap'
+    vim.cmd 'setl nodiff noscrollbind nocursorbind foldmethod=manual foldcolumn=0 wrap'
     vim.cmd 'normal! zE'
   end)
 end

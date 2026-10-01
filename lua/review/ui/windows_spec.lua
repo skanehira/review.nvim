@@ -120,25 +120,23 @@ describe('windows.open: 専有 tab 3 窓の開通', function()
     assert.equals(false, vim.wo[sb].wrap)
   end)
 
-  it(
-    'head/base 窓 opts (diff/scrollbind/cursorbind/foldmethod=diff/foldcolumn/wrap=off)',
-    function()
-      windows.open { dir = OTHER_DIR, on_tab_closed = function() end }
-      -- opts は bind (buf 張付) の時点で適用する (空窓での fold 計算壊れ回避 —
-      -- windows.open のコメント)。張付後の窓がレビュー窓契約を満たすことを見る。
-      windows.bind(scratch_buf 'review://base/sx/opts.lua', scratch_buf 'review://head/sx/opts.lua')
-      for _, role in ipairs { 'base', 'head' } do
-        local w = windows.win(role)
-        assert.equals(true, vim.wo[w].diff)
-        assert.equals(true, vim.wo[w].scrollbind)
-        assert.equals(true, vim.wo[w].cursorbind)
-        assert.equals('diff', vim.wo[w].foldmethod)
-        assert.equals(0, vim.wo[w].foldlevel)
-        assert.equals(1, tonumber(vim.wo[w].foldcolumn))
-        assert.equals(false, vim.wo[w].wrap)
-      end
+  it('head/base 窓 opts (diff/scrollbind/cursorbind/foldmethod=diff/foldcolumn/wrap)', function()
+    windows.open { dir = OTHER_DIR, on_tab_closed = function() end }
+    -- opts は bind (buf 張付) の時点で適用する (空窓での fold 計算壊れ回避 —
+    -- windows.open のコメント)。張付後の窓がレビュー窓契約を満たすことを見る。
+    windows.bind(scratch_buf 'review://base/sx/opts.lua', scratch_buf 'review://head/sx/opts.lua')
+    for _, role in ipairs { 'base', 'head' } do
+      local w = windows.win(role)
+      assert.equals(true, vim.wo[w].diff)
+      assert.equals(true, vim.wo[w].scrollbind)
+      assert.equals(true, vim.wo[w].cursorbind)
+      assert.equals('diff', vim.wo[w].foldmethod)
+      assert.equals(0, vim.wo[w].foldlevel)
+      assert.equals(1, tonumber(vim.wo[w].foldcolumn))
+      -- 長い行を折り返して読める (diff 窓は wrap 有効。panel は wrap=off のまま)
+      assert.equals(true, vim.wo[w].wrap)
     end
-  )
+  end)
 
   it(
     'diffopt (world option) をレビュー側から変更しない (DESIGN 既知の制約)',

@@ -603,7 +603,7 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
     end
   )
 
-  it('head/base 窓の opts (窓 diff / scrollbind / cursorbind / fold / wrap=off)', function()
+  it('head/base 窓の opts (窓 diff / scrollbind / cursorbind / fold / wrap)', function()
     start_done('main', 'feature')
     for _, role in ipairs { 'base', 'head' } do
       local w = ui_windows.win(role)
@@ -611,7 +611,7 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
       assert.equals(true, vim.wo[w].scrollbind)
       assert.equals(true, vim.wo[w].cursorbind)
       assert.equals('diff', vim.wo[w].foldmethod)
-      assert.equals(false, vim.wo[w].wrap)
+      assert.equals(true, vim.wo[w].wrap)
     end
   end)
 
