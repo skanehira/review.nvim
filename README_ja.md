@@ -4,7 +4,7 @@ English: [README.md](README.md) · **日本語** (this file)
 
 GitHub の Files changed 風に、ブランチ (git ref) 間の差分と PR の差分を Neovim 内でレビューし、コメントを蓄積して **AI エージェントに渡すプロンプト**として出力するプラグイン。
 
-差分は専有 tabpage の 3 窓 (file panel │ base │ head) で開き、head 窓は実ファイルなので編集も LSP も効いたままレビューできる。追加ファイルは base が無いため base 窓を閉じ、head のみを全幅表示する。コメントは自動的にディスクへ永続化され、Neovim を再起動しても `:Review` 1 操作で復元する。ランタイム依存ゼロ (Neovim 標準 API のみ)。
+差分は専有 tabpage の 3 窓 (file panel │ base │ head) で開き、head 窓は実ファイルなので編集も LSP も効いたままレビューできる。追加ファイルは base が無いため base 窓を閉じ、head のみを全幅表示する。差分は窓ローカル `'winhl'` で GitHub 風に着色される (diffview.nvim の `enhanced_diff_hl` と同方式): 行内の変更語は head = 緑 / base = 赤、旧側にしか無い行 (削除) は削除色、filler 行は dim。コメントは自動的にディスクへ永続化され、Neovim を再起動しても `:Review` 1 操作で復元する。ランタイム依存ゼロ (Neovim 標準 API のみ)。
 
 ## 必要要件
 

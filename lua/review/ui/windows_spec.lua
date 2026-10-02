@@ -139,10 +139,12 @@ describe('windows.open: 専有 tab 3 窓の開通', function()
   end)
 
   it(
-    'diffopt (world option) をレビュー側から変更しない (DESIGN 既知の制約)',
+    'diffopt (world option) をレビュー側から一切変更しない (DESIGN「diff ペアの併存」)',
     function()
       local before = vim.o.diffopt
       windows.open { dir = OTHER_DIR, on_tab_closed = function() end }
+      assert.equals(before, vim.o.diffopt)
+      windows.close()
       assert.equals(before, vim.o.diffopt)
     end
   )
@@ -198,6 +200,70 @@ describe('windows.bind / set_panel_buf: role 導出', function()
     assert.equals('base', windows.role_of(windows.win 'base'))
     assert.equals('head', windows.role_of(windows.win 'head'))
   end)
+
+  it(
+    'bind は GitHub 風 winhl を張る: base = 削除色 / head = 追加色 (diffview enhanced 方式、panel には張らない)',
+    function()
+      windows.bind(base_buf, head_buf)
+      local base_w, head_w = windows.win 'base', windows.win 'head'
+      -- base 窓: この側にしか無い行 (= 削除) は削除色、filler は dim
+      local base_hl = vim.wo[base_w].winhl
+      assert.is_true(
+        base_hl:find('DiffAdd:ReviewDiffAddAsDelete', 1, true) ~= nil,
+        'base に削除色が無い'
+      )
+      assert.is_true(
+        base_hl:find('DiffDelete:ReviewDiffDeleteDim', 1, true) ~= nil,
+        'base に dim が無い'
+      )
+      assert.is_true(
+        base_hl:find('DiffText:ReviewDiffTextDelete', 1, true) ~= nil,
+        'base に行内削除色が無い'
+      )
+      -- head 窓: 追加色のまま、filler は dim
+      local head_hl = vim.wo[head_w].winhl
+      assert.is_true(
+        head_hl:find('DiffAdd:ReviewDiffAdd', 1, true) ~= nil,
+        'head に追加色が無い'
+      )
+      assert.is_true(
+        head_hl:find('DiffDelete:ReviewDiffDeleteDim', 1, true) ~= nil,
+        'head に dim が無い'
+      )
+      assert.is_true(
+        head_hl:find('DiffText:ReviewDiffTextAdd', 1, true) ~= nil,
+        'head に行内追加色が無い'
+      )
+      assert.equals(
+        '',
+        vim.wo[windows.win 'panel'].winhl,
+        'panel 窓に winhl が張られている'
+      )
+      -- bind 反復で二重付加しない (窓ローカル winhl は冪等)
+      windows.bind(base_buf, head_buf)
+      assert.equals(head_hl, vim.wo[head_w].winhl, 'bind 反復で winhl が二重付加された')
+    end
+  )
+
+  it(
+    'diffoff=both の bind は winhl を剥がす (告知窓・A 窓は素の色のまま)',
+    function()
+      windows.bind(base_buf, head_buf)
+      local shared = scratch_buf 'review://binary/s/x.lua'
+      windows.bind(shared, shared, { diffoff = 'both' })
+      assert.is_false(
+        vim.wo[windows.win 'base'].winhl:find('ReviewDiff', 1, true) ~= nil,
+        'diffoff 窓に review winhl が残っている'
+      )
+      assert.is_false(
+        vim.wo[windows.win 'head'].winhl:find('ReviewDiff', 1, true) ~= nil,
+        'diffoff 窓に review winhl が残っている'
+      )
+      -- 次の通常 bind で張り直す (剥がしと再付加の往復)
+      windows.bind(base_buf, head_buf)
+      assert.is_true(vim.wo[windows.win 'head'].winhl:find('ReviewDiffAdd', 1, true) ~= nil)
+    end
+  )
 
   it(
     'bind 反復 (9 ファイル超): 前回 buf を diff group から外し E96«Cannot diff more than 8 buffers» を起こさない',

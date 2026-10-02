@@ -104,7 +104,9 @@ end
 
 -- tree モードは basename、list モードはフルパス 1 行 (親パスサフィックスは無し)
 -- (name に path を渡す) ので name 解決は呼び出し側。
-local function file_row(entry, indent, icon, icon_hl, name)
+-- basename は無色 (= ReviewPanelFile)。diffview と同方式で icon だけ DevIcon* 色、
+-- 現在開いているファイル (active) の basename だけ ReviewPanelActive で着色する。
+local function file_row(entry, indent, icon, icon_hl, name, active)
   local l = line()
   l.add(indent)
   l.add(entry.status, 'ReviewPanelStatus')
@@ -114,13 +116,12 @@ local function file_row(entry, indent, icon, icon_hl, name)
     l.add ' '
   end
   if icon ~= nil then
-    -- アイコンとファイル名の色の hl group の解決は resolver の責任
-    -- (nvim-web-devicons の DevIcon* group 参照のみ。plugin 側で set_hl も
-    -- syntax engine も触らない — diffview hl.get_file_icon と同方式)。
-    -- hl なし / 未定義 group は無色 = ReviewPanelFile フォールバック。
+    -- icon の hl group の解決は resolver の責任 (nvim-web-devicons の DevIcon*
+    -- group 参照のみ。plugin 側で set_hl も syntax engine も触らない — diffview
+    -- hl.get_file_icon と同方式)。hl なし / 未定義 group は無色。
     l.add(icon .. ' ', icon_hl)
   end
-  l.add(name, icon_hl or 'ReviewPanelFile')
+  l.add(name, active and 'ReviewPanelActive' or 'ReviewPanelFile')
   l.add ' '
   l.add(('+%d'):format(entry.added or 0), 'ReviewPanelAdd')
   l.add ' '
@@ -204,7 +205,8 @@ local function emit_tree(node, opts, indent, out)
     if opts.icon ~= nil then
       icon, icon_hl = opts.icon(entry.path)
     end
-    out[#out + 1] = file_row(entry, indent, icon, icon_hl, fname)
+    local active = opts.active_path ~= nil and entry.path == opts.active_path
+    out[#out + 1] = file_row(entry, indent, icon, icon_hl, fname, active)
   end
 end
 
@@ -249,7 +251,8 @@ local function emit_section_rows(section, opts, rows, title, with_subtitle)
         local _, hl = opts.icon(entry.path)
         icon_hl = hl
       end
-      rows[#rows + 1] = file_row(entry, '', nil, icon_hl, entry.path)
+      local active = opts.active_path ~= nil and entry.path == opts.active_path
+      rows[#rows + 1] = file_row(entry, '', nil, icon_hl, entry.path, active)
     end
   end
 end
@@ -260,6 +263,8 @@ end
 ---   mode = 'tree' | 'list' (省略時 tree),
 ---   collapsed = { [dirpath]=true } (dir 行の path キー = deepest path),
 ---   icon = nil | function(path) -> (string|nil), (hlname|nil) (2返り値 = 色 group),
+---   active_path = nil | string (現在 diff 窓に開いているファイル。その basename だけ
+---     ReviewPanelActive で着色 — diffview の file.active と同方式),
 ---   base, head_display  -- tree ヘッダ «Showing changes for: <base>..<head 表示名>»
 --- }
 --- 返り値 rows = { {kind='header'|'separator'|'dir'|'file', text, path?, spans} }

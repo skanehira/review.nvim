@@ -144,7 +144,9 @@ end
 --- panel を再描画する (同一 buffer を再構成)。
 --- session: viewed 解決と winbar 用の id/base があるセッションテーブル。
 --- files: 可視 File 一覧 (filter 済み・呼び出し側の責任 — 進行順と同じ集合を向く)。
---- opts = { mode?, collapsed?, base?, head_display?, cursor? = {kind,path} }。
+--- opts = { mode?, collapsed?, base?, head_display?, cursor? = {kind,path},
+---   active_path? = string (現在 diff 窓に開いているファイル。basename span だけ
+---   ReviewPanelActive で着色 — diffview の file.active と同方式) }。
 ---   cursor = head 窓で開いたファイルへの panel カーソル逆追従 (diff-review「選択追従」)。
 ---   cursor 省略時は前回選択 entry を同じ行番号で维持し、隠れていれば clamp する
 ---     (view state の再構成で行単位で状態を持たない契約)。
@@ -187,6 +189,7 @@ function M.render(session, files, opts)
     mode = opts.mode,
     collapsed = opts.collapsed or {},
     icon = icon_resolver_override or devicons_resolver,
+    active_path = opts.active_path,
     base = opts.base or session.base,
     head_display = opts.head_display,
   })

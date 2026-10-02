@@ -413,7 +413,10 @@ Review windows (head / base)			*review-keymaps-diff*
 
 	Cursor movement in the panel alone never swaps the diff. Conversely
 	open_file scrolls the panel cursor to the row (mutual highlight:
-	selection + cursorline). Movement keys pressed from the panel
+	selection + cursorline). The basename of the file currently shown in
+	the diff windows is tinted (ReviewPanelActive, like diffview's active
+	entry); other file names are plain (only the devicon is colored).
+	Movement keys pressed from the panel
 	(<Tab>/<S-Tab>/[F/]F/<C-f>/<C-b>) return focus to the panel too (from
 	the review windows focus stays in the head window).
 
@@ -588,7 +591,18 @@ The three review windows			*review-display-diff*
 	  the new side of the diff = the real file itself (:edit). Editable,
 	  filetype / LSP work. Comparison with base is Neovim's standard window
 	  diff (DiffAdd / DiffChange / DiffDelete / DiffText); folds and
-	  scrollbind stay standard. `[c` / `]c` are bound to comment navigation
+	  scrollbind stay standard and 'diffopt' is never touched (inline
+	  changed-word spans follow your own 'diffopt' inline: setting).
+	  Both windows get a GitHub-like scheme through window-local 'winhl'
+	  (the same mechanism as diffview.nvim's enhanced_diff_hl): changed
+	  words *within* a line are tinted green on the head window and red on
+	  the base window (ReviewDiffTextAdd / ReviewDiffTextDelete, adapting
+	  to 'background', overridable via config.highlight); on the base
+	  window the lines that exist only there (= deletions) are shown in
+	  the delete color, and filler lines are dimmed in both windows.
+	  Windows that leave the diff pair (notices, no-changes) show plain
+	  colors. With 'diffexpr' set the internal diff is disabled and inline
+	  spans are not produced. `[c` / `]c` are bound to comment navigation
 	  in the review windows (the built-in hunk movement remains in your own
 	  windows). Added and deleted files exit the window diff and open in
 	  plain colors; the type is told by the winbar marks (` · new file` /

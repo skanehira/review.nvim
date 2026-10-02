@@ -382,7 +382,10 @@ KEYMAPS						*review-keymaps_ja*
 
 	panel のカーソル移動だけでは diff を切り替えない。逆にファイルを open_file
 	すると panel のカーソルがその行へ追従する (相互ハイライト: 選択行 +
-	cursorline)。panel から押した移動キー (<Tab>/<S-Tab>/[F/]F/<C-f>/<C-b>) も
+	cursorline)。いま diff 窓に開いているファイルの basename は着色される
+	(ReviewPanelActive — diffview の active entry と同方式)。他のファイル名は
+	無色 (色が付くのは devicon のみ)。panel から押した移動キー
+	(<Tab>/<S-Tab>/[F/]F/<C-f>/<C-b>) も
 	focus を panel に残す (レビュー窓から押したときは head 窓に残る)。
 
  コメント一覧 (横断)			*review-keymaps-commentlist_ja*
@@ -486,7 +489,16 @@ outdated 認定 (差分の揺れで対象行を特定できないコメント) �
 	head 窓
 	  差分の new 側 = 実ファイルそのもの (:edit)。編集可・filetype / LSP が
 	  効く。base との比較は Neovim 標準の窓 diff (DiffAdd / DiffChange /
-	  DiffDelete / DiffText) で、fold・scrollbind は標準のまま。`[c` / `]c`
+	  DiffDelete / DiffText) で、fold・scrollbind は標準のまま。'diffopt'
+	  は一切変更しない (行内 span はユーザーの 'diffopt' inline: 設定に
+	  従う)。両窓には窓ローカル 'winhl' で GitHub 風の配色を張る
+	  (diffview.nvim の enhanced_diff_hl と同方式): 行内の変更語は head =
+	  ReviewDiffTextAdd (緑) / base = ReviewDiffTextDelete (赤)。
+	  base 窓の「この側にしか無い行 (削除)」は削除色で、filler 行は両窓で
+	  dim になる。既定色は setup 時の 'background' で出し分け、
+	  config.highlight で override 可。diff ペアから外れる窓 (告知・
+	  no-changes) は素の色。'diffexpr' 設定環境では internal diff が無効の
+	  ため行内 span は出ない。`[c` / `]c`
 	  はレビュー窓ではコメント移動に割り当てている (標準の hunk 移動は
 	  自分の窓ではそのまま使える)。追加・削除ファイルは窓 diff を無効化
 	  して素の色で開き、種別は winbar のマーク (` · new file` / ` ·

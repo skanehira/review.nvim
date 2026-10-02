@@ -21,6 +21,12 @@ local DEFAULTS = {
   ReviewCommentBorder = { link = 'FloatBorder' },
   ReviewDiffAdd = { link = 'DiffAdd' },
   ReviewDiffDelete = { link = 'DiffDelete' },
+  -- GitHub 風配色 (diffview.nvim enhanced_diff_hl と同方式)。base 窓の「この側に
+  -- しか無い行 = 削除」は削除色で、filler 行は両窓で dim。link なので colorscheme
+  -- の DiffDelete / Comment 定義に動的に追従する。
+  ReviewDiffAddAsDelete = { link = 'DiffDelete' },
+  ReviewDiffDeleteDim = { link = 'Comment' },
+  ReviewDiffChange = { link = 'DiffChange' },
   ReviewDiffHunk = { link = 'diffLine' },
   -- file panel (DESIGN「命名」basename / dir 行 / git status 記号 / コメント有無 /
   -- 増減数)。basename は既定無着色 = Normal link。±は + 緑 / - 赤、コメントアイコンは
@@ -33,17 +39,41 @@ local DEFAULTS = {
   ReviewPanelAdd = { link = 'Added' },
   ReviewPanelRemove = { link = 'Removed' },
   ReviewPanelSelection = { link = 'CursorLine' },
+  -- 現在 diff 窓に開いているファイルの basename (diffview FilePanelSelected = Type
+  -- link と同系。行全体の選択行背景は ReviewPanelSelection が担うため別 group)。
+  ReviewPanelActive = { link = 'Type' },
   -- session 一覧 (:Review list) の grey 行 (repo path 消失で <Enter> 不可)。
   -- file panel 側では未使用 (2026-09 改訂で親パスサフィックスを撤去)。
   ReviewPanelMeta = { link = 'Comment' },
 }
 
+-- 行内 span (ユーザーの diffopt inline: 設定で付く DiffText / DiffTextAdd) の
+-- 既定色。GitHub の word-diff 由来の帯で「行内のどこが変わったか」を見せる。
+-- background で出し分ける。default=true なのでユーザーの明示定義 / config.highlight
+-- が勝つ。colorscheme が後から background を変えた場合は再 setup か
+-- config.highlight での定義に委ねる (setup 時点の background で固定)。
+local function word_hl_defaults()
+  if vim.o.background == 'light' then
+    return {
+      ReviewDiffTextAdd = { bg = '#acf2bd' },
+      ReviewDiffTextDelete = { bg = '#fdb8c0' },
+    }
+  end
+  return {
+    ReviewDiffTextAdd = { bg = '#266d32' },
+    ReviewDiffTextDelete = { bg = '#6e2b31' },
+  }
+end
+
 function M.setup()
   for group, attrs in pairs(DEFAULTS) do
     vim.api.nvim_set_hl(0, group, vim.tbl_extend('keep', attrs, { default = true }))
   end
+  for group, attrs in pairs(word_hl_defaults()) do
+    vim.api.nvim_set_hl(0, group, vim.tbl_extend('keep', attrs, { default = true }))
+  end
   for group, attrs in pairs(config.get().highlight or {}) do
-    if DEFAULTS[group] ~= nil then
+    if DEFAULTS[group] ~= nil or group:match '^ReviewDiffText' then
       vim.api.nvim_set_hl(0, group, vim.deepcopy(attrs))
     end
   end

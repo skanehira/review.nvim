@@ -25,27 +25,73 @@ local function valid_win(w)
   return w ~= nil and vim.api.nvim_win_is_valid(w)
 end
 
+-- GitHub 風の diff 配色 (diffview.nvim の enhanced_diff_hl と同方式)。
+-- `diffopt` は global option なので**一切触らない** (DESIGN「diff ペアの併存」)。
+-- 窓ローカル winhl のみで振り替える: 旧側 (base) 窓は「この側にしか無い行 = 削除」
+-- を削除色 (DiffAdd → ReviewDiffAddAsDelete) に、新側 (head) 窓は追加色のまま。
+-- filler 行 (相手側にしか無い行の空表示) は両窓で dim (Comment) — GitHub の
+-- side-by-side と同じく「削除行は旧側に赤で、新側は空帯」になる。行内 span は
+-- ユーザーの diffopt inline: 設定に従い (0.13 既定 inline:char)、その色を
+-- ReviewDiffTextAdd/Delete へ振って視認性を上げる。窓ローカルなのでユーザーの
+-- Diff* や他 tab には影響しない。
+local WINHL_BASE = {
+  'DiffAdd:ReviewDiffAddAsDelete',
+  'DiffDelete:ReviewDiffDeleteDim',
+  'DiffChange:ReviewDiffChange',
+  'DiffText:ReviewDiffTextDelete',
+  'DiffTextAdd:ReviewDiffTextDelete',
+}
+local WINHL_HEAD = {
+  'DiffDelete:ReviewDiffDeleteDim',
+  'DiffChange:ReviewDiffChange',
+  'DiffAdd:ReviewDiffAdd',
+  'DiffText:ReviewDiffTextAdd',
+  'DiffTextAdd:ReviewDiffTextAdd',
+}
+
+local function winhl_for(role)
+  return role == 'base' and table.concat(WINHL_BASE, ',') or table.concat(WINHL_HEAD, ',')
+end
+
 --- 窓 diff ペアの opts (base/head 窓ローカル)。`diffopt` は world option なので
 --- 触らない (DESIGN「既知の制約」)。wrap は長い行を折り返して読むため有効
 --- (virt_text との干渉は許容 — 同左)。panel は別関数で wrap=off のまま。
 --- foldcolumn は 0.10 (number) / 0.13 (string) で API 型が変わるため、両版で
---- 安定な :setl (窓ローカル) 経路で一括設定する。
-local function apply_pair_opts(w)
+--- 安定な :setl (窓ローカル) 経路で一括設定する。role ごとに GitHub 風 winhl
+--- (上記) を張る — 再 bind で二重付加しない。
+local function apply_pair_opts(w, role)
   vim.api.nvim_win_call(w, function()
     vim.cmd 'setl diff scrollbind cursorbind foldmethod=diff foldlevel=0 foldcolumn=1 wrap'
   end)
+  local cur = vim.wo[w].winhl
+  if cur:find('ReviewDiff', 1, true) then
+    return -- 再 bind で二重付加しない
+  end
+  local mine = winhl_for(role)
+  vim.wo[w].winhl = cur == '' and mine or cur .. ',' .. mine
 end
 
 -- binary 注釈窓・削除告知窓など窓 diff に参加しない窓の退避。`:diffoff` は
 -- foldmethod を元へ戻さない (既知の制約) ので manual を明示し、さらに `zE` で
 -- diff 由来の保存 fold を解消する — manual だと残 fold がそのまま動き続ける
 -- ため、退避の検証可能形 foldclosed()==-1 (DESIGN「既知の制約」窓 diff) を
--- 保証する。告知 1 行窓が fold で跳ぶ事故も同時に防ぐ。
+-- 保証する。告知 1 行窓が fold で跳ぶ事故も同時に防ぐ。apply_pair_opts が張った
+-- winhl も剥がす (告知窓・A 窓は素の色のまま)。
 local function apply_diffoff(w)
   vim.api.nvim_win_call(w, function()
     vim.cmd 'setl nodiff noscrollbind nocursorbind foldmethod=manual foldcolumn=0 wrap'
     vim.cmd 'normal! zE'
   end)
+  local cur = vim.wo[w].winhl
+  if cur ~= '' and cur:find('ReviewDiff', 1, true) then
+    local kept = {}
+    for _, item in ipairs(vim.split(cur, ',', { plain = true })) do
+      if not item:find('ReviewDiff', 1, true) then
+        table.insert(kept, item)
+      end
+    end
+    vim.wo[w].winhl = table.concat(kept, ',')
+  end
 end
 
 local function release_autocmd()
@@ -218,7 +264,7 @@ local function ensure_pair()
     vim.api.nvim_set_current_win(st.head_win)
     vim.cmd 'leftabove vsplit'
     st.base_win = vim.api.nvim_get_current_win()
-    apply_pair_opts(st.base_win)
+    apply_pair_opts(st.base_win, 'base')
     return
   end
   for _, role in ipairs { 'base', 'head' } do
@@ -259,8 +305,8 @@ local function ensure_pair()
   st.base_win = vim.api.nvim_get_current_win()
   vim.cmd 'rightbelow vsplit'
   st.head_win = vim.api.nvim_get_current_win()
-  apply_pair_opts(st.base_win)
-  apply_pair_opts(st.head_win)
+  apply_pair_opts(st.base_win, 'base')
+  apply_pair_opts(st.head_win, 'head')
 end
 
 --- base / head 窓にバッファを張り、役割 gate 窓変数を更新する。追加 (A) は
@@ -308,8 +354,8 @@ function M.bind(base_buf, head_buf, opts)
     apply_diffoff(bw)
     apply_diffoff(hw)
   else
-    apply_pair_opts(bw)
-    apply_pair_opts(hw)
+    apply_pair_opts(bw, 'base')
+    apply_pair_opts(hw, 'head')
   end
   vim.w[bw].review_base_gate = bw
   vim.w[bw].review_base_buf = base_buf

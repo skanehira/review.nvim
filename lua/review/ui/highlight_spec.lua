@@ -61,8 +61,55 @@ describe('highlight.setup', function()
       'CursorLine',
       vim.api.nvim_get_hl(0, { name = 'ReviewPanelSelection', link = true }).link
     )
+    -- 現在開いているファイルの basename (diffview FilePanelSelected = Type と同系)
+    assert.equals('Type', vim.api.nvim_get_hl(0, { name = 'ReviewPanelActive', link = true }).link)
     assert.is_nil(next(vim.api.nvim_get_hl(0, { name = 'ReviewSidebarFile' })))
   end)
+
+  it(
+    'GitHub 風配色の 3 グループが link で定義される (diffview enhanced_diff_hl 方式)',
+    function()
+      highlight.setup()
+      -- base 窓の「この側にしか無い行 = 削除」は削除色、filler は両窓で dim
+      assert.equals(
+        'DiffDelete',
+        vim.api.nvim_get_hl(0, { name = 'ReviewDiffAddAsDelete', link = true }).link
+      )
+      assert.equals(
+        'Comment',
+        vim.api.nvim_get_hl(0, { name = 'ReviewDiffDeleteDim', link = true }).link
+      )
+      assert.equals(
+        'DiffChange',
+        vim.api.nvim_get_hl(0, { name = 'ReviewDiffChange', link = true }).link
+      )
+    end
+  )
+
+  it(
+    '行内 span 色 (ReviewDiffText*) が背景色付きで定義され、override できる',
+    function()
+      highlight.setup()
+      local add = vim.api.nvim_get_hl(0, { name = 'ReviewDiffTextAdd' })
+      local del = vim.api.nvim_get_hl(0, { name = 'ReviewDiffTextDelete' })
+      assert.is_true(
+        add.bg ~= nil,
+        'ReviewDiffTextAdd に行内ハイライトの背景色が無い'
+      )
+      assert.is_true(
+        del.bg ~= nil,
+        'ReviewDiffTextDelete に行内ハイライトの背景色が無い'
+      )
+      assert.not_equals(
+        add.bg,
+        del.bg,
+        '追加側と削除側の span 背景が同一 (赤緑の区別が付かない)'
+      )
+      config.setup { highlight = { ReviewDiffTextAdd = { bg = '#123456' } } }
+      highlight.setup()
+      assert.equals(0x123456, vim.api.nvim_get_hl(0, { name = 'ReviewDiffTextAdd' }).bg)
+    end
+  )
 
   it('config.highlight の file panel group override が既定定義に勝つ', function()
     config.setup { highlight = { ReviewPanelDir = { link = 'Question', bold = true } } }

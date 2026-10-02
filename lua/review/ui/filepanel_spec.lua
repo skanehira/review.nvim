@@ -406,8 +406,9 @@ describe('filepanel icon (devicons 自動検出)', function()
   end)
 
   it(
-    'resolver が返す hl group がアイコンとファイル名の両方に張る (dir 行は対象外)',
+    'resolver の hl は icon span のみ。ファイル名 span は無色 (=ReviewPanelFile)',
     function()
+      -- diffview と同方式: icon は DevIcon* 色、basename は無色 (active のみ着色)。
       filepanel._set_icon_resolver(function(path)
         if path:match '%.lua$' then
           return 'L', 'DevIconLuaStub'
@@ -416,31 +417,59 @@ describe('filepanel icon (devicons 自動検出)', function()
       end)
       local buf = filepanel.render(session_stub(), { f('a.lua', 'M', 1, 0) }, TREE_OPTS)
       local marks = vim.api.nvim_buf_get_extmarks(buf, hl_ns(), 0, -1, { details = true })
-      local icon_hit, name_hit = false, false
+      local icon_hit, name_wrong = false, nil
       for _, m in ipairs(marks) do
         if m[4].hl_group == 'DevIconLuaStub' then
-          -- 'M L a.lua +1 -0': icon 起点 col=2 (0-based)、name 起点 col=4
+          -- 'M L a.lua +1 -0': icon 起点 col=2 (0-based)
           if m[3] == 2 then
             icon_hit = true
           end
-          if m[3] == 4 and m[4].end_col == 9 then
-            name_hit = true
-          end
+        end
+        -- 名前 span (col 4-9) に resolver hl が乗っていたら契約違反
+        if m[3] == 4 and m[4].end_col == 9 and m[4].hl_group ~= 'ReviewPanelFile' then
+          name_wrong = m[4].hl_group
         end
       end
       assert.is_true(
         icon_hit,
         'icon span に resolver hl が張られていない: ' .. vim.inspect(marks)
       )
-      assert.is_true(
-        name_hit,
-        'file 名 span に resolver hl が張られていない: ' .. vim.inspect(marks)
+      assert.is_nil(
+        name_wrong,
+        'ファイル名 span に色が張られている: ' .. tostring(name_wrong)
       )
     end
   )
 
+  it('list モードでも icon span だけ resolver hl (file 名 span は無色)', function()
+    filepanel._set_icon_resolver(function(path)
+      if path:match '%.lua$' then
+        return 'L', 'DevIconLuaStub'
+      end
+      return nil
+    end)
+    local buf = filepanel.render(
+      session_stub(),
+      { f('src/a.lua', 'M', 1, 0) },
+      { mode = 'list', base = 'main', head_display = 'working tree' }
+    )
+    local lines = panel_lines(buf)
+    assert.equals('M src/a.lua +1 -0', lines[2])
+    local marks = vim.api.nvim_buf_get_extmarks(buf, hl_ns(), 0, -1, { details = true })
+    local name_wrong = nil
+    for _, m in ipairs(marks) do
+      if m[4].hl_group == 'DevIconLuaStub' then
+        name_wrong = m[4].hl_group
+      end
+    end
+    assert.is_nil(
+      name_wrong,
+      'list 名に resolver hl が張られている: ' .. vim.inspect(marks)
+    )
+  end)
+
   it(
-    'list モードでも file 名 span は resolver hl (icon 文字自身は list では張らない)',
+    'opts.active_path の行の basename span だけ ReviewPanelActive (diffview file.active 相当)',
     function()
       filepanel._set_icon_resolver(function(path)
         if path:match '%.lua$' then
@@ -450,19 +479,27 @@ describe('filepanel icon (devicons 自動検出)', function()
       end)
       local buf = filepanel.render(
         session_stub(),
-        { f('src/a.lua', 'M', 1, 0) },
-        { mode = 'list', base = 'main', head_display = 'working tree' }
+        { f('a.lua', 'M', 1, 0), f('b.lua', 'M', 1, 0) },
+        vim.tbl_extend('force', TREE_OPTS, { active_path = 'b.lua' })
       )
-      local lines = panel_lines(buf)
-      assert.equals('M src/a.lua +1 -0', lines[2])
       local marks = vim.api.nvim_buf_get_extmarks(buf, hl_ns(), 0, -1, { details = true })
-      local name_hit
+      -- 行構成 (0-based): 0=Changes, 1=subtitle, 2='M a.lua…', 3='M b.lua…'
+      local active_rows, a_active, b_plain = {}, nil, nil
       for _, m in ipairs(marks) do
-        if m[4].hl_group == 'DevIconLuaStub' then
-          name_hit = true
+        if m[4].hl_group == 'ReviewPanelActive' then
+          active_rows[m[2]] = true
+        end
+        if m[2] == 2 and m[4].hl_group == 'ReviewPanelActive' then
+          a_active = true
+        end
+        if m[2] == 3 and m[4].hl_group == 'ReviewPanelFile' then
+          b_plain = true
         end
       end
-      assert.is_true(name_hit, 'list 名の hl 写しが無い: ' .. vim.inspect(marks))
+      assert.is_nil(active_rows[2], '非 active 行に active 色が付いている')
+      assert.is_truthy(active_rows[3], 'active 行の basename に色が付いていない')
+      assert.is_nil(a_active, '非 active 行 (a.lua) に active 色が付いている')
+      assert.is_nil(b_plain, 'active 行 (b.lua) に無色 span が残っている')
     end
   )
 

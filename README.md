@@ -4,7 +4,7 @@
 
 A Neovim plugin to review branch (git ref) and PR diffs the way GitHub's Files changed page does — collect comments and export them as a **prompt for your AI agent**.
 
-Diffs open in a dedicated tabpage with three windows (file panel │ base │ head). Added files have no base side, so the base window is closed and only the head is shown, full width. The head window is the real file, so editing and LSP keep working while you review. Comments are persisted to disk automatically and a Neovim restart is recovered with one `:Review`. Zero runtime dependencies (Neovim core API only).
+Diffs open in a dedicated tabpage with three windows (file panel │ base │ head). Added files have no base side, so the base window is closed and only the head is shown, full width. The head window is the real file, so editing and LSP keep working while you review. Diffs are colored GitHub-style through window-local 'winhl' (same mechanism as diffview.nvim's `enhanced_diff_hl`): changed words are tinted green (head) / red (base), deleted lines show in the delete color on the old side, and filler lines are dimmed. Comments are persisted to disk automatically and a Neovim restart is recovered with one `:Review`. Zero runtime dependencies (Neovim core API only).
 
 ## Requirements
 

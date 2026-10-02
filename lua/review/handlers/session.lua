@@ -772,6 +772,9 @@ local function refresh_panel(cursor_entry)
     collapsed = panel_collapsed,
     head_display = panel_head_display(),
     cursor = cursor_entry,
+    -- 現在 diff 窓に開いているファイルの basename だけ着色 (diffview file.active
+    -- と同方式)。no-changes placeholder は panel に row がないので素通りする。
+    active_path = active.current ~= nil and active.current.path or nil,
   })
   ui_keygate.install(active.panel_buf)
   active.owned_bufs[active.panel_buf] = true

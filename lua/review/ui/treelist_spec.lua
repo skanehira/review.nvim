@@ -245,6 +245,42 @@ describe('treelist.build tree モード', function()
   end)
 
   it(
+    'active_path のファイルだけ basename span が ReviewPanelActive (他は無色・dir 行は対象外)',
+    function()
+      -- diffview の file.active と同方式: 現在開いているファイルの basename だけ
+      -- 着色する (FilePanelSelected 相当)。dir 行・他ファイルは無色のまま。
+      local rows = treelist.build({
+        f('src/a.lua', 'M', 1, 0),
+        f('src/b.lua', 'M', 1, 0),
+      }, tree_opts { active_path = 'src/b.lua' })
+      local function name_group(row)
+        for _, s in ipairs(row.spans) do
+          local text = row.text:sub(s.from + 1, s.to)
+          if text == 'a.lua' or text == 'b.lua' then
+            return s.group
+          end
+        end
+        return nil
+      end
+      local dir = rows[3]
+      assert.equals('dir', dir.kind)
+      for _, s in ipairs(dir.spans) do
+        assert.not_equals('ReviewPanelActive', s.group, 'dir 行が active 色になっている')
+      end
+      assert.equals(
+        'ReviewPanelFile',
+        name_group(rows[4]),
+        '非 active ファイルが着色されている'
+      )
+      assert.equals(
+        'ReviewPanelActive',
+        name_group(rows[5]),
+        'active ファイルの basename が無色'
+      )
+    end
+  )
+
+  it(
     'spans: status / dir 名 (ReviewPanelDir) / basename (ReviewPanelFile) / ± (Add・Remove)',
     function()
       local rows = treelist.build({
@@ -357,6 +393,25 @@ describe('treelist.build list モード', function()
     assert.is_true(groups.ReviewPanelStatus == true)
     assert.is_true(groups.ReviewPanelAdd == true)
     assert.is_true(groups.ReviewPanelRemove == true)
+  end)
+
+  it('list モードでも active_path の basename だけ ReviewPanelActive', function()
+    local rows = treelist.build({
+      f('src/a.lua', 'M', 1, 0),
+      f('src/b.lua', 'M', 1, 0),
+    }, { mode = 'list', active_path = 'src/b.lua' })
+    -- list の name span はフルパス
+    local function name_group(row)
+      for _, s in ipairs(row.spans) do
+        local text = row.text:sub(s.from + 1, s.to)
+        if text == 'src/a.lua' or text == 'src/b.lua' then
+          return s.group
+        end
+      end
+      return nil
+    end
+    assert.equals('ReviewPanelFile', name_group(rows[2]))
+    assert.equals('ReviewPanelActive', name_group(rows[3]))
   end)
 
   it('list モードでもコメント icon は付く (フルパス行の status 後)', function()
