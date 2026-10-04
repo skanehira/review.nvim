@@ -9,30 +9,19 @@ local session_handler = require 'review.handlers.session'
 local sessions_list = require 'review.handlers.sessions_list'
 local store = require 'review.store.session'
 local ui_list = require 'review.ui.list'
+local fixtures = require 'helpers.fixtures'
 
 local REAL_NOTIFY = vim.notify
 local state = {}
 
 local function session_stub(id, overrides)
-  local s = {
-    version = 1,
+  return fixtures.session_stub(vim.tbl_extend('force', {
     id = id,
     repo = '/spec/repo',
-    mode = 'branch',
     base = id:match '^(.-)%-%-' or id,
     head = id:match '%-%-(.*)$' or id,
-    pr = vim.NIL,
-    worktree = vim.NIL,
     status = 'closed',
-    files = {},
-    comments = {},
-    created_at = 1,
-    updated_at = 1,
-  }
-  for k, v in pairs(overrides or {}) do
-    s[k] = v
-  end
-  return s
+  }, overrides or {}))
 end
 
 describe('sessions_list.delete_current (一覧 d)', function()

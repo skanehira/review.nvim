@@ -5,27 +5,12 @@ local list = require 'review.ui.list'
 local chrome = require 'review.ui.chrome'
 local windows = require 'review.ui.windows'
 local nvim_env = require 'helpers.nvim_env'
+local fixtures = require 'helpers.fixtures'
 
 local function session_stub(overrides)
-  local s = {
-    version = 1,
-    id = 'main--feature',
-    repo = '/repo',
-    mode = 'branch',
-    base = 'main',
-    head = 'feature',
-    pr = vim.NIL,
-    worktree = vim.NIL,
-    status = 'open',
-    files = {},
-    comments = {},
-    created_at = 1,
+  return fixtures.session_stub(vim.tbl_extend('force', {
     updated_at = 1725843600, -- 2024-09-09 09:00:00 (UTC+9 で表示される…は環境 TZ 依存)
-  }
-  for k, v in pairs(overrides or {}) do
-    s[k] = v
-  end
-  return s
+  }, overrides or {}))
 end
 
 local state = {}

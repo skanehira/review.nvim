@@ -14,6 +14,7 @@ local paths = require 'review.store.paths'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local ui_windows = require 'review.ui.windows'
+local fixtures = require 'helpers.fixtures'
 
 local SLUG = 'main--feature'
 
@@ -25,22 +26,9 @@ local CY = vim.api.nvim_replace_termcodes('<C-y>', true, false, true)
 
 -- head (作業ツリー) の a.lua = new 側 5 行。実 repo dir の disk と同じ内容に
 -- する (head 実ファイル窓は :edit 相当の実在ファイル経路なので磁盘実在が前提)。
-local HEAD_TEXT = table.concat({ 'one', 'two', 'three', 'four', 'six' }, '\n') .. '\n'
+local HEAD_TEXT = fixtures.HEAD_TEXT_ONE_SIX
 
-local RAW_DIFF = table.concat({
-  'diff --git a/a.lua b/a.lua',
-  'index 1111111..2222222 100644',
-  '--- a/a.lua',
-  '+++ b/a.lua',
-  '@@ -1,3 +1,5 @@',
-  ' one',
-  '+two',
-  '+three',
-  ' four',
-  '-five',
-  ' six',
-  '',
-}, '\n')
+local RAW_DIFF = fixtures.RAW_DIFF_ONE_SIX
 
 local state = {}
 

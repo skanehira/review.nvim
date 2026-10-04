@@ -8,6 +8,7 @@ local config = require 'review.config'
 local chrome = require 'review.ui.chrome'
 local commentlist = require 'review.ui.commentlist'
 local nvim_env = require 'helpers.nvim_env'
+local fixtures = require 'helpers.fixtures'
 
 local SLUG = 'main--feature'
 local BUF_NAME = 'review://comments/' .. SLUG
@@ -29,44 +30,9 @@ local function use_env()
   end)
 end
 
-local function comment(overrides)
-  local c = {
-    id = 'c1',
-    file = 'a.lua',
-    line = 1,
-    end_line = 1,
-    body = 'body',
-    anchor = vim.NIL,
-    state = 'active',
-    created_at = 1,
-  }
-  for k, v in pairs(overrides or {}) do
-    c[k] = v
-  end
-  return c
-end
+local comment = fixtures.comment
 
-local function session_stub(overrides)
-  local s = {
-    version = 1,
-    id = SLUG,
-    repo = '/repo',
-    mode = 'branch',
-    base = 'main',
-    head = 'feature',
-    pr = vim.NIL,
-    worktree = vim.NIL,
-    status = 'open',
-    files = {},
-    comments = {},
-    created_at = 1,
-    updated_at = 1,
-  }
-  for k, v in pairs(overrides or {}) do
-    s[k] = v
-  end
-  return s
-end
+local session_stub = fixtures.session_stub
 
 local function lines_of(buf)
   return vim.api.nvim_buf_get_lines(buf, 0, -1, false)

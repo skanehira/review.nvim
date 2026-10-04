@@ -9,25 +9,13 @@ local store = require 'review.store.session'
 local pr_chat = require 'review.handlers.pr_chat'
 local prchat = require 'review.ui.prchat'
 local ui_windows = require 'review.ui.windows'
+local fixtures = require 'helpers.fixtures'
 
 local SLUG = 'main--feature'
 
-local HEAD_TEXT = table.concat({ 'one', 'two', 'three', 'four', 'six' }, '\n') .. '\n'
+local HEAD_TEXT = fixtures.HEAD_TEXT_ONE_SIX
 
-local RAW_DIFF = table.concat({
-  'diff --git a/a.lua b/a.lua',
-  'index 1111111..2222222 100644',
-  '--- a/a.lua',
-  '+++ b/a.lua',
-  '@@ -1,3 +1,5 @@',
-  ' one',
-  '+two',
-  '+three',
-  ' four',
-  '-five',
-  ' six',
-  '',
-}, '\n')
+local RAW_DIFF = fixtures.RAW_DIFF_ONE_SIX
 
 local REAL_INPUT = vim.ui.input
 local REAL_NOTIFY = vim.notify

@@ -14,6 +14,7 @@ local paths = require 'review.store.paths'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local ui_windows = require 'review.ui.windows'
+local fixtures = require 'helpers.fixtures'
 
 local SLUG = 'main--feature'
 local COMMENTS_BUF = 'review://comments/' .. SLUG
@@ -233,22 +234,7 @@ local function start_degraded()
 end
 
 -- active セッションのコメントを 1 件注入する (render は session.comments を読む)。
-local function comment_stub(overrides)
-  local c = {
-    id = 'c1',
-    file = 'a.lua',
-    line = 1,
-    end_line = 1,
-    body = 'body',
-    anchor = vim.NIL,
-    state = 'active',
-    created_at = 1,
-  }
-  for k, v in pairs(overrides or {}) do
-    c[k] = v
-  end
-  return c
-end
+local comment_stub = fixtures.comment
 
 local function add_comment(overrides)
   local sess = session_handler.active()

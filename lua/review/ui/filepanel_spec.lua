@@ -7,31 +7,12 @@
 local config = require 'review.config'
 local filepanel = require 'review.ui.filepanel'
 local nvim_env = require 'helpers.nvim_env'
+local fixtures = require 'helpers.fixtures'
 
 local SLUG = 'main--feature'
 local BUF_NAME = 'review://sidebar/' .. SLUG
 
-local function session_stub(overrides)
-  local s = {
-    version = 1,
-    id = SLUG,
-    repo = '/repo',
-    mode = 'branch',
-    base = 'main',
-    head = 'feature',
-    pr = vim.NIL,
-    worktree = vim.NIL,
-    status = 'open',
-    files = {},
-    comments = {},
-    created_at = 1,
-    updated_at = 1,
-  }
-  for k, v in pairs(overrides or {}) do
-    s[k] = v
-  end
-  return s
-end
+local session_stub = fixtures.session_stub
 
 local function f(path, status, added, deleted)
   return { path = path, status = status, added = added, deleted = deleted, hunks = {} }

@@ -13,27 +13,15 @@ local prompt_handler = require 'review.handlers.prompt'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local ui_windows = require 'review.ui.windows'
+local fixtures = require 'helpers.fixtures'
 
 local SENTINEL = 'SENTINEL-MUST-NOT-BE-CLOBBERED'
 
 -- head (作業ツリー) の a.lua = new 側 5 行。head 実ファイル窓は :edit 相当の
 -- 実在ファイル経路なのでディスク実在が前提 (恒等行の源)。
-local HEAD_TEXT = table.concat({ 'one', 'two', 'three', 'four', 'six' }, '\n') .. '\n'
+local HEAD_TEXT = fixtures.HEAD_TEXT_ONE_SIX
 
-local RAW_DIFF = table.concat({
-  'diff --git a/a.lua b/a.lua',
-  'index 1111111..2222222 100644',
-  '--- a/a.lua',
-  '+++ b/a.lua',
-  '@@ -1,3 +1,5 @@',
-  ' one',
-  '+two',
-  '+three',
-  ' four',
-  '-five',
-  ' six',
-  '',
-}, '\n')
+local RAW_DIFF = fixtures.RAW_DIFF_ONE_SIX
 
 local REAL_NOTIFY = vim.notify
 local REAL_INPUT = vim.ui.input
