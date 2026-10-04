@@ -283,7 +283,10 @@ describe('filepanel.row_entry / winbar', function()
   end)
 
   it('winbar 文字列は b: 変数に持たない (窓変数 only 契約)', function()
-    local buf = filepanel.render(session_stub(), files2(), TREE_OPTS)
+    local session = session_stub()
+    local buf = filepanel.render(session, files2(), TREE_OPTS)
+    -- 対照: render が b: に置くのはセッション識別の meta だけ
+    assert.same({ kind = 'sidebar', session_id = session.id }, vim.b[buf].review_meta)
     assert.is_nil(vim.b[buf].review_winbar)
   end)
 end)

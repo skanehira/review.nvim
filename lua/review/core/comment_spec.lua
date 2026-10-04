@@ -398,6 +398,11 @@ describe('comment.reply_target', function()
   end)
 
   it('スレッドが無い行は nil を返す', function()
+    local comments = { mk('c1', { line = 5 }) }
+    -- 対照: スレッドのある行は根を返す (常に nil を返す実装をここで落とす)
+    assert.equals('c1', comment.reply_target(comments, 'a.lua', 5))
+    assert.is_nil(comment.reply_target(comments, 'a.lua', 6))
+    assert.is_nil(comment.reply_target(comments, 'b.lua', 5))
     assert.is_nil(comment.reply_target({}, 'a.lua', 5))
   end)
 
@@ -485,8 +490,17 @@ describe('comment.from_gh', function()
       subject_type = 'line',
     }
     local c = comment.from_gh(gh, { id = 'c10' })
-    assert.is_nil(c.line)
-    assert.is_nil(c.end_line)
+    -- line / end_line キーを持たないことを全体比較で pin する
+    assert.same({
+      id = 'c10',
+      file = 'a.lua',
+      body = 'null line',
+      origin = 'gh',
+      gh_id = 503,
+      gh_user = 'x',
+      created_at = 1704164645,
+      state = 'active',
+    }, c)
   end)
 
   it('line が vim.NIL でも original_line があればそれを仮置きする', function()

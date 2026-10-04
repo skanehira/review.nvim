@@ -184,6 +184,10 @@ describe('windows.bind / set_panel_buf: role 導出', function()
       assert.is_nil(windows.role_of(windows.win 'base'))
       assert.is_nil(windows.role_of(windows.win 'head'))
       assert.is_nil(windows.role_of(windows.win 'panel'))
+      -- 対照: 同じ窓に bind した後は role が導ける (常に nil を返す実装をここで落とす)
+      windows.bind(base_buf, head_buf)
+      assert.equals('base', windows.role_of(windows.win 'base'))
+      assert.equals('head', windows.role_of(windows.win 'head'))
     end
   )
 
@@ -294,6 +298,9 @@ describe('windows.bind / set_panel_buf: role 導出', function()
       vim.api.nvim_set_current_tabpage(state.tab)
       local uw = vim.api.nvim_get_current_win()
       vim.api.nvim_win_set_buf(uw, real)
+      -- 対照: 同じ buf を表示するレビューの head 窓は head と導ける
+      assert.equals('head', windows.role_of(windows.win 'head'))
+      assert.equals(real, vim.api.nvim_win_get_buf(uw))
       assert.is_nil(windows.role_of(uw))
     end
   )
@@ -871,8 +878,16 @@ describe('windows: q (close) と :tabclose の両経路', function()
   )
 
   it('state が無いときの close は no-op で安全', function()
+    -- 対照: state があれば close は tab を閉じて state を落とす
+    windows.open { dir = OTHER_DIR }
     windows.close()
     assert.is_nil(windows.state())
+    local tabs = #vim.api.nvim_list_tabpages()
+    local cur = vim.api.nvim_get_current_tabpage()
+    windows.close()
+    assert.is_nil(windows.state())
+    assert.equals(tabs, #vim.api.nvim_list_tabpages())
+    assert.equals(cur, vim.api.nvim_get_current_tabpage())
   end)
 
   it(

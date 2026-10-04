@@ -196,8 +196,15 @@ describe('git/gh repo_from_url', function()
   end)
 
   it('URL でない / nil は nil を返す', function()
-    assert.is_nil(gh.repo_from_url(nil))
-    assert.is_nil(gh.repo_from_url '7')
+    local cases = {
+      -- 対照: URL なら owner/repo が取れる (常に nil を返す実装をここで落とす)
+      { input = 'https://github.com/acme/demo/pull/7', want = { owner = 'acme', repo = 'demo' } },
+      { input = nil, want = nil },
+      { input = '7', want = nil },
+    }
+    for _, case in ipairs(cases) do
+      assert.same(case.want, gh.repo_from_url(case.input), tostring(case.input))
+    end
   end)
 end)
 
