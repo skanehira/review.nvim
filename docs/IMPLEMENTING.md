@@ -112,7 +112,7 @@ CI matrix は **nvim v0.10.0 と stable の両方**で走る。手元 nightly �
   (`E2E-XX=値`) を標準出力し、`run <name> "$TMP"` の後 **shell 側で `grep -q` する**。
   fixture は mktemp + exit trap。nvim 側に assert を置くと失敗理由が log の中で
   見づらくなるので、期待値は shell のメッセージにする。`fail` / `wait_for` /
-  `realpath` / `git` / `expect` は `require 'helpers.e2e'` から取る
+  `realpath` / `git` は `require 'helpers.e2e'` から取る
 - 実 PTY でしか取れない契約 (窓限定キーの isolation / insert 残留) は
   `tmux + nvim --listen + --remote-expr` で実測し、**手順と結果を commit msg** に
   (AGENTS.md の約束。スクリプトは /tmp でよいが手順をコミットに転記する)
