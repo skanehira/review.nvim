@@ -14,6 +14,10 @@ local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local ui_scratchwin = require 'review.ui.scratchwin'
 local ui_windows = require 'review.ui.windows'
+local git_env = require 'helpers.git_env'
+local git_stub = require 'helpers.git_stub'
+local nvim_env = require 'helpers.nvim_env'
+local session_env = require 'helpers.session_env'
 
 local SLUG = 'main--feature'
 local SIDEBAR_NAME = 'review://sidebar/' .. SLUG
@@ -79,37 +83,10 @@ local state = {}
 -- 対象とする本 spec では GET 一覧系を空応答で通し、call 記録にも応答 index にも
 -- 含めない (fetch 完了の通知も 0 件で出ない)。取り込み自体の検証は
 -- pr_comments_spec が担う。
-local function gh_api_stub(cmd, on_exit)
-  if cmd[1] == 'gh' and cmd[2] == 'api' then
-    on_exit { code = 0, stdout = '[]', stderr = '' }
-    return true
-  end
-  return false
-end
+local gh_api_stub = git_stub.gh_api_stub
 
 local function install_git(responses)
-  state.git_calls = {}
-  state.git_opts = {}
-  cli._set_system(function(cmd, opts, on_exit)
-    if gh_api_stub(cmd, on_exit) then
-      return
-    end
-    local idx = #state.git_calls + 1
-    table.insert(state.git_calls, cmd)
-    state.git_opts[idx] = opts
-    if responses[idx] ~= nil then
-      on_exit(responses[idx](cmd, opts))
-      return
-    end
-    if cmd[2] == 'show' then
-      on_exit { code = 0, stdout = 'base content\n', stderr = '' }
-      return
-    end
-    error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
-  end)
-  cli._set_executable(function()
-    return 1
-  end)
+  git_stub.install_queue(state, responses, { gh_api_empty = true })
 end
 
 -- install_git の非同期版。defer_pred(cmd) が真の git (worktree remove や
@@ -118,33 +95,7 @@ end
 -- 「完了前/後」の挟み込み・順序を pin する)。responses の該当スロットは手前へ
 -- 返るため読まれない (placeholder で可)。
 local function install_git_deferred(responses, defer_pred)
-  state.git_calls = {}
-  state.git_opts = {}
-  state.deferred = nil
-  cli._set_system(function(cmd, opts, on_exit)
-    if gh_api_stub(cmd, on_exit) then
-      return
-    end
-    local idx = #state.git_calls + 1
-    table.insert(state.git_calls, cmd)
-    state.git_opts[idx] = opts
-    if defer_pred(cmd) then
-      state.deferred = on_exit
-      return
-    end
-    if responses[idx] ~= nil then
-      on_exit(responses[idx](cmd, opts))
-      return
-    end
-    if cmd[2] == 'show' then
-      on_exit { code = 0, stdout = 'base content\n', stderr = '' }
-      return
-    end
-    error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
-  end)
-  cli._set_executable(function()
-    return 1
-  end)
+  git_stub.install_queue(state, responses, { gh_api_empty = true, defer = defer_pred })
 end
 
 local function install_git_deferred_remove(responses)
@@ -273,26 +224,10 @@ local function focus_panel_file(needle)
   vim.api.nvim_win_set_cursor(pw, { row, 0 })
 end
 
--- plenary busted は describe 外のフックを持たないため helper 経由で登録する。
--- vim 組み込み関数はプロセス単一なので real 参照は require 時に 1 回捕捉する
--- (before_each ごとに見ると spy が入れ子になり after_each の復旧先が壊れる)。
-local REAL_NOTIFY = vim.notify
-local REAL_INPUT = vim.ui.input
-
-local function review_tab()
-  local st = ui_windows.state()
-  return st and st.tab or nil
-end
-
-local function head_buf_name()
-  local w = ui_windows.win 'head'
-  return w ~= nil and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)) or nil
-end
-
-local function base_buf_name()
-  local w = ui_windows.win 'base'
-  return w ~= nil and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)) or nil
-end
+local REAL_INPUT = nvim_env.REAL_INPUT
+local review_tab = session_env.review_tab
+local head_buf_name = session_env.head_buf_name
+local base_buf_name = session_env.base_buf_name
 
 -- active セッションへコメントを 1 件注入し commit_comment_change (INV-4 save +
 -- 表示再構成) まで通す (handlers/comments の UI 往復を待たない最小注入。
@@ -334,94 +269,37 @@ local function inject_outdated(body, file)
   session_handler.commit_comment_change()
 end
 
+-- plenary busted は describe 外のフックを持たないため helper 経由で登録する。
 local function use_env()
   before_each(function()
     config.reset()
     state = { notifications = {}, inputs = {}, input_answer = 'y' }
-    state.dir = vim.fn.tempname()
-    vim.fn.mkdir(state.dir, 'p')
     -- head 実ファイル窓の経路 (:edit 相当) はディスク実在が前提なので repo を作る
-    local raw = vim.fs.joinpath(state.dir, 'repo')
-    vim.fn.mkdir(raw, 'p')
-    for _, n in ipairs { 'a.lua', 'b.lua', 'c.lua', 'bin.dat' } do
-      local f = io.open(vim.fs.joinpath(raw, n), 'w')
-      f:write 'line1\nline2\n'
-      f:close()
-    end
-    state.repo = vim.uv.fs_realpath(raw) or raw
+    session_env.make_dirs(state, {
+      ['a.lua'] = 'line1\nline2\n',
+      ['b.lua'] = 'line1\nline2\n',
+      ['c.lua'] = 'line1\nline2\n',
+      ['bin.dat'] = 'line1\nline2\n',
+    })
     state.cwd0 = vim.uv.cwd()
-    paths._set_data_dir(state.dir)
-    store._set_now(function()
-      return 4321
-    end)
-    store._set_notify(function() end)
-    session_handler._set_now(function()
-      return 4321
-    end)
-    session_handler._reset()
-    vim.notify = function(msg, level)
-      -- worktree 作成中の過渡 notify は完了時に nvim_echo クリアで消える実態を
-      -- モデル化し、最終的な notifications に残さない (shown はフラグで観測)。
-      if type(msg) == 'string' and msg:find('creating the review worktree', 1, true) then
-        state.worktree_notify_shown = true
-        return
-      end
-      table.insert(state.notifications, { msg = msg, level = level })
-    end
-    vim.ui.input = function(opts, cb)
-      table.insert(state.inputs, opts)
-      cb(state.input_answer)
-    end
+    session_env.inject_store(state)
+    session_env.capture_notify(state, true)
+    session_env.answer_input(state)
     -- review://* とレビュー tab は nvim プロセス共有。前テスト残りを掃除して
     -- 隔離 tab を現在の tab にする (同名再利用の混線防止)。
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    ui_windows.reset()
-    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-      if vim.api.nvim_tabpage_is_valid(tab) then
-        vim.api.nvim_set_current_tabpage(tab)
-        pcall(vim.cmd, 'tabclose!')
-      end
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    session_env.reset_windows()
+    nvim_env.close_all_tabs()
+    nvim_env.wipe_review_buffers()
+    nvim_env.isolate_tab(state)
   end)
   after_each(function()
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    ui_windows.reset()
-    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-      if vim.api.nvim_tabpage_is_valid(tab) then
-        vim.api.nvim_set_current_tabpage(tab)
-        pcall(vim.cmd, 'tabclose!')
-      end
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
-    vim.notify = REAL_NOTIFY
-    vim.ui.input = REAL_INPUT
-    paths._set_data_dir(nil)
-    store._set_now(nil)
-    store._set_notify(nil)
-    session_handler._set_now(nil)
-    session_handler._reset()
-    config.reset()
-    cli._set_system(nil)
-    cli._set_executable(nil)
+    session_env.reset_windows()
+    nvim_env.close_all_tabs()
+    nvim_env.wipe_review_buffers()
     -- 555 化された残骸 dir を含めて掃除できるよう権限を戻す (chmod テスト側でも
     -- 戻すが、失敗経路の取りこぼし対策)
     pcall(vim.fn.system, { 'chmod', '-R', '755', state.dir })
-    vim.fn.delete(state.dir, 'rf')
+    session_env.release(state)
   end)
 end
 
@@ -3885,9 +3763,7 @@ local function install_git_deferred_diff(responses)
     end
     on_exit(responses[idx](cmd, opts))
   end)
-  cli._set_executable(function()
-    return 1
-  end)
+  git_env.executable_ok()
 end
 
 -- 保存されたセッションファイル実体のバッファ (head 窓が張る実ファイルそのもの。
