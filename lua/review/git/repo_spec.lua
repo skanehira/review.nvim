@@ -94,9 +94,12 @@ describe('git/repo switch 実行不能 (bin 不在)', function()
       repo.switch({ ref = 'feature', cwd = '/tmp' }, cb)
     end)
 
-    assert.equals(false, res.ok)
-    assert.equals('E_GIT', res.code)
-    assert.equals('git not found', res.error)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'git not found',
+      code = 'E_GIT',
+    }, res)
     assert.is_false(spawned)
   end)
 end)

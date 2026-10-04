@@ -56,7 +56,7 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
     function()
       local res = start_done('main', 'feature')
 
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       assert.same({ 'git', 'rev-parse', '--show-toplevel' }, state.git_calls[1])
       -- head==HEAD 一致 (通常経路) は作業ツリー基準の単引数形
       assert.same({ 'git', 'rev-parse', '--verify', 'feature' }, state.git_calls[2])
@@ -256,7 +256,7 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
       }
       local res = session_handler.start { base = 'main', head = 'feature' }
 
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       assert.same({
         msg = 'review.nvim: no changes (main..feature): nothing to review',
         level = vim.log.levels.INFO,
@@ -284,7 +284,7 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
 
       local res = session_handler.start { base = 'main' }
 
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       assert.same({ 'git', 'rev-parse', '--abbrev-ref', 'HEAD' }, state.git_calls[2])
       assert.equals('feature', load_saved().head)
       assert.same({ 'git', 'diff', 'main' }, state.git_calls[5])

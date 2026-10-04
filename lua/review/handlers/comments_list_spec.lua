@@ -245,7 +245,7 @@ describe('comments_list.open', function()
       add_comment { line = 2, body = 'two' }
       local res = comments_list.open()
 
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       assert.equals(w, list_win())
       assert.equals(3, #vim.api.nvim_tabpage_list_wins(review_tab()))
       assert.same({ 'a.lua:1  [c1]  one', 'a.lua:2  [c2]  two' }, list_lines())
@@ -265,7 +265,7 @@ describe('comments_list.open', function()
 
       local res = comments_list.open()
 
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       local fresh = list_win()
       assert.is_not_nil(fresh)
       assert.is_not.equals(drifted, fresh)
@@ -358,7 +358,7 @@ describe('comments_list.open の位置契約 (レビュー tab 最下部・全�
 
       local res = comments_list.open()
 
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       local w = list_win()
       assert.is_not_nil(w)
       -- 最下部: panel / base / head のどれよりも下の行に置かれる
@@ -638,7 +638,7 @@ describe('comments_list の閉じ方と窓の掃除', function()
       assert.is_nil(commentlist.row_comment(buf1, 1)) -- BufUnload で state 掃除
 
       local res = comments_list.open()
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       local buf2 = vim.api.nvim_win_get_buf(list_win())
       assert.is_not.equals(buf1, buf2)
       assert.is_not_nil(commentlist.row_comment(buf2, 1))
@@ -657,7 +657,7 @@ describe('comments_list の閉じ方と窓の掃除', function()
 
       local res = comments_list.open()
 
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       assert.equals(moved, vim.api.nvim_get_current_tabpage())
       assert.equals(list_win(), vim.api.nvim_get_current_win())
       assert.equals(1, #vim.api.nvim_tabpage_list_wins(moved))

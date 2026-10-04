@@ -102,7 +102,13 @@ usage: git diff [<options>] [<commit>]
   -u, --unified[=<n>] <n>
 ]],
     }
-    assert.equals("fatal: bad revision 'nope'", received.error)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      data = { stdout = '', code = 128 },
+      error = "fatal: bad revision 'nope'",
+      code = 'E_GIT',
+    }, received)
   end)
 
   it(
@@ -379,10 +385,13 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
 
       local res = cli.run_sync('git', { 'for-each-ref' }, { err_code = 'E_REF' })
 
-      assert.equals(false, res.ok)
-      assert.equals('E_REF', res.code)
-      assert.equals('boom1', res.error)
-      assert.equals(128, res.data.code)
+      assert.same({
+        __class = 'review.Result',
+        ok = false,
+        data = { stdout = '', code = 128 },
+        error = 'boom1',
+        code = 'E_REF',
+      }, res)
     end
   )
 
@@ -397,7 +406,13 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
 
     local res = cli.run_sync('git', { 'for-each-ref' }, { err_code = 'E_REF' })
 
-    assert.equals("error: unknown option 'nope'", res.error)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      data = { stdout = '', code = 128 },
+      error = "error: unknown option 'nope'",
+      code = 'E_REF',
+    }, res)
   end)
 
   it(
@@ -409,10 +424,14 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
 
       local res = cli.run_sync('git', { 'for-each-ref' }, { timeout_ms = 30 })
 
-      assert.equals(false, res.ok)
+      assert.same({
+        __class = 'review.Result',
+        ok = false,
+        error = 'git did not finish within the sync-run timeout',
+        code = 'E_GIT',
+      }, res)
       assert.equals(30, captured.timeout)
       assert.is_true(captured.killed ~= nil)
-      assert.equals('git did not finish within the sync-run timeout', res.error)
     end
   )
 
@@ -427,8 +446,12 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
 
     local res = cli.run_sync('git', { 'x' })
 
-    assert.equals(false, res.ok)
-    assert.equals('E_GIT', res.code)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'git not found',
+      code = 'E_GIT',
+    }, res)
     assert.equals(1, calls)
     assert.is_nil(captured.cmd)
   end)
@@ -441,7 +464,11 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
 
     local res = cli.run_sync('git', { 'x' }, { err_code = 'E_REF' })
 
-    assert.equals(false, res.ok)
-    assert.equals('E_REF', res.code)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'git failed to launch',
+      code = 'E_REF',
+    }, res)
   end)
 end)

@@ -69,12 +69,19 @@ describe('git/gh pr_view 引数組み立て', function()
         'number,title,baseRefName,headRefName,headRepositoryOwner,url,state',
       }, state.calls[1].cmd)
       assert.equals('/repo', state.calls[1].opts.cwd)
-      assert.equals(true, received.ok)
-      assert.equals('Add widget', received.data.title)
-      assert.equals(7, received.data.number)
-      assert.equals('main', received.data.baseRefName)
-      assert.equals('topic', received.data.headRefName)
-      assert.equals('OPEN', received.data.state)
+      assert.same({
+        __class = 'review.Result',
+        ok = true,
+        data = {
+          number = 7,
+          title = 'Add widget',
+          baseRefName = 'main',
+          headRefName = 'topic',
+          headRepositoryOwner = { login = 'forkguy' },
+          url = 'https://github.com/acme/demo/pull/7',
+          state = 'OPEN',
+        },
+      }, received)
     end
   )
 
@@ -221,9 +228,11 @@ describe('git/gh api 一覧系 (引数組み立て + JSON 変換)', function()
       { 'gh', 'api', 'repos/acme/demo/pulls/7/comments', '--paginate' },
       state.calls[1].cmd
     )
-    assert.equals(true, received.ok)
-    assert.equals(10, received.data[1].id)
-    assert.equals('hi', received.data[1].body)
+    assert.same({
+      __class = 'review.Result',
+      ok = true,
+      data = { { id = 10, path = 'a.lua', body = 'hi' } },
+    }, received)
   end)
 
   it('list_reviews は pulls/{n}/reviews を GET する', function()
@@ -402,8 +411,13 @@ describe('git/gh api 書き込み系 (JSON body を --input で渡す)', functio
         received = res
       end
     )
-    assert.same('E_GH', received.code)
-    assert.equals('gh is not logged in; run `gh auth login`', received.error)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      data = { stdout = '', code = 1 },
+      error = 'gh is not logged in; run `gh auth login`',
+      code = 'E_GH',
+    }, received)
   end)
 
   it('api の 404 失敗は E_PR に変換する', function()

@@ -108,7 +108,11 @@ describe('review.command 委譲', function()
         msg = 'review.nvim: unknown subcommand: zzz. ' .. USAGE,
         level = vim.log.levels.WARN,
       }, notifications[1])
-      assert.equals(false, res.ok)
+      assert.same({
+        __class = 'review.Result',
+        ok = false,
+        error = 'review.nvim: unknown subcommand: zzz',
+      }, res)
     end
   )
 
@@ -155,7 +159,11 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
 
   it(':Review start の 0 引目は usage 通知で受けつけない', function()
     local res = review.command { 'start' }
-    assert.equals(false, res.ok)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'review.nvim: use the form :Review start <base> [head]',
+    }, res)
     assert.same({
       msg = 'review.nvim: use the form :Review start <base> [head]',
       level = vim.log.levels.WARN,
@@ -164,7 +172,11 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
 
   it(':Review pr の 0 引目は usage 通知 (ハンドラを発火しない)', function()
     local res = review.command { 'pr' }
-    assert.equals(false, res.ok)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'review.nvim: use the form :Review pr <number|url>',
+    }, res)
     assert.same({
       msg = 'review.nvim: use the form :Review pr <number|url>',
       level = vim.log.levels.WARN,
@@ -180,7 +192,11 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
 
   it(':Review delete の 0 引目は usage 通知', function()
     local res = review.command { 'delete' }
-    assert.equals(false, res.ok)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'review.nvim: use the form :Review delete <id>',
+    }, res)
     assert.same(1, #notifications)
     assert.equals(vim.log.levels.WARN, notifications[1].level)
   end)
@@ -354,7 +370,7 @@ describe('Lua API resume({id}) 直接復元 (DESIGN.md「API 一覧」)', functi
       local res = review.resume { id = 'x--y' }
 
       vim.ui.select = real_select
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       assert.equals(0, selected)
       assert.equals('x--y', session_handler.active().id)
       assert.equals('open', store.load(RESUME_REPO, 'x--y').data.status)

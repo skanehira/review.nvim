@@ -98,8 +98,12 @@ describe('pr-handler 入力解析', function()
     install_git {}
     local res = pr_handler.start 'not-a-pr'
 
-    assert.equals(false, res.ok)
-    assert.equals('E_PR', res.code)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'review.nvim: cannot recognize the PR number or URL',
+      code = 'E_PR',
+    }, res)
     assert.equals(1, #state.notifications)
     assert.equals(vim.log.levels.WARN, state.notifications[1].level)
     assert.equals(0, #state.git_calls)
@@ -139,7 +143,7 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
       install_git(fork_seq(pr_json()))
 
       local res = pr_handler.start '7'
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
 
       assert.same({ 'git', 'rev-parse', '--show-toplevel' }, state.git_calls[1])
       assert.equals('gh', state.git_calls[2][1])

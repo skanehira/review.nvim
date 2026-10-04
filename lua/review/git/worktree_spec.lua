@@ -150,8 +150,13 @@ describe('git/worktree status / list', function()
         stderr = "fatal: cannot change to '/gone': No such file or directory\n",
       }
 
-      assert.equals('E_WORKTREE', received.code)
-      assert.equals(false, received.ok)
+      assert.same({
+        __class = 'review.Result',
+        ok = false,
+        data = { stdout = '', code = 128 },
+        error = "fatal: cannot change to '/gone': No such file or directory",
+        code = 'E_WORKTREE',
+      }, received)
     end
   )
 

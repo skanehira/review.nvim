@@ -498,7 +498,7 @@ describe('comments D / clear_by_command (一括削除)', function()
     local res = comments_handler.clear_by_command()
     vim.ui.input = REAL_INPUT
 
-    assert.equals(true, res.ok)
+    assert.same({ __class = 'review.Result', ok = true }, res)
     assert.equals(
       'review.nvim: delete all 2 comments? (includes outdated; deletion cannot be undone) [y/N]: ',
       state.confirm_prompt
@@ -520,7 +520,7 @@ describe('comments D / clear_by_command (一括削除)', function()
       local res = comments_handler.clear_by_command()
       vim.ui.input = REAL_INPUT
 
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       assert.same({}, state.notifications)
       assert.equals(2, #saved().comments)
     end
@@ -535,7 +535,7 @@ describe('comments D / clear_by_command (一括削除)', function()
     local res = comments_handler.clear_by_command()
     vim.ui.input = REAL_INPUT
 
-    assert.equals(true, res.ok)
+    assert.same({ __class = 'review.Result', ok = true }, res)
     assert.equals(false, confirmed)
     assert.same({
       msg = 'review.nvim: No comments',
