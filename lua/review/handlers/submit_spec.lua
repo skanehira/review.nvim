@@ -18,6 +18,12 @@ local RAW_DIFF = fixtures.RAW_DIFF_ONE_SIX
 
 local state = {}
 
+-- gh api 書き込み (JSON body を --input で渡す POST) の argv。一時ファイル名は stub が
+-- '<input>' に置き換えて記録する。
+local function post_argv(path)
+  return { 'gh', 'api', '--method', 'POST', 'repos/acme/demo/' .. path, '--input', '<input>' }
+end
+
 local function use_env()
   before_each(function()
     config.reset()
@@ -29,6 +35,8 @@ local function use_env()
       if cmd[1] == 'gh' and cmd[2] == 'api' then
         local line = table.concat(cmd, ' ')
         local payload = nil
+        -- argv は --input の一時ファイル名 (実行ごとに変わる) を '<input>' に置き換えた写し
+        local argv = vim.deepcopy(cmd)
         for i = 1, #cmd - 1 do
           if cmd[i] == '--input' then
             local fh = io.open(cmd[i + 1], 'r')
@@ -36,9 +44,10 @@ local function use_env()
               payload = vim.json.decode(fh:read '*a')
               fh:close()
             end
+            argv[i + 1] = '<input>'
           end
         end
-        table.insert(state.gh_calls, { cmd = cmd, payload = payload })
+        table.insert(state.gh_calls, { cmd = cmd, argv = argv, payload = payload })
         if line:find('/comments', 1, true) and cmd[3] == '--method' and cmd[4] == 'POST' then
           if line:find('/issues/', 1, true) then
             on_exit { code = 0, stdout = '{"id":300}', stderr = '' }
@@ -131,14 +140,17 @@ describe('handlers/submit submit_review', function()
       --       4) general を POST /issues/comments
       local calls = state.gh_calls
       assert.equals(4, #calls)
-      assert.matches('pulls/7/reviews', table.concat(calls[1].cmd, ' '))
+      assert.same(post_argv 'pulls/7/reviews', calls[1].argv)
       assert.equals('APPROVE', calls[1].payload.event)
       assert.equals('lgtm', calls[1].payload.body)
       assert.same({ { path = 'a.lua', line = 2, body = 'new note' } }, calls[1].payload.comments)
-      assert.matches('reviews/9/comments', table.concat(calls[2].cmd, ' '))
-      assert.matches('pulls/7/comments', table.concat(calls[3].cmd, ' '))
+      assert.same(
+        { 'gh', 'api', 'repos/acme/demo/pulls/7/reviews/9/comments', '--paginate' },
+        calls[2].argv
+      )
+      assert.same(post_argv 'pulls/7/comments', calls[3].argv)
       assert.equals(101, calls[3].payload.in_reply_to) -- 返信は in_reply_to (数値)
-      assert.matches('issues/7/comments', table.concat(calls[4].cmd, ' '))
+      assert.same(post_argv 'issues/7/comments', calls[4].argv)
       -- gh_id が記録される (root は review comments の対応付け / reply・general は応答)
       assert.equals(200, state.session.comments[1].gh_id)
       assert.equals(201, state.session.comments[2].gh_id)
@@ -216,9 +228,9 @@ describe('handlers/submit submit_review', function()
 
     local calls = state.gh_calls
     assert.equals(2, #calls)
-    assert.matches('pulls/7/reviews', table.concat(calls[1].cmd, ' '))
+    assert.same(post_argv 'pulls/7/reviews', calls[1].argv)
     assert.same({ event = 'COMMENT', body = 'summary only' }, calls[1].payload)
-    assert.matches('issues/7/comments', table.concat(calls[2].cmd, ' '))
+    assert.same(post_argv 'issues/7/comments', calls[2].argv)
     assert.equals(1, refreshed)
   end)
 end)
