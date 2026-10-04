@@ -1099,16 +1099,26 @@ describe('comments_list.reply_current (行スレッド / ファイルレベル)'
       }
       comments_list.open()
       focus_list_row(1)
+      comments_list._set_now(function()
+        return 4321
+      end)
       comments_list.reply_current()
       type_into_float 'reply to gh'
 
       local sess = session_handler.active()
       assert.equals(2, #sess.comments)
-      local c = sess.comments[2]
-      assert.equals('c2', c.id)
-      assert.equals('local', c.origin)
-      assert.equals(101, c.in_reply_to)
-      assert.equals(1, c.line)
+      -- 返信は local の未 push で、in_reply_to に gh 根の id を持つ (anchor なし)
+      assert.same({
+        id = 'c2',
+        file = 'a.lua',
+        line = 1,
+        end_line = 1,
+        body = 'reply to gh',
+        origin = 'local',
+        in_reply_to = 101,
+        created_at = 4321,
+        state = 'active',
+      }, sess.comments[2])
     end
   )
 
@@ -1128,14 +1138,23 @@ describe('comments_list.reply_current (行スレッド / ファイルレベル)'
       comments_list.open()
       -- 一覧は `a.lua (file)  [c1]  file note` の 1 行
       focus_list_row(1)
+      comments_list._set_now(function()
+        return 4321
+      end)
       comments_list.reply_current()
       type_into_float 'file reply'
 
-      local c = session_handler.active().comments[2]
-      assert.equals('file', c.subject_type)
-      assert.equals('local', c.origin)
-      assert.equals(202, c.in_reply_to)
-      assert.is_nil(c.line)
+      -- ファイルレベルへの返信は line / end_line を持たない
+      assert.same({
+        id = 'c2',
+        file = 'a.lua',
+        subject_type = 'file',
+        body = 'file reply',
+        origin = 'local',
+        in_reply_to = 202,
+        created_at = 4321,
+        state = 'active',
+      }, session_handler.active().comments[2])
     end
   )
 end)

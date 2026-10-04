@@ -197,8 +197,9 @@ describe('サブコマンド結線 (#5 で実装された start/close/delete/...
       ok = false,
       error = 'review.nvim: use the form :Review delete <id>',
     }, res)
-    assert.same(1, #notifications)
-    assert.equals(vim.log.levels.WARN, notifications[1].level)
+    assert.same({
+      { msg = 'review.nvim: use the form :Review delete <id>', level = vim.log.levels.WARN },
+    }, notifications)
   end)
 
   it(':Review close は active 不在で E_NOT_ACTIVE を同期で返す', function()
