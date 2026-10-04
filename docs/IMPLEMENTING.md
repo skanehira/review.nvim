@@ -56,11 +56,15 @@ nvim を起動せずに通る)。
 - `BufWritePost` に later 載せる: 窓 diff は `:w` 単体では再計算されない (PoC 実測)。
   リフレッシュは `session.lua` が自動で行うので、窓を作るとき autocmd を増やさない。
   head 窓で `:w` すると自動で diff 再計算まで走る
-- **窓再利用での set_buf 張替は古い buf が diff group に残積する** (group は全体
-  8 buffer 上限で、9 個目に E96 «Cannot diff more than 8 buffers»。実運用報告で判明)。
-  base/head 窓を使い回す `windows.bind` は `set_buf` 前に現窓 buf へ `:diffoff` して
-  刈る (窓そのものの close/tabclose は残積しない = 張替経路限定)。窓 diff を使う
-  新しい窓種族 (3 個以上の比較窓など) を足すときは同じ刈り込みを設けること
+- **窓 diff は tab の diff 集合 (hidden buf を含む) 全体と比較する**。前ファイルの buf が
+  集合に残ると、新しいペアの無変更行が変更表示になる (空行以外が全部 `DiffChange`)。
+  残留源は set_buf 張替で hidden になった前 buf と、diff 有効のまま閉じた窓の buf。
+  後者は `diffopt` に `closeoff` (既定) があれば掃除されるが、無いユーザー設定では残る
+  (既定 diffopt のテストでは再現しない点に注意)。集合は 8 buffer 上限で、9 個目に
+  E96 «Cannot diff more than 8 buffers»。`windows.bind` は set_buf の前に review 窓で
+  `:diffoff!` を打ち、集合を空にしてから組み直す。窓 diff を
+  使う新しい窓種族 (3 個以上の比較窓など) を足すときも同じ掃除を設け、テストは
+  `vim.o.diffopt = 'internal'` (closeoff なし) で書くこと
 - head バッファの extmark 残骸: `ui/commentmarks` の clear_tracked /
   `ui/keygate.uninstall` は **close・tab 消滅・縮退切り替えの全経路**で必要。
   「窓を閉じれば消える」に依赖しない (レビュー窓以外の同 buffer 窓にも見える仕様)
