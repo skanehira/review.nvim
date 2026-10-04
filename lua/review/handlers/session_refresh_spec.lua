@@ -611,17 +611,26 @@ describe('セッション一覧の追随 (persist 経路 / :Review list)', funct
     return nil
   end
 
+  -- 一覧の 1 行 (ui/list の行書式)。時刻はローカル + tz で、期待値も同じ os.date で組む。
+  local function expected_row(status, comments, updated_at)
+    return ('%s  %s  branch  main..feature  %d comments  %s'):format(
+      SLUG,
+      status,
+      comments,
+      os.date('%Y-%m-%d %H:%M %Z', updated_at)
+    )
+  end
+
   it(
     'x / コメント CRUD / R のあと、開いている一覧の comments 列と更新時刻が追随する',
     function()
       start_done('main', 'feature')
       open_sessionlist()
-      local before = assert(session_row(), '一覧にセッション行が無い')
-      assert.is_truthy(before:find(' 0 comments', 1, true), before)
+      assert.equals(expected_row('open', 0, 4321), session_row())
 
       -- コメント CRUD (commit_comment_change -> persist): comments 列が追随する
       inject_comment 'list follow thread'
-      assert.is_truthy(session_row():find(' 1 comments', 1, true), session_row())
+      assert.equals(expected_row('open', 1, 4321), session_row())
 
       -- x (toggle_viewed_current -> persist): 更新時刻列が現在時刻へ追随する
       store._set_now(function()
@@ -629,9 +638,7 @@ describe('セッション一覧の追随 (persist 経路 / :Review list)', funct
       end)
       focus_panel_file 'a.lua'
       session_handler.toggle_viewed_current()
-      local after_x = assert(session_row())
-      assert.is_truthy(after_x:find(' 1 comments', 1, true), after_x)
-      assert.is_truthy(after_x:find(os.date('%Y-%m-%d %H:%M', 5000), 1, true), after_x)
+      assert.equals(expected_row('open', 1, 5000), session_row())
 
       -- R (差分再取得 -> apply_refresh -> persist): 件数を維持したまま時刻が追随する
       store._set_now(function()
@@ -646,20 +653,18 @@ describe('セッション一覧の追随 (persist 経路 / :Review list)', funct
         RP_HEAD_MATCH[2],
       }
       fire_buf_write_post(abuf)
-      local after_r = assert(session_row())
-      assert.is_truthy(after_r:find(' 1 comments', 1, true), after_r)
-      assert.is_truthy(after_r:find(os.date('%Y-%m-%d %H:%M', 6000), 1, true), after_r)
+      assert.equals(expected_row('open', 1, 6000), session_row())
     end
   )
 
   it('q close のあと、開いている一覧の status 列が closed へ追随する', function()
     start_done('main', 'feature')
     open_sessionlist()
-    assert.is_truthy(session_row():find(' open ', 1, true), '前提: 一覧は open 行')
+    assert.equals(expected_row('open', 0, 4321), session_row())
 
     session_handler.close() -- コメント 0 件 = 確認なし
 
-    assert.is_truthy(session_row():find(' closed ', 1, true), session_row())
+    assert.equals(expected_row('closed', 0, 4321), session_row())
     -- ディスクも closed (INV 判定はメモリでなくディスク)
     assert.equals('closed', load_saved().status)
   end)

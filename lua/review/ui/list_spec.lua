@@ -51,19 +51,13 @@ describe('list.render_sessionlist', function()
         session_stub { id = 'a--b', base = 'a', head = 'b', updated_at = 1 },
       }
       local buf = list.render_sessionlist(sessions)
-      -- 更新時刻はローカル時刻 + tz 表記 (UX review F17)。TZ 絶対値は実行環境
-      -- 依存なので「先頭がローカル os.date と一致 + 行末に何か付く」で contract を
-      -- 固定し、完全一致は TZ=UTC 相当の意味内容 (日付 + 分単位) を自分で計算する。
-      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-      local prefix_a = 'a--b  open  branch  a..b  0 comments  ' .. os.date('%Y-%m-%d %H:%M', 1)
-      local prefix_z = 'z--y  open  branch  z..y  2 comments  '
-        .. os.date('%Y-%m-%d %H:%M', 1725843600)
-      assert.is_true(lines[1]:sub(1, #prefix_a) == prefix_a, lines[1])
-      assert.is_true(lines[2]:sub(1, #prefix_z) == prefix_z, lines[2])
-      -- tz トークン (非空の後末) を pin: tz 付けを外す変異で落ちる (UX review F17
-      -- は「tz 表記なし UTC」が問題だったため、表記自体を検証する)
-      assert.is_true(lines[1]:match '^.- %d%d:%d%d %S+$' ~= nil, lines[1])
-      assert.is_true(lines[2]:match '^.- %d%d:%d%d %S+$' ~= nil, lines[2])
+      -- 更新時刻はローカル時刻 + tz 表記 (UX review F17: tz 表記なしの UTC が誤読を
+      -- 招いた)。TZ の絶対値は実行環境依存なので、期待値も同じ os.date (%Z 込み) で
+      -- 組んで行全体を一致させる (TZ に依らず、tz 表記を外す変異でも落ちる)。
+      assert.same({
+        'a--b  open  branch  a..b  0 comments  ' .. os.date('%Y-%m-%d %H:%M %Z', 1),
+        'z--y  open  branch  z..y  2 comments  ' .. os.date('%Y-%m-%d %H:%M %Z', 1725843600),
+      }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
       assert.equals('review-list', vim.bo[buf].filetype)
     end
   )

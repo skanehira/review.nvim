@@ -189,7 +189,11 @@ describe('sessions_list 追随 (実 delete / refresh / 複数窓 winbar)', funct
         #lines,
         '削除後に一覧が再 render されていない: ' .. vim.inspect(lines)
       )
-      assert.is_truthy(lines[1]:find('a--a', 1, true), lines[1])
+      local kept = store.load(state.repo, 'a--a').data
+      assert.equals(
+        'a--a  closed  branch  a..a  0 comments  ' .. os.date('%Y-%m-%d %H:%M %Z', kept.updated_at),
+        lines[1]
+      )
       assert.equals('review.nvim · 1 session', vim.w[vim.api.nvim_get_current_win()].review_winbar)
       -- 実 delete: メモリでなくディスクの JSON が消えている (INV 判定)
       assert.is_true(vim.uv.fs_stat(paths.session_file(state.repo, 'b--b')) == nil)
