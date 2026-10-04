@@ -7,10 +7,8 @@ vim.ui.input = function(_, cb)
   cb(answers[idx] or 'y')
 end
 
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
 
 local wt_root = assert(os.getenv 'REVIEW_E2E_WT', 'REVIEW_E2E_WT 未設定')
 local json = assert(os.getenv 'REVIEW_E2E_JSON', 'REVIEW_E2E_JSON 未設定')

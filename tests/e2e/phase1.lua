@@ -14,26 +14,11 @@
 local windows = require 'review.ui.windows'
 local filepanel = require 'review.ui.filepanel'
 
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
-
-local function wait_for(pred, why)
-  if not vim.wait(8000, pred, 20) then
-    fail('timeout: ' .. why)
-  end
-end
-
-local function realpath(p)
-  return vim.uv.fs_realpath(p) or p
-end
-
-local function expect(cond, why)
-  if not cond then
-    fail(why)
-  end
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
+local wait_for = e2e.wait_for
+local expect = e2e.expect
+local realpath = e2e.realpath
 
 local function win_buf_name(w)
   return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))

@@ -1,10 +1,8 @@
 -- E2E delete fixture (DoD シナリオ 5 前半)。pr-7 を開始して clean close する。
 -- close は worktree を残す設計 (keep) なので、dir 実在 + status=closed を assert して
 -- 終了する (dir + ref + JSON の一掃は後続 pr6 の :Review delete が担う)。
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
 
 local wt_root = assert(os.getenv 'REVIEW_E2E_WT', 'REVIEW_E2E_WT 未設定')
 

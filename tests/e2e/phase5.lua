@@ -19,16 +19,9 @@
 local windows = require 'review.ui.windows'
 local filepanel = require 'review.ui.filepanel'
 
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
-
-local function wait_for(pred, why)
-  if not vim.wait(8000, pred, 20) then
-    fail('timeout: ' .. why)
-  end
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
+local wait_for = e2e.wait_for
 
 -- 編集 float 確定後の focus が head 窓へ戻っていることの検査 (戻りが遅い場合の
 -- y 打鍵の取りこぼしを timeout ではなくここで失敗させる)。

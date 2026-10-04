@@ -8,23 +8,10 @@
 
 local windows = require 'review.ui.windows'
 
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
-
-local function wait_for(pred, why)
-  if not vim.wait(8000, pred, 20) then
-    fail('timeout: ' .. why)
-  end
-end
-
--- 比較は symlink 解決後の実パスで行う (macOS /var -> /private/var)。gsub の
--- 多値戻りを実関数に直接渡さない。
-local function realpath(p)
-  local s = (p or ''):gsub('[\r\n]+$', '')
-  return vim.uv.fs_realpath(s) or s
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
+local wait_for = e2e.wait_for
+local realpath = e2e.realpath
 
 -- worktree dir はレビュー開始時に作られる (起動時点では未存在)。realpath は
 -- 生成後に解決する必要があるので raw のまま保持し、比較箇所で lazy resolve する。
