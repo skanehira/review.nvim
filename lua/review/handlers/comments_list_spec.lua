@@ -5,16 +5,17 @@
 -- 折畳・絞り込み・list 表示は panel の view state 側で動かし、一覧の表示順が
 -- { collapsed = {}, mode = 'tree' } 解決 (折畳無視・tree 固定) であることを pin する。
 -- e の永続化はディスクの session JSON を読んで判定する (INV-4)。
-local cli = require 'review.git.cli'
 local commentlist = require 'review.ui.commentlist'
 local comments_list = require 'review.handlers.comments_list'
 local comments_handler = require 'review.handlers.comments'
 local config = require 'review.config'
-local paths = require 'review.store.paths'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local ui_windows = require 'review.ui.windows'
 local fixtures = require 'helpers.fixtures'
+local git_stub = require 'helpers.git_stub'
+local nvim_env = require 'helpers.nvim_env'
+local session_env = require 'helpers.session_env'
 
 local SLUG = 'main--feature'
 local COMMENTS_BUF = 'review://comments/' .. SLUG
@@ -73,32 +74,15 @@ local OTHER_SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 
 local state = {}
 
-local REAL_NOTIFY = vim.notify
-local REAL_INPUT = vim.ui.input
-
 -- cli._set_system 注入: 実行順に responses[idx] を同期で on_exit する。
 -- show (base scratch / 縮退 head の充填) は path に応じた既定応答。
 local function install_git(responses)
-  state.git_calls = {}
-  cli._set_system(function(cmd, opts, on_exit)
-    local idx = #state.git_calls + 1
-    table.insert(state.git_calls, cmd)
-    if responses[idx] ~= nil then
-      on_exit(responses[idx](cmd, opts))
-      return
-    end
-    if cmd[2] == 'show' then
+  git_stub.install_queue(state, responses, {
+    show_stdout = function(cmd)
       local spec = cmd[3] or ''
-      local body = spec:find('src/deep/new.lua', 1, true) and 'deep1\ndeep2\ndeep3\n'
-        or 'line1\nline2\n'
-      on_exit { code = 0, stdout = body, stderr = '' }
-      return
-    end
-    error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
-  end)
-  cli._set_executable(function()
-    return 1
-  end)
+      return spec:find('src/deep/new.lua', 1, true) and 'deep1\ndeep2\ndeep3\n' or 'line1\nline2\n'
+    end,
+  })
 end
 
 local top_ok = function()
@@ -123,84 +107,29 @@ local function use_env()
   before_each(function()
     config.reset()
     state = { notifications = {}, input_answer = 'y', git_calls = {} }
-    state.dir = vim.fn.tempname()
-    vim.fn.mkdir(state.dir, 'p')
-    local raw = vim.fs.joinpath(state.dir, 'repo')
-    vim.fn.mkdir(vim.fs.joinpath(raw, 'src/deep'), 'p')
-    local files = {
+    session_env.make_dirs(state, {
       ['a.lua'] = 'line1\nline2\n',
       ['b.lua'] = 'line1\nline2\n',
       ['bin.dat'] = 'binary\n',
       ['src/deep/new.lua'] = 'deep1\n',
-    }
-    for name, body in pairs(files) do
-      local f = io.open(vim.fs.joinpath(raw, name), 'w')
-      f:write(body)
-      f:close()
-    end
-    state.repo = vim.uv.fs_realpath(raw) or raw
-    paths._set_data_dir(state.dir)
-    store._set_now(function()
-      return 4321
-    end)
-    store._set_notify(function() end)
-    session_handler._set_now(function()
-      return 4321
-    end)
-    session_handler._reset()
-    vim.notify = function(msg, level)
-      table.insert(state.notifications, { msg = msg, level = level })
-    end
+    })
+    session_env.inject_store(state)
+    session_env.capture_notify(state)
     vim.ui.input = function(opts, cb)
       table.insert(state.notifications, opts)
       cb(state.input_answer)
     end
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    ui_windows.reset()
-    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-      if vim.api.nvim_tabpage_is_valid(tab) then
-        vim.api.nvim_set_current_tabpage(tab)
-        pcall(vim.cmd, 'tabclose!')
-      end
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    session_env.reset_windows()
+    nvim_env.close_all_tabs()
+    nvim_env.wipe_review_buffers()
+    nvim_env.isolate_tab(state)
   end)
   after_each(function()
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    ui_windows.reset()
-    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-      if vim.api.nvim_tabpage_is_valid(tab) then
-        vim.api.nvim_set_current_tabpage(tab)
-        pcall(vim.cmd, 'tabclose!')
-      end
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
-    vim.notify = REAL_NOTIFY
-    vim.ui.input = REAL_INPUT
-    paths._set_data_dir(nil)
-    store._set_now(nil)
-    store._set_notify(nil)
-    session_handler._set_now(nil)
+    session_env.reset_windows()
+    nvim_env.close_all_tabs()
+    nvim_env.wipe_review_buffers()
     comments_list._set_now(nil)
-    session_handler._reset()
-    config.reset()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    vim.fn.delete(state.dir, 'rf')
+    session_env.release(state)
   end)
 end
 
@@ -244,10 +173,7 @@ local function add_comment(overrides)
   return c
 end
 
-local function review_tab()
-  local st = ui_windows.state()
-  return st and st.tab or nil
-end
+local review_tab = session_env.review_tab
 
 local function list_win()
   return commentlist.find_window(SLUG)
@@ -266,10 +192,7 @@ local function focus_list_row(row)
   vim.api.nvim_win_set_cursor(w, { row, 0 })
 end
 
-local function head_buf_name()
-  local w = ui_windows.win 'head'
-  return w ~= nil and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)) or nil
-end
+local head_buf_name = session_env.head_buf_name
 
 local function panel_row_for(kind, path)
   local filepanel = require 'review.ui.filepanel'
