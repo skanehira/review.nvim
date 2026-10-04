@@ -6,6 +6,7 @@
 -- 併存・viewed 混在・filter 併用) を全体一致で pin する。
 local config = require 'review.config'
 local filepanel = require 'review.ui.filepanel'
+local nvim_env = require 'helpers.nvim_env'
 
 local SLUG = 'main--feature'
 local BUF_NAME = 'review://sidebar/' .. SLUG
@@ -46,21 +47,13 @@ local state = {}
 local function use_env()
   before_each(function()
     config.reset()
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
     state.win = vim.api.nvim_get_current_win()
   end)
   after_each(function()
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
+    nvim_env.wipe_review_buffers()
     filepanel._set_icon_resolver(nil)
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
+    nvim_env.close_tab(state.tab)
     state.win = nil
   end)
 end

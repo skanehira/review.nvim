@@ -11,6 +11,7 @@
 --   * role は窓変数 gate + 表示 buf 指紋から導く (別窓で同じ buf を見せても head 不成立)
 local windows = require 'review.ui.windows'
 local chrome = require 'review.ui.chrome'
+local nvim_env = require 'helpers.nvim_env'
 
 local OTHER_DIR = vim.uv.fs_realpath '/tmp' or '/tmp'
 
@@ -29,9 +30,7 @@ local state = {}
 local function use_env()
   before_each(function()
     scratch_bufs = {}
-    state.old_notify = vim.notify
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
   end)
   after_each(function()
     if windows.state() ~= nil then
@@ -43,21 +42,14 @@ local function use_env()
         pcall(vim.cmd, 'tabclose!')
       end
     end
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
+    nvim_env.close_tab(state.tab)
+    nvim_env.wipe_review_buffers()
     for _, buf in ipairs(scratch_bufs) do
       if vim.api.nvim_buf_is_valid(buf) then
         vim.api.nvim_buf_delete(buf, { force = true })
       end
     end
-    vim.notify = state.old_notify
+    vim.notify = nvim_env.REAL_NOTIFY
     windows.reset()
     require('review.config').reset()
   end)

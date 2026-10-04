@@ -7,8 +7,9 @@
 -- nvim_input/feedkeys の typeahead が消費されないため :normal が唯一の投入経路
 -- (DESIGN.md「既知の制約」)。
 local input = require 'review.ui.input'
+local nvim_env = require 'helpers.nvim_env'
 
-local CY = vim.api.nvim_replace_termcodes('<C-y>', true, false, true)
+local CY = nvim_env.CY
 local CR = vim.api.nvim_replace_termcodes('<CR>', true, true, true)
 local ESC = vim.api.nvim_replace_termcodes('<Esc>', true, false, true)
 
@@ -19,23 +20,18 @@ local state = {}
 -- plenary busted は describe 外のフックを持たない (init_spec.lua と同じ helper 方式)。
 local function use_isolated_tabpage()
   before_each(function()
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
     state.confirmed = {}
     state.notifications = {}
-    state.real_notify = vim.notify
     vim.notify = function(msg, level)
       table.insert(state.notifications, { msg = msg, level = level })
     end
     input._set_now(nil)
   end)
   after_each(function()
-    vim.notify = state.real_notify
+    vim.notify = nvim_env.REAL_NOTIFY
     input._set_now(nil)
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
+    nvim_env.close_tab(state.tab)
   end)
 end
 

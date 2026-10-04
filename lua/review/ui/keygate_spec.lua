@@ -10,6 +10,7 @@ local config = require 'review.config'
 local keygate = require 'review.ui.keygate'
 local windows = require 'review.ui.windows'
 local session_handler = require 'review.handlers.session'
+local nvim_env = require 'helpers.nvim_env'
 
 local state = {}
 
@@ -19,12 +20,10 @@ local function use_env()
   before_each(function()
     config.reset()
     state = { notifications = {} }
-    state.REAL_NOTIFY = vim.notify
     vim.notify = function(msg, level)
       table.insert(state.notifications, { msg = msg, level = level })
     end
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
     state.user_win = vim.api.nvim_get_current_win()
   end)
   after_each(function()
@@ -33,12 +32,8 @@ local function use_env()
     end
     state.finally = nil
     windows.close()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
-    state.REAL_NOTIFY = state.REAL_NOTIFY or vim.notify
-    vim.notify = state.REAL_NOTIFY
+    nvim_env.close_tab(state.tab)
+    vim.notify = nvim_env.REAL_NOTIFY
     config.reset()
     windows.reset()
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do

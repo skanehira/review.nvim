@@ -4,6 +4,7 @@
 local list = require 'review.ui.list'
 local chrome = require 'review.ui.chrome'
 local windows = require 'review.ui.windows'
+local nvim_env = require 'helpers.nvim_env'
 
 local function session_stub(overrides)
   local s = {
@@ -31,15 +32,11 @@ local state = {}
 
 local function use_env()
   before_each(function()
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
     state.win = vim.api.nvim_get_current_win()
   end)
   after_each(function()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
+    nvim_env.close_tab(state.tab)
   end)
 end
 
