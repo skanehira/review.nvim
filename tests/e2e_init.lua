@@ -16,6 +16,8 @@ end
 local this_file = debug.getinfo(1, 'S').source:sub(2)
 local repo_root = vim.fs.dirname(vim.fs.dirname(this_file))
 vim.opt.runtimepath:append(repo_root)
+-- シナリオ共有ヘルパー (tests/helpers/e2e.lua) を require 'helpers.<name>' で読む。
+package.path = vim.fs.joinpath(repo_root, 'tests') .. '/?.lua;' .. package.path
 vim.opt.swapfile = false
 vim.opt.shadafile = 'NONE'
 

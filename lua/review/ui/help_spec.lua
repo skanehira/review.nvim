@@ -3,6 +3,7 @@
 -- 表示行は `<key> <説明>` の 1 行フォーマット (詳細は help.lua)。
 local config = require 'review.config'
 local help = require 'review.ui.help'
+local nvim_env = require 'helpers.nvim_env'
 
 local ESC = vim.api.nvim_replace_termcodes('<Esc>', true, false, true)
 
@@ -12,14 +13,10 @@ local state = {}
 local function use_isolated_tabpage()
   before_each(function()
     config.reset()
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
   end)
   after_each(function()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
-    end
+    nvim_env.close_tab(state.tab)
   end)
 end
 
