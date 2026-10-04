@@ -3,13 +3,14 @@
 -- pending の一般コメントが追加され save (INV-4)、(3) branch は WARN、q で閉じる。
 local cli = require 'review.git.cli'
 local config = require 'review.config'
-local paths = require 'review.store.paths'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local pr_chat = require 'review.handlers.pr_chat'
 local prchat = require 'review.ui.prchat'
-local ui_windows = require 'review.ui.windows'
 local fixtures = require 'helpers.fixtures'
+local git_env = require 'helpers.git_env'
+local nvim_env = require 'helpers.nvim_env'
+local session_env = require 'helpers.session_env'
 
 local SLUG = 'main--feature'
 
@@ -17,32 +18,14 @@ local HEAD_TEXT = fixtures.HEAD_TEXT_ONE_SIX
 
 local RAW_DIFF = fixtures.RAW_DIFF_ONE_SIX
 
-local REAL_INPUT = vim.ui.input
-local REAL_NOTIFY = vim.notify
-
 local state = {}
 
 local function use_env()
   before_each(function()
     config.reset()
     state = { notifications = {} }
-    state.dir = vim.fn.tempname()
-    vim.fn.mkdir(state.dir, 'p')
-    state.repo = vim.fs.joinpath(state.dir, 'repo')
-    vim.fn.mkdir(state.repo, 'p')
-    state.repo = vim.uv.fs_realpath(state.repo) or state.repo
-    local f = io.open(vim.fs.joinpath(state.repo, 'a.lua'), 'w')
-    f:write(HEAD_TEXT)
-    f:close()
-    paths._set_data_dir(state.dir)
-    store._set_now(function()
-      return 4321
-    end)
-    store._set_notify(function() end)
-    session_handler._set_now(function()
-      return 4321
-    end)
-    session_handler._reset()
+    session_env.make_dirs(state, { ['a.lua'] = HEAD_TEXT })
+    session_env.inject_store(state)
     cli._set_system(function(cmd, _opts, on_exit)
       if cmd[1] == 'gh' and cmd[2] == 'api' then
         on_exit { code = 0, stdout = '[]', stderr = '' }
@@ -56,13 +39,9 @@ local function use_env()
         on_exit { code = 0, stdout = RAW_DIFF, stderr = '' }
       end
     end)
-    cli._set_executable(function()
-      return 1
-    end)
+    git_env.executable_ok()
     state.tab = vim.api.nvim_get_current_tabpage()
-    vim.notify = function(msg, level)
-      table.insert(state.notifications, { msg = msg, level = level })
-    end
+    session_env.capture_notify(state)
     session_handler.start { base = 'main', head = 'feature' }
     local sess = session_handler.active()
     sess.mode = 'pr'
@@ -80,34 +59,11 @@ local function use_env()
     state.session = sess
   end)
   after_each(function()
-    vim.ui.input = function(_, cb)
-      cb 'y'
-    end
-    session_handler.close()
-    vim.ui.input = REAL_INPUT
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    ui_windows.reset()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
-    vim.notify = REAL_NOTIFY
-    paths._set_data_dir(nil)
-    store._set_now(nil)
-    store._set_notify(nil)
-    session_handler._set_now(nil)
-    session_handler._reset()
-    config.reset()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    vim.fn.delete(state.dir, 'rf')
+    session_env.close_session()
+    session_env.reset_windows()
+    nvim_env.close_tab(state.tab)
+    nvim_env.wipe_review_buffers()
+    session_env.release(state)
   end)
 end
 

@@ -10,19 +10,18 @@
 local cli = require 'review.git.cli'
 local config = require 'review.config'
 local comments_handler = require 'review.handlers.comments'
-local paths = require 'review.store.paths'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local ui_windows = require 'review.ui.windows'
 local fixtures = require 'helpers.fixtures'
+local git_env = require 'helpers.git_env'
+local nvim_env = require 'helpers.nvim_env'
+local session_env = require 'helpers.session_env'
 
 local SLUG = 'main--feature'
 
--- プロセス単一の vim 組み込みを require 時に 1 回捕捉 (before_each ごとに見ると
--- spy が入れ子になり after_each の復旧先が壊れる — session_spec と同型)。
-local REAL_NOTIFY = vim.notify
-local REAL_INPUT = vim.ui.input
-local CY = vim.api.nvim_replace_termcodes('<C-y>', true, false, true)
+local REAL_INPUT = nvim_env.REAL_INPUT
+local CY = nvim_env.CY
 
 -- head (作業ツリー) の a.lua = new 側 5 行。実 repo dir の disk と同じ内容に
 -- する (head 実ファイル窓は :edit 相当の実在ファイル経路なので磁盘実在が前提)。
@@ -36,27 +35,12 @@ local function use_env()
   before_each(function()
     config.reset()
     state = { notifications = {}, inputs = {}, input_answer = 'y' }
-    state.dir = vim.fn.tempname()
-    vim.fn.mkdir(state.dir, 'p')
     -- 実 repo に見せた dir (head 実ファイルがディスクに実在する = 通常経路)
-    state.repo = vim.fs.joinpath(state.dir, 'repo')
-    vim.fn.mkdir(state.repo, 'p')
-    state.repo = vim.uv.fs_realpath(state.repo) or state.repo
-    local f = io.open(vim.fs.joinpath(state.repo, 'a.lua'), 'w')
-    f:write(HEAD_TEXT)
-    f:close()
-    paths._set_data_dir(state.dir)
-    store._set_now(function()
-      return 4321
-    end)
-    store._set_notify(function() end)
-    session_handler._set_now(function()
-      return 4321
-    end)
+    session_env.make_dirs(state, { ['a.lua'] = HEAD_TEXT })
+    session_env.inject_store(state)
     comments_handler._set_now(function()
       return 4321
     end)
-    session_handler._reset()
     cli._set_system(function(cmd, _opts, on_exit)
       if cmd[2] == 'rev-parse' then
         on_exit { code = 0, stdout = state.repo .. '\n', stderr = '' }
@@ -67,13 +51,9 @@ local function use_env()
         on_exit { code = 0, stdout = RAW_DIFF, stderr = '' }
       end
     end)
-    cli._set_executable(function()
-      return 1
-    end)
+    git_env.executable_ok()
     state.tab = vim.api.nvim_get_current_tabpage()
-    vim.notify = function(msg, level)
-      table.insert(state.notifications, { msg = msg, level = level })
-    end
+    session_env.capture_notify(state)
     session_handler.start { base = 'main', head = 'feature' }
     state.session = session_handler.active()
     -- head 実ファイル窓 (専有 tab 開通後 focus == head 窓)
@@ -83,39 +63,12 @@ local function use_env()
     -- 恒等行: head バッファの行 N = new 側行 N (1 one / 2 two / 3 three / 4 four / 5 six)
   end)
   after_each(function()
-    -- close はコメントあり確認として vim.ui.input を引く (headless の既定 provider は
-    -- 無限待ちになるため 'y' 応答に戻してから閉じる)。
-    vim.ui.input = function(_, cb)
-      cb 'y'
-    end
-    session_handler.close()
-    vim.ui.input = REAL_INPUT
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    ui_windows.reset()
-    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-      if vim.api.nvim_tabpage_is_valid(tab) then
-        vim.api.nvim_set_current_tabpage(tab)
-        pcall(vim.cmd, 'tabclose!')
-      end
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
-    vim.notify = REAL_NOTIFY
-    paths._set_data_dir(nil)
-    store._set_now(nil)
-    store._set_notify(nil)
-    session_handler._set_now(nil)
+    session_env.close_session()
+    session_env.reset_windows()
+    nvim_env.close_all_tabs()
+    nvim_env.wipe_review_buffers()
     comments_handler._set_now(nil)
-    session_handler._reset()
-    config.reset()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    vim.fn.delete(state.dir, 'rf')
+    session_env.release(state)
   end)
 end
 
