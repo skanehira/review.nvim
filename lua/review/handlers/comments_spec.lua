@@ -106,15 +106,16 @@ describe('comments c (作成 / head バッファ恒等行)', function()
 
       local sess = saved()
       assert.equals(1, #sess.comments)
-      local c = sess.comments[1]
-      assert.equals('c1', c.id)
-      assert.equals('a.lua', c.file)
-      assert.equals(2, c.line)
-      assert.equals(2, c.end_line)
-      assert.equals('use map here', c.body)
-      assert.same({ before = 'one', line = 'two', after = 'three' }, c.anchor)
-      assert.equals(4321, c.created_at)
-      assert.equals('active', c.state)
+      assert.same({
+        id = 'c1',
+        file = 'a.lua',
+        line = 2,
+        end_line = 2,
+        body = 'use map here',
+        anchor = { before = 'one', line = 'two', after = 'three' },
+        created_at = 4321,
+        state = 'active',
+      }, sess.comments[1])
     end
   )
 
@@ -124,9 +125,17 @@ describe('comments c (作成 / head バッファ恒等行)', function()
     comments_handler.add_visual_marks()
     type_into_float 'range note'
 
-    local c = saved().comments[1]
-    assert.equals(2, c.line)
-    assert.equals(4, c.end_line)
+    -- anchor は範囲の開始行 (two) 基準
+    assert.same({
+      id = 'c1',
+      file = 'a.lua',
+      line = 2,
+      end_line = 4,
+      body = 'range note',
+      anchor = { before = 'one', line = 'two', after = 'three' },
+      created_at = 4321,
+      state = 'active',
+    }, saved().comments[1])
   end)
 
   it(
@@ -141,9 +150,16 @@ describe('comments c (作成 / head バッファ恒等行)', function()
 
       comments_handler.add_visual_marks()
       type_into_float 'live range'
-      local c = saved().comments[1]
-      assert.equals(1, c.line)
-      assert.equals(2, c.end_line)
+      assert.same({
+        id = 'c1',
+        file = 'a.lua',
+        line = 1,
+        end_line = 2,
+        body = 'live range',
+        anchor = { before = vim.NIL, line = 'one', after = 'two' },
+        created_at = 4321,
+        state = 'active',
+      }, saved().comments[1])
 
       -- Ctrl-V (blockwise) も live 位置から行範囲を取る
       local cv = vim.api.nvim_replace_termcodes('<C-v>', true, false, true)
@@ -849,15 +865,18 @@ describe('comments r (返信 / local pending)', function()
 
       local comments = saved().comments
       assert.equals(2, #comments)
-      local c = comments[2]
-      assert.equals('c2', c.id)
-      assert.equals('a.lua', c.file)
-      assert.equals(2, c.line)
-      assert.equals(2, c.end_line)
-      assert.equals('my reply', c.body)
-      assert.equals('local', c.origin)
-      assert.equals(101, c.in_reply_to)
-      assert.is_nil(c.gh_id)
+      -- 返信は local の未 push (gh_id なし) で、in_reply_to に gh 根の id を持つ
+      assert.same({
+        id = 'c2',
+        file = 'a.lua',
+        line = 2,
+        end_line = 2,
+        body = 'my reply',
+        origin = 'local',
+        in_reply_to = 101,
+        created_at = 4321,
+        state = 'active',
+      }, comments[2])
     end
   )
 
