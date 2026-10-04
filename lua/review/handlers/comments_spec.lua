@@ -180,41 +180,28 @@ describe('comments c (作成 / head バッファ恒等行)', function()
     type_into_float 'inline thread'
 
     local ns = vim.api.nvim_get_namespaces().review_comment
-    assert.is_true(ns ~= nil)
-    local found_cnt, found_body = false, false
-    local head_marks = vim.api.nvim_buf_get_extmarks(state.head_buf, ns, 0, -1, { details = true })
-    for _, m in ipairs(head_marks) do
-      if m[2] == 2 then
-        -- chunk は get_extmarks strict 既定 ([text, hl]) で返る (AGENTS virt_text
-        -- chunk 教訓の get 側形状)。text = chunk[1] を直接見る。
-        local function text_of(chunk)
-          if type(chunk) == 'table' then
-            local inner = chunk[1]
-            return type(inner) == 'table' and inner[1] or inner
-          end
-          return chunk
-        end
-        local function line_text(chunks)
-          local parts = {}
-          for _, chunk in ipairs(chunks or {}) do
-            parts[#parts + 1] = text_of(chunk)
-          end
-          return table.concat(parts)
-        end
-        local vt = m[4].virt_text and text_of(m[4].virt_text[1]) or ''
-        if type(vt) == 'string' and vt:find('\u{EA6B}', 1, true) ~= nil then
-          found_cnt = true
-        end
-        for _, vl in ipairs(m[4].virt_lines or {}) do
-          local t = line_text(vl)
-          if type(t) == 'string' and t:find('inline thread', 1, true) ~= nil then
-            found_body = true
+    -- 表示 mark (件数 eol + 行下スレッド) の行・件数表示・箱の中身行 (罫線と右 pad を
+    -- 除く。実窓では箱幅 = 窓幅なので pad は見ない)
+    local shown = {}
+    local marks = vim.api.nvim_buf_get_extmarks(state.head_buf, ns, 0, -1, { details = true })
+    for _, m in ipairs(marks) do
+      if m[4].virt_text ~= nil then
+        local rows = {}
+        for _, line in ipairs(m[4].virt_lines or {}) do
+          if #line >= 4 then
+            rows[#rows + 1] = line[2][1]
           end
         end
+        shown[#shown + 1] = { row = m[2], virt_text = m[4].virt_text, rows = rows }
       end
     end
-    assert.is_true(found_cnt, '件数 eol mark が無い')
-    assert.is_true(found_body, '行下スレッド本文が無い')
+    assert.same({
+      {
+        row = 2,
+        virt_text = { { ' \u{EA6B} 1', 'ReviewPanelComment' } },
+        rows = { '  [c1]', 'inline thread' },
+      },
+    }, shown)
   end)
 
   it(
