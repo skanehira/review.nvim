@@ -11,9 +11,12 @@ describe('usermsg.git_ref_error', function()
       "fatal: ambiguous argument 'nope': unknown revision or path not in the working tree",
       "fatal: invalid object name 'nope'",
     } do
-      local msg = usermsg.git_ref_error(raw)
-      assert.is_true(msg:find('"nope"', 1, true) ~= nil, raw .. ' -> ' .. msg)
-      assert.is_true(msg:find('<Tab>', 1, true) ~= nil, raw .. ' -> ' .. msg)
+      assert.equals(
+        'cannot resolve the reviewed ref: "nope". specify an existing branch/commit '
+          .. '(base/head args of start are <Tab>-completable)',
+        usermsg.git_ref_error(raw),
+        raw
+      )
     end
   end)
 
@@ -34,9 +37,10 @@ describe('usermsg.gh_error', function()
   end)
 
   it('PR 解決不能は番号を添えて gh pr list 導線へ', function()
-    local msg = usermsg.gh_error 'Could not resolve any pull request #42'
-    assert.is_true(msg:find('42', 1, true) ~= nil)
-    assert.is_true(msg:find('gh pr list', 1, true) ~= nil)
+    assert.equals(
+      'PR #42 not found. use a number (or :Review pr <URL>) that gh pr list confirms',
+      usermsg.gh_error 'Could not resolve any pull request #42'
+    )
   end)
 
   it('既知パターンの gh 失敗 (未ログイン等) は原文 passthrough', function()
