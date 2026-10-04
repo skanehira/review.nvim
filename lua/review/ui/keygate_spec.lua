@@ -594,7 +594,9 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
             key .. ' の fallback が built-in へ返らない'
           )
         end
-        nvim_env.drain_scheduled()
+        nvim_env.settle(function()
+          return #spy_msgs() > 0
+        end)
         assert.same({}, spy_msgs(), key .. ' が gate 不成立窓で発火した')
       end
     end
@@ -607,9 +609,11 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       vim.api.nvim_set_current_win(state.user_win)
       local res = press(head_buf, 'q', state.user_win)
       -- 戻り値 = 元キーそのもの (built-in 再実行用)。schedule は予約されていない
-      -- ことが契約なので、予約済みの schedule を全て流した後も SPY が出ないことを見る。
+      -- ことが契約なので、予約済みの schedule と timer を待った後も SPY が出ないことを見る。
       assert.equals('q', res)
-      nvim_env.drain_scheduled()
+      nvim_env.settle(function()
+        return #spy_msgs() > 0
+      end)
       assert.same({}, spy_msgs())
     end
   )

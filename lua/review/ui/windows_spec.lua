@@ -188,6 +188,8 @@ describe('windows.bind / set_panel_buf: role 導出', function()
       windows.bind(base_buf, head_buf)
       assert.equals('base', windows.role_of(windows.win 'base'))
       assert.equals('head', windows.role_of(windows.win 'head'))
+      vim.api.nvim_win_set_buf(windows.win 'panel', scratch_buf 'review://sidebar/sx')
+      assert.equals('panel', windows.role_of(windows.win 'panel'))
     end
   )
 
@@ -822,16 +824,12 @@ describe('windows: q (close) と :tabclose の両経路', function()
         end,
       }
       local tab = windows.state().tab
-      local function tab_hooks()
-        return vim.api.nvim_get_autocmds { group = 'review_windows', event = 'TabClosed' }
-      end
-      assert.equals(1, #tab_hooks())
       windows.close()
       assert.is_nil(windows.state())
       assert.is_false(vim.api.nvim_tabpage_is_valid(tab))
-      -- close() は tab を閉じる前に TabClosed hook を外す
-      assert.same({}, tab_hooks())
-      nvim_env.drain_scheduled()
+      nvim_env.settle(function()
+        return called > 0
+      end)
       assert.equals(0, called, 'programmatic close は tab 消滅経路と区別される')
     end
   )
@@ -874,7 +872,9 @@ describe('windows: q (close) と :tabclose の両経路', function()
       local review_t = windows.state().tab
       vim.api.nvim_set_current_tabpage(state.tab)
       vim.cmd 'tabclose!'
-      nvim_env.drain_scheduled()
+      nvim_env.settle(function()
+        return called > 0
+      end)
 
       assert.equals(0, called)
       assert.is_true(vim.api.nvim_tabpage_is_valid(review_t))

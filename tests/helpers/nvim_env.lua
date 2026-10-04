@@ -55,6 +55,15 @@ function M.drain_scheduled()
   )
 end
 
+--- 「発火しないこと」を確かめる前の待ち。予約済みの vim.schedule を drain で全て流し
+--- (決定論)、続けて timer (vim.defer_fn / uv timer) 経由の遅延発火も拾えるよう、
+--- fired() が真になったら即抜ける上限付きの待ちを ms だけ続ける。
+--- 戻り値: 待ちの間に fired() が真になったか (呼び出し側は直後の正の比較で判定する)。
+function M.settle(fired, ms)
+  M.drain_scheduled()
+  return vim.wait(ms or 100, fired, 5)
+end
+
 --- 隔離 tabpage を作って current にし、state.tab に記録して返す。
 function M.isolate_tab(state)
   vim.cmd 'tabnew'

@@ -120,6 +120,10 @@ describe('handlers/pr_chat open / reply / refresh', function()
     local wins_before = #vim.api.nvim_tabpage_list_wins(0)
     local session_before = vim.deepcopy(session_handler.active())
     local saved_before = store.load(state.repo, state.session.id).data
+    assert.is_not_nil(
+      saved_before,
+      '前提: 開始時に保存されたセッションファイルがある'
+    )
     pr_chat.close_current()
     assert.is_nil(prchat.find_window(state.session.id))
     assert.equals(wins_before - 1, #vim.api.nvim_tabpage_list_wins(0))
