@@ -24,7 +24,7 @@ local load_saved = sf.load_saved
 local json_path = sf.json_path
 local existing_stub = sf.existing_stub
 local wt_path = sf.wt_path
-local has_call = sf.has_call
+local calls_of = sf.calls_of
 local panel_row_for = sf.panel_row_for
 local focus_panel_file = sf.focus_panel_file
 local inject_comment = sf.inject_comment
@@ -36,15 +36,6 @@ local showref_ok = sf.showref_ok
 local status_clean = sf.status_clean
 local start_done = sf.start_done
 local DEGRADED_MSG = sf.DEGRADED_MSG
-
-local function has_worktree_call()
-  for _, cmd in ipairs(state.git_calls) do
-    if cmd[2] == 'worktree' then
-      return true
-    end
-  end
-  return false
-end
 
 local review_tab = session_env.review_tab
 local head_buf_name = session_env.head_buf_name
@@ -443,7 +434,7 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
       session_handler.start { base = 'main', head = 'feature' }
 
       assert.equals(1, #state.inputs)
-      assert.is_false(has_call 'git switch')
+      assert.same({}, calls_of 'switch')
       assert.same(DEGRADED_MSG, state.notifications[1])
       assert.same({ 'git', 'diff', 'main', 'feature' }, state.git_calls[6])
       assert.equals(SLUG, session_handler.active().id)
@@ -523,7 +514,7 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
         { 'git', 'show-ref', '--verify', '--quiet', 'refs/heads/feature' },
         state.git_calls[4]
       )
-      assert.is_false(has_call 'git status --porcelain')
+      assert.same({}, calls_of 'status')
       assert.equals(0, #state.inputs)
       assert.same(DEGRADED_MSG, state.notifications[1])
       assert.same({ 'git', 'diff', 'main', 'feature' }, state.git_calls[5])
@@ -545,7 +536,7 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
 
     session_handler.start { base = 'main', head = 'feature' }
 
-    assert.is_false(has_worktree_call())
+    assert.same({}, calls_of 'worktree')
     assert.equals(vim.NIL, load_saved().worktree)
   end)
 
@@ -566,7 +557,7 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
       session_handler.start { base = 'main', head = 'feature' }
 
       assert.equals(vim.NIL, load_saved().worktree)
-      assert.is_false(has_worktree_call())
+      assert.same({}, calls_of 'worktree')
     end
   )
 
@@ -658,7 +649,7 @@ describe('head 解決フロー (branch: diff-review「開始」2)', function()
 
       -- top / RP x2 / diff / (open) show = 5。worktree 掃除 (status/remove) は 0 件
       assert.equals(5, #state.git_calls)
-      assert.is_false(has_worktree_call())
+      assert.same({}, calls_of 'worktree')
       assert.equals(vim.NIL, load_saved().worktree)
     end
   )

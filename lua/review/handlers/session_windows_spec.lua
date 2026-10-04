@@ -17,7 +17,7 @@ local top_ok = sf.top_ok
 local diff_ok = sf.diff_ok
 local load_saved = sf.load_saved
 local existing_stub = sf.existing_stub
-local has_call = sf.has_call
+local calls_of = sf.calls_of
 local inject_comment = sf.inject_comment
 local inject_outdated = sf.inject_outdated
 local use_env = sf.use_env
@@ -126,8 +126,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       assert.equals(false, vim.wo[ui_windows.win 'head'].diff)
       assert.equals(false, vim.wo[ui_windows.win 'base'].diff)
       -- git show 充填は base 窓のみ (head 実ファイル編集事故を作らない)
-      assert.is_true(has_call 'git show main:c.lua')
-      assert.is_false(has_call 'git show feature:c.lua')
+      assert.same({ { 'git', 'show', 'main:c.lua' } }, calls_of 'show')
     end
   )
 
@@ -153,7 +152,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       assert.equals(false, vim.wo[ui_windows.win 'base'].diff)
       assert.equals(false, vim.wo[ui_windows.win 'head'].diff)
       -- 窓 diff に参加しない告知窓なので git show を呼ばない
-      assert.is_false(has_call 'git show')
+      assert.same({}, calls_of 'show')
     end
   )
 
@@ -174,7 +173,7 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       assert.is_nil(ui_windows.win 'base')
       assert.equals(state.repo .. '/b.lua', head_buf_name())
       assert.equals(2, #vim.api.nvim_tabpage_list_wins(review_tab()))
-      assert.is_false(has_call 'git show main:b.lua')
+      assert.same({ { 'git', 'show', 'main:a.lua' } }, calls_of 'show')
       -- 陰性対照: M の a.lua へ戻ると base 窓が再建され 3 窓ペアに復帰する
       session_handler.prev_file()
       assert.equals('review://base/' .. SLUG .. '/a.lua', base_buf_name())

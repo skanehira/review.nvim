@@ -15,7 +15,7 @@ local install_git = sf.install_git
 local top_ok = sf.top_ok
 local diff_ok = sf.diff_ok
 local load_saved = sf.load_saved
-local has_call = sf.has_call
+local calls_of = sf.calls_of
 local panel_row_for = sf.panel_row_for
 local focus_panel_file = sf.focus_panel_file
 local inject_outdated = sf.inject_outdated
@@ -165,7 +165,11 @@ describe('panel 操作 (open_file / viewed) と移動系', function()
     session_handler.prev_file()
 
     assert.equals(state.repo .. '/a.lua', ex_bufname())
-    assert.is_true(has_call 'git show main:a.lua')
+    -- 開始時の充填と、戻ったときの再充填 (b.lua は新規追加なので base を引かない)
+    assert.same(
+      { { 'git', 'show', 'main:a.lua' }, { 'git', 'show', 'main:a.lua' } },
+      calls_of 'show'
+    )
   end)
 
   it('端では <Tab>/<S-Tab> は無動作 (最後の次へを進まない)', function()

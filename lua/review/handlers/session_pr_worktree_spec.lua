@@ -18,7 +18,7 @@ local load_saved = sf.load_saved
 local existing_stub = sf.existing_stub
 local wt_path = sf.wt_path
 local git_fail = sf.git_fail
-local has_call = sf.has_call
+local calls_of = sf.calls_of
 local use_env = sf.use_env
 local git_ok = sf.git_ok
 local begin_pr = sf.begin_pr
@@ -92,7 +92,7 @@ describe(
         )
         assert.equals(vim.log.levels.WARN, state.notifications[1].level)
         assert.equals(1, #state.notifications)
-        assert.is_false(has_call 'git diff')
+        assert.same({}, calls_of 'diff')
         assert.is_nil(load_saved())
         assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME))
         assert.is_nil(session_handler.active())
@@ -126,7 +126,7 @@ describe(
           end,
         }
 
-        assert.is_false(has_call 'git worktree add')
+        assert.same({ { 'git', 'worktree', 'list', '--porcelain' } }, calls_of 'worktree')
         assert.same(list_cmd(), state.git_calls[1])
         assert.same({ 'git', 'diff', 'main' }, state.git_calls[2])
         assert.equals(wt, state.git_opts[2].cwd)

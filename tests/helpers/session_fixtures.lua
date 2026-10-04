@@ -115,13 +115,18 @@ local function git_fail(msg)
   end
 end
 
-local function has_call(prefix)
+-- 実行した git のうち、サブコマンドが sub のものを実行順に返す (`git -C <dir> <sub>` 形も
+-- サブコマンドで拾う)。呼び出し順は仕様の一部なので、存在・不在・順序をこの射影の
+-- 全体比較 1 つで pin する (開始フロー全体の列を毎回固定しない)。
+local function calls_of(sub)
+  local out = {}
   for _, cmd in ipairs(state.git_calls) do
-    if table.concat(cmd, ' '):sub(1, #prefix) == prefix then
-      return true
+    local name = cmd[2] == '-C' and cmd[4] or cmd[2]
+    if name == sub then
+      table.insert(out, cmd)
     end
   end
-  return false
+  return out
 end
 
 -- file panel (既定 tree) の行はヘッダで揺れるので、entry 写像で行を探す
@@ -318,7 +323,7 @@ M.json_path = json_path
 M.existing_stub = existing_stub
 M.wt_path = wt_path
 M.git_fail = git_fail
-M.has_call = has_call
+M.calls_of = calls_of
 M.panel_row_for_buf = panel_row_for_buf
 M.panel_row_for = panel_row_for
 M.focus_panel_file = focus_panel_file
