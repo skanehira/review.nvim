@@ -8,35 +8,11 @@
 local diff_adapter = require 'review.git.diff'
 local cli = require 'review.git.cli'
 local config = require 'review.config'
+local git_env = require 'helpers.git_env'
 
-local created_dirs = {}
-
-local function restore_after_each()
-  after_each(function()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    config.reset()
-    for _, dir in ipairs(created_dirs) do
-      vim.fn.delete(dir, 'rf')
-    end
-    created_dirs = {}
-  end)
-end
-
--- 呼ばれたら (cmd, opts, on_exit) を捕捉し、明示的に on_exit を呼ぶまで発火しない。
-local function stub_system(captured)
-  return function(cmd, opts, on_exit)
-    captured.cmd = cmd
-    captured.opts = opts
-    captured.on_exit = on_exit
-  end
-end
-
-local function stub_ok_executable()
-  cli._set_executable(function()
-    return 1
-  end)
-end
+local restore_after_each = git_env.restore_after_each
+local stub_system = git_env.capture_system
+local stub_ok_executable = git_env.executable_ok
 
 -- tail.txt -U0 の生出力を git 2.55 実測のまま使う (core/diff_spec とは別に、
 -- アダプタが parse を通すことの検証用フィクスチャ)。
@@ -177,20 +153,7 @@ describe('git/diff fetch 実 git', function()
   it(
     '実リポジトリの main..headbr 差分が parse 済みで ok 結果として返る',
     function()
-      local dir = vim.fn.tempname()
-      vim.fn.mkdir(dir, 'p')
-      table.insert(created_dirs, dir)
-      local function git(args)
-        local out =
-          vim.system(vim.list_extend({ 'git' }, args), { cwd = dir, text = true }):wait(10000)
-        if out.code ~= 0 then
-          error('git ' .. table.concat(args, ' ') .. ' 失敗: ' .. out.stderr, 0)
-        end
-        return out.stdout
-      end
-      git { 'init', '-q', '-b', 'main' }
-      git { 'config', 'user.email', 'spec@example.com' }
-      git { 'config', 'user.name', 'spec' }
+      local dir, git = git_env.init_repo()
       local f = io.open(vim.fs.joinpath(dir, 'x.txt'), 'w')
       f:write 'one\n'
       f:close()
@@ -239,20 +202,7 @@ describe('git/diff fetch 実 git', function()
   it(
     '実リポジトリ + head 省略の単引数形 (working tree基準) も同一の parse 結果を返す',
     function()
-      local dir = vim.fn.tempname()
-      vim.fn.mkdir(dir, 'p')
-      table.insert(created_dirs, dir)
-      local function git(args)
-        local out =
-          vim.system(vim.list_extend({ 'git' }, args), { cwd = dir, text = true }):wait(10000)
-        if out.code ~= 0 then
-          error('git ' .. table.concat(args, ' ') .. ' 失敗: ' .. out.stderr, 0)
-        end
-        return out.stdout
-      end
-      git { 'init', '-q', '-b', 'main' }
-      git { 'config', 'user.email', 'spec@example.com' }
-      git { 'config', 'user.name', 'spec' }
+      local dir, git = git_env.init_repo()
       local f = io.open(vim.fs.joinpath(dir, 'x.txt'), 'w')
       f:write 'one\n'
       f:close()

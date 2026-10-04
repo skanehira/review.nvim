@@ -1,5 +1,6 @@
 local cli = require 'review.git.cli'
 local result = require 'review.core.result'
+local git_env = require 'helpers.git_env'
 
 -- vim.system / vim.fn.executable の注入スタブを組み、結果型への変換を検証する。
 -- 実行アダプタの境界なので DI スタブが testing.md 優先順位① (DI + fake) に該当する。
@@ -14,16 +15,7 @@ local function restore_injections_after_each()
   end)
 end
 
--- 注入用の疑似 system: 呼ばれたら (cmd, opts, on_exit) を捕捉し、
--- テストが明示的に on_exit を呼ぶまでコールバックを発火しない。
-local function stub_system(captured)
-  return function(cmd, opts, on_exit)
-    captured.cmd = cmd
-    captured.opts = opts
-    captured.on_exit = on_exit
-    captured.calls = (captured.calls or 0) + 1
-  end
-end
+local stub_system = git_env.capture_system
 
 describe('cli.run 成功', function()
   restore_injections_after_each()

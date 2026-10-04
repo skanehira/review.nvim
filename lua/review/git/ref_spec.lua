@@ -3,51 +3,16 @@
 -- 引数組み立てと結果型分岐は注入 system スタブ、実 git 経路を 1 ケース。
 local ref = require 'review.git.ref'
 local cli = require 'review.git.cli'
-local config = require 'review.config'
+local git_env = require 'helpers.git_env'
 
-local created_dirs = {}
-
-local function restore_after_each()
-  after_each(function()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    config.reset()
-    for _, dir in ipairs(created_dirs) do
-      vim.fn.delete(dir, 'rf')
-    end
-    created_dirs = {}
-  end)
-end
-
-local function stub_system(captured)
-  return function(cmd, opts, on_exit)
-    captured.cmd = cmd
-    captured.opts = opts
-    captured.on_exit = on_exit
-  end
-end
-
-local function stub_ok_executable()
-  cli._set_executable(function()
-    return 1
-  end)
-end
+local restore_after_each = git_env.restore_after_each
+local stub_system = git_env.capture_system
+local stub_ok_executable = git_env.executable_ok
+local await_result = git_env.await_result
 
 -- ブランチ 2・tag 1 の実 repo 作成 (実 git 系 describe 共通のヘルパー)。
 local function build_repo()
-  local dir = vim.fn.tempname()
-  vim.fn.mkdir(dir, 'p')
-  table.insert(created_dirs, dir)
-  local function git(args)
-    local out = vim.system(vim.list_extend({ 'git' }, args), { cwd = dir, text = true }):wait(10000)
-    if out.code ~= 0 then
-      error('git ' .. table.concat(args, ' ') .. ' 失敗: ' .. out.stderr, 0)
-    end
-    return out.stdout
-  end
-  git { 'init', '-q', '-b', 'main' }
-  git { 'config', 'user.email', 'spec@example.com' }
-  git { 'config', 'user.name', 'spec' }
+  local dir, git = git_env.init_repo()
   local f = io.open(vim.fs.joinpath(dir, 'a.txt'), 'w')
   f:write 'a\n'
   f:close()
@@ -56,17 +21,6 @@ local function build_repo()
   git { 'branch', 'feature' }
   git { 'tag', 'v1.0.0' }
   return dir, git
-end
-
-local function await_result(call)
-  local received
-  call(function(res)
-    received = res
-  end)
-  vim.wait(6000, function()
-    return received ~= nil
-  end)
-  return received
 end
 
 describe('git/ref branches / tags 引数組み立て', function()
@@ -424,7 +378,7 @@ describe('git/ref fetch_pull / delete_ref / remotes (pr-worktree fork 経路)', 
       local dir = vim.fn.tempname()
       vim.fn.mkdir(vim.fs.joinpath(dir, 'origin'), 'p')
       vim.fn.mkdir(vim.fs.joinpath(dir, 'work'), 'p')
-      table.insert(created_dirs, dir)
+      git_env.track(dir)
 
       local init_r = vim.system(
         { 'git', 'init', '-q', '--bare', '-b', 'main', 'origin' },
@@ -579,7 +533,7 @@ describe('ref.refs_sync (cmdline 補完専用の同期一覧)', function()
   it('両系統失敗 (repo 外) -> ok false E_REF (data なし)', function()
     local dir = vim.fn.tempname()
     vim.fn.mkdir(dir, 'p')
-    table.insert(created_dirs, dir)
+    git_env.track(dir)
 
     local res = ref.refs_sync { cwd = dir }
 

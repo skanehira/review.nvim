@@ -7,6 +7,7 @@
 -- ディレクトリ名を決めるだけ。REPO_HASH は shasum 実測値)。
 
 local paths = require 'review.store.paths'
+local store_env = require 'helpers.store_env'
 local session = require 'review.store.session'
 
 local REPO = '/repo-x'
@@ -59,31 +60,8 @@ local function sample(overrides)
   return s
 end
 
--- tmpdir 注入・固定 now・notify 記録を各テスト前后に設定する状態ヘルパ。
--- 返り値の state から dir / notices をテスト本体で参照する。
 local function isolate_store()
-  local state = {}
-  before_each(function()
-    state.dir = vim.fn.tempname()
-    vim.fn.mkdir(state.dir, 'p')
-    state.notices = {}
-    paths._set_data_dir(state.dir)
-    session._set_now(function()
-      return FIXED_NOW
-    end)
-    session._set_rename(nil)
-    session._set_notify(function(msg, level)
-      table.insert(state.notices, { msg = msg, level = level })
-    end)
-  end)
-  after_each(function()
-    paths._set_data_dir(nil)
-    session._set_now(nil)
-    session._set_rename(nil)
-    session._set_notify(nil)
-    vim.fn.delete(state.dir, 'rf')
-  end)
-  return state
+  return store_env.isolate_store(FIXED_NOW)
 end
 
 describe('save→load 往復', function()
