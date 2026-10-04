@@ -234,13 +234,11 @@ describe('input.open 表示契約', function()
 
   it('窓 title に確定/閉じる的操作ヒントが表示される', function()
     open()
-    local text = title_text()
-    assert.is_true(text:find('<CR> confirm', 1, true) ~= nil)
-    assert.is_true(text:find('q close', 1, true) ~= nil)
+    assert.equals(' Comment  <CR> confirm  q close ', title_text())
   end)
 
   it('opts.hint (対象行の示唆) が title に載る', function()
     open { hint = 'a.lua:4-5' }
-    assert.is_true(title_text():find('a.lua:4-5', 1, true) ~= nil)
+    assert.equals(' Comment [a.lua:4-5]  <CR> confirm  q close ', title_text())
   end)
 end)
