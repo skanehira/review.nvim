@@ -77,11 +77,9 @@ describe('handlers/pr_chat open / reply / refresh', function()
       local win = prchat.find_window(state.session.id)
       assert.is_not_nil(win)
       local buf = vim.api.nvim_win_get_buf(win)
-      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-      local joined = table.concat(lines, '\n')
-      assert.is_true(joined:find('[octocat] overall lgtm', 1, true) ~= nil, joined)
+      assert.same({ '[octocat] overall lgtm' }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
       -- winbar に件数
-      assert.is_true((vim.w[win].review_winbar or ''):find('PR #7', 1, true) ~= nil)
+      assert.equals('PR #7 · 1 comment', vim.w[win].review_winbar)
     end
   )
 

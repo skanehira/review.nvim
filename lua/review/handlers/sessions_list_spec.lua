@@ -98,7 +98,7 @@ describe('sessions_list.delete_current (一覧 d)', function()
       end
     end
     assert.is_not_nil(rhs, 'd がマップされていない')
-    assert.is_true(rhs:find('delete_current', 1, true) ~= nil, rhs)
+    assert.equals(":lua require('review.handlers.sessions_list').delete_current()<CR>", rhs)
   end)
 end)
 

@@ -118,9 +118,10 @@ describe('head / base 窓の中身分岐 (窓張り分け表)', function()
       assert.equals('review://deleted/' .. SLUG .. '/c.lua', head_buf_name())
       assert.equals('review://base/' .. SLUG .. '/c.lua', base_buf_name())
       local head_buf = vim.fn.bufnr('review://deleted/' .. SLUG .. '/c.lua')
-      local lines = vim.api.nvim_buf_get_lines(head_buf, 0, -1, false)
-      assert.equals(1, #lines)
-      assert.is_true(lines[1]:find('deleted', 1, true) ~= nil)
+      assert.same(
+        { '■ deleted (absent from head — base side is in the left window)' },
+        vim.api.nvim_buf_get_lines(head_buf, 0, -1, false)
+      )
       -- 削除は告知ペア (head 告知 1 行 / base 旧内容) なので両窓で窓 diff を抜ける
       -- (相手のいない diff ペアを作らない — issue #38)
       assert.equals(false, vim.wo[ui_windows.win 'head'].diff)
@@ -634,7 +635,7 @@ describe('commit_comment_change (INV-4 + extmark 再適用)', function()
     for _, chunk in ipairs(details[1][4].virt_text or {}) do
       vt = vt .. (type(chunk[1]) == 'table' and chunk[1][1] or chunk[1])
     end
-    assert.is_true(vt:find('\u{EA6B} 2', 1, true) ~= nil, vt)
+    assert.equals(' \u{EA6B} 2', vt)
     assert.equals('main..feature · a.lua · +1 -0 · 2 comments', vim.w[hw].review_winbar)
   end)
 
@@ -652,25 +653,17 @@ describe('commit_comment_change (INV-4 + extmark 再適用)', function()
         end
         return nil
       end
-      local before = assert(row_of 'a.lua', 'panel に a.lua 行が無い')
-      assert.is_nil(
-        before:find('\u{EA6B}', 1, true),
-        '前提: コメント 0 件でアイコンが出ている'
-      )
+      assert.equals('M a.lua +1 -0', row_of 'a.lua', '前提: コメント 0 件の行')
       inject_comment 'first thread'
-      local after = assert(row_of 'a.lua', 'panel に a.lua 行が無い (commit 後)')
-      assert.is_true(
-        after:find('\u{EA6B}', 1, true) ~= nil,
-        'panel 行にコメントアイコンが反映されない'
+      assert.equals(
+        'M \u{EA6B} a.lua +1 -0',
+        row_of 'a.lua',
+        'コメントアイコンが反映されない'
       )
       -- 削除 (最後の 1 件) でアイコンも消える (同じ render 経路)
       table.remove(session_handler.active().comments, 1)
       session_handler.commit_comment_change()
-      local restored = assert(row_of 'a.lua')
-      assert.is_nil(
-        restored:find('\u{EA6B}', 1, true),
-        'panel 行からアイコンが消えない'
-      )
+      assert.equals('M a.lua +1 -0', row_of 'a.lua', 'panel 行からアイコンが消えない')
     end
   )
 
@@ -733,25 +726,34 @@ describe('commit_comment_change (INV-4 + extmark 再適用)', function()
 
       local head_buf = vim.fn.bufnr('review://base/' .. SLUG .. '/(no-changes)')
       local ns = vim.api.nvim_get_namespaces().review_comment
-      local function mark_texts()
-        local out = {}
+      -- 集約の箱の中身 (罫線・区切り・右 pad を除く)。実窓では箱幅 = 窓幅で見出しが
+      -- 折り返されるため、見出しは連結し、以降のコメント行 (id 行 + 本文) と分けて返す。
+      local function outdated_box()
+        local heading, rows = {}, {}
         local marks = vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, { details = true })
         for _, m in ipairs(marks) do
-          if m[4].virt_lines ~= nil then
-            for _, vl in ipairs(m[4].virt_lines) do
-              for _, chunk in ipairs(vl) do
-                out[#out + 1] = type(chunk[1]) == 'table' and chunk[1][1] or chunk[1]
+          for _, line in ipairs(m[4].virt_lines or {}) do
+            if #line >= 4 then
+              local chunk = line[2]
+              local text = type(chunk[1]) == 'table' and chunk[1][1] or chunk[1]
+              if #rows == 0 and text:sub(1, 3) ~= '  [' then
+                heading[#heading + 1] = text
+              else
+                rows[#rows + 1] = text
               end
             end
           end
         end
-        return table.concat(out, '\n')
+        return { heading = table.concat(heading), rows = rows }
       end
       local function mark_count()
         return #vim.api.nvim_buf_get_extmarks(head_buf, ns, 0, -1, {})
       end
       assert.equals(1, mark_count(), '前提: 集約 mark が 1 件 (placeholder 開通直後)')
-      assert.is_truthy(mark_texts():find('c1', 1, true), mark_texts())
+      assert.same({
+        heading = ' 2 outdated (excluded from prompt)',
+        rows = { '  [c1]', 'ghost one', '  [c2]', 'ghost two' },
+      }, outdated_box())
 
       -- placeholder 窓での削除 (commit_comment_change 経路): clear_tracked 後も
       -- no-changes への再適用で集約が復活する (real / degraded と同一条件)。
@@ -759,9 +761,10 @@ describe('commit_comment_change (INV-4 + extmark 再適用)', function()
       session_handler.commit_comment_change()
 
       assert.equals(1, mark_count(), '削除後に集約 mark が消えたまま復活しない')
-      local texts = mark_texts()
-      assert.is_truthy(texts:find('c2', 1, true), texts)
-      assert.is_falsy(texts:find('c1', 1, true), texts)
+      assert.same({
+        heading = ' 1 outdated (excluded from prompt)',
+        rows = { '  [c2]', 'ghost two' },
+      }, outdated_box())
     end
   )
 end)
