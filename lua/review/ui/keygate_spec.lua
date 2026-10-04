@@ -63,6 +63,17 @@ local function scratch_buf(name, meta)
   return buf
 end
 
+-- dispatch spy (SPY:<name>) の通知だけを順に取り出す。
+local function spy_msgs()
+  local out = {}
+  for _, n in ipairs(state.notifications) do
+    if n.msg:find('SPY:', 1, true) == 1 then
+      table.insert(out, n.msg)
+    end
+  end
+  return out
+end
+
 local function open_review_tab()
   windows.open { dir = vim.fn.getcwd(), on_tab_closed = function() end }
 end
@@ -579,20 +590,8 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
             key .. ' の fallback が built-in へ返らない'
           )
         end
-        vim.wait(100, function()
-          for _, n in ipairs(state.notifications) do
-            if n.msg:find('SPY:', 1, true) ~= nil then
-              return true
-            end
-          end
-          return false
-        end, 10)
-        for _, n in ipairs(state.notifications) do
-          assert.is_true(
-            n.msg:find('SPY:', 1, true) == nil,
-            key .. ' が gate 不成立窓で発火した'
-          )
-        end
+        nvim_env.drain_scheduled()
+        assert.same({}, spy_msgs(), key .. ' が gate 不成立窓で発火した')
       end
     end
   )
@@ -604,19 +603,10 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       vim.api.nvim_set_current_win(state.user_win)
       local res = press(head_buf, 'q', state.user_win)
       -- 戻り値 = 元キーそのもの (built-in 再実行用)。schedule は予約されていない
-      -- ことが契約なので、最小の drain 後も SPY が出ないことを見る。
+      -- ことが契約なので、予約済みの schedule を全て流した後も SPY が出ないことを見る。
       assert.equals('q', res)
-      vim.wait(100, function()
-        for _, n in ipairs(state.notifications) do
-          if n.msg:find('SPY:', 1, true) ~= nil then
-            return true
-          end
-        end
-        return false
-      end, 10)
-      for _, n in ipairs(state.notifications) do
-        assert.is_true(n.msg:find('SPY:', 1, true) == nil)
-      end
+      nvim_env.drain_scheduled()
+      assert.same({}, spy_msgs())
     end
   )
 

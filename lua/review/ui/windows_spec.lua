@@ -822,10 +822,16 @@ describe('windows: q (close) と :tabclose の両経路', function()
         end,
       }
       local tab = windows.state().tab
+      local function tab_hooks()
+        return vim.api.nvim_get_autocmds { group = 'review_windows', event = 'TabClosed' }
+      end
+      assert.equals(1, #tab_hooks())
       windows.close()
       assert.is_nil(windows.state())
       assert.is_false(vim.api.nvim_tabpage_is_valid(tab))
-      vim.wait(50)
+      -- close() は tab を閉じる前に TabClosed hook を外す
+      assert.same({}, tab_hooks())
+      nvim_env.drain_scheduled()
       assert.equals(0, called, 'programmatic close は tab 消滅経路と区別される')
     end
   )
@@ -868,12 +874,18 @@ describe('windows: q (close) と :tabclose の両経路', function()
       local review_t = windows.state().tab
       vim.api.nvim_set_current_tabpage(state.tab)
       vim.cmd 'tabclose!'
-      vim.wait(100)
+      nvim_env.drain_scheduled()
 
       assert.equals(0, called)
       assert.is_true(vim.api.nvim_tabpage_is_valid(review_t))
       assert.is_not_nil(windows.state())
       assert.equals(review_t, vim.api.nvim_win_get_tabpage(windows.win 'head'))
+      -- 対照: 同じ hook でレビュー tab 自身を閉じれば 1 回発火する
+      vim.api.nvim_set_current_tabpage(review_t)
+      vim.cmd 'tabclose!'
+      nvim_env.drain_scheduled()
+      assert.equals(1, called)
+      assert.is_nil(windows.state())
     end
   )
 

@@ -39,6 +39,22 @@ function M.close_tab(tab)
   end
 end
 
+--- それまでに予約された vim.schedule を全て流す。番兵を最後に積み、番兵が走った
+--- 時点でそれ以前の予約は実行済み (FIFO)。「発火しないこと」を固定時間の sleep で
+--- 待つと、遅い環境では未実行のまま通ってしまうため、こちらで待つ。
+function M.drain_scheduled()
+  local drained = false
+  vim.schedule(function()
+    drained = true
+  end)
+  assert(
+    vim.wait(1000, function()
+      return drained
+    end, 5),
+    'vim.schedule の予約が流れない'
+  )
+end
+
 --- 隔離 tabpage を作って current にし、state.tab に記録して返す。
 function M.isolate_tab(state)
   vim.cmd 'tabnew'
