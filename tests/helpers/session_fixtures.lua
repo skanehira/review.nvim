@@ -122,7 +122,7 @@ local function calls_of(sub)
   local out = {}
   for _, cmd in ipairs(state.git_calls) do
     local name = cmd[2] == '-C' and cmd[4] or cmd[2]
-    if name == sub then
+    if cmd[1] == 'git' and name == sub then
       table.insert(out, cmd)
     end
   end

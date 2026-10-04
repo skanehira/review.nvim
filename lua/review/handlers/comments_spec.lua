@@ -852,7 +852,9 @@ describe('comments r (返信 / local pending)', function()
 
       local comments = saved().comments
       assert.equals(2, #comments)
-      -- 返信は local の未 push (gh_id なし) で、in_reply_to に gh 根の id を持つ
+      -- 返信は local の未 push (gh_id なし) で、in_reply_to に gh 根の id を持つ。
+      -- anchor を持たないのは現実装の挙動の固定 (DESIGN.md の anchor 行は local 返信の
+      -- 扱いを書いていない。仕様が決まったら期待値をそれに揃える)
       assert.same({
         id = 'c2',
         file = 'a.lua',

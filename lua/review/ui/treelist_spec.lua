@@ -484,7 +484,8 @@ describe('treelist.build list モード', function()
 
   it('collapsed/mode 省略時は tree が既定 (既定がフォルダツリー)', function()
     local rows = treelist.build({ f('src/deep/new.lua', 'A', 1, 0) }, nil)
-    -- dir 行がある = tree モード (ヘッダ文言は base/head 未指定の縮退なので見ない)
+    -- dir 行がある = tree モード (サブタイトルは base/head 未指定の縮退なので見ない)
+    assert.equals('Changes (1)', rows[1].text)
     assert.same({
       { kind = 'header' },
       { kind = 'header' },

@@ -1105,9 +1105,10 @@ describe('comments_list.reply_current (行スレッド / ファイルレベル)'
       comments_list.reply_current()
       type_into_float 'reply to gh'
 
-      local sess = session_handler.active()
+      local sess = store.load(state.repo, SLUG).data
       assert.equals(2, #sess.comments)
-      -- 返信は local の未 push で、in_reply_to に gh 根の id を持つ (anchor なし)
+      -- 返信は local の未 push で、in_reply_to に gh 根の id を持つ。anchor を持たないのは
+      -- 現実装の挙動の固定 (DESIGN.md 未記載。仕様が決まったら期待値をそれに揃える)
       assert.same({
         id = 'c2',
         file = 'a.lua',
@@ -1154,7 +1155,7 @@ describe('comments_list.reply_current (行スレッド / ファイルレベル)'
         in_reply_to = 202,
         created_at = 4321,
         state = 'active',
-      }, session_handler.active().comments[2])
+      }, store.load(state.repo, SLUG).data.comments[2])
     end
   )
 end)

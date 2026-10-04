@@ -385,6 +385,8 @@ describe(
           },
           { msg = 'review.nvim: fatal: boom', level = vim.log.levels.WARN },
         }, state.notifications)
+        -- 開始失敗でセッション JSON を残さない (題名の «記録なし»。INV-4: ディスクで判定)
+        assert.is_nil(load_saved())
 
         vim.fn.system { 'chmod', '755', wt }
         assert.equals(0, vim.v.shell_error)
