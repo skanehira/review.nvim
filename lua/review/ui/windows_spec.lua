@@ -270,8 +270,8 @@ describe('windows.bind / set_panel_buf: role 導出', function()
     function()
       -- Neovim の窓 diff は共有 group が 8 buffer 上限で、窓を再利用して
       -- 張替えても張付けたbufが group に残積する (実測)。open_file 反復で
-      -- 9 個目の set_buf が E96 で crash するため、bind は毎回
-      -- 「今張る buf 以外」を group から刈る責務を持つ。
+      -- 9 個目の set_buf が E96 で crash するため、bind は毎回 group を
+      -- 空にしてから今回のペアだけで組み直す責務を持つ。
       for i = 1, 12 do
         local ok, err = pcall(
           windows.bind,
@@ -365,6 +365,109 @@ describe('windows.bind / set_panel_buf: role 導出', function()
       assert.equals(true, vim.wo[windows.win 'head'].diff)
       -- base は head の左 (panel│base│head の順を崩さない)
       assert.is_true(vim.fn.win_screenpos(windows.win 'base')[2] < vim.fn.win_screenpos(hw)[2])
+    end
+  )
+
+  -- 窓 diff は tab の diff 集合 (hidden buf を含む) 全体と比較する。前ファイルの
+  -- buf が集合に残ると、新しいペアの無変更行が「変更」と表示される。既定
+  -- diffopt の closeoff は窓 close 時に残りを掃除するため、closeoff の無い
+  -- ユーザー設定 (例: diffopt=vertical,internal) でだけ表面化する (実測)。
+  describe(
+    '前ファイルの buf を diff 集合に残さない (closeoff なしの diffopt)',
+    function()
+      local saved_diffopt
+
+      before_each(function()
+        saved_diffopt = vim.o.diffopt
+        vim.o.diffopt = 'internal'
+      end)
+
+      after_each(function()
+        vim.o.diffopt = saved_diffopt
+      end)
+
+      local function filled(name, lines)
+        local b = scratch_buf(name)
+        vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
+        return b
+      end
+
+      local function diff_hl(role, row)
+        return vim.api.nvim_win_call(windows.win(role), function()
+          return vim.fn.diff_hlID(row, 1)
+        end)
+      end
+
+      local function bind_x()
+        windows.bind(
+          filled('review://base/s/x.lua', { 'x one', 'x two', '', 'x four', 'x five' }),
+          filled('review://head/s/x.lua', { 'x one', 'x two!', '', 'x four', 'x five' })
+        )
+      end
+
+      -- 次に開くペア Y: 1-4 行目は同一、5 行目だけが違う
+      local function y_pair()
+        return filled('review://base/s/y.lua', { 'y one', 'y two', '', 'y four', 'y five' }),
+          filled('review://head/s/y.lua', { 'y one', 'y two', '', 'y four', 'y five CHANGED' })
+      end
+
+      local function bind_pair(b, h)
+        windows.bind(b, h)
+        vim.cmd 'redraw'
+      end
+
+      local function bind_y()
+        bind_pair(y_pair())
+      end
+
+      local function assert_only_line5_changed()
+        for _, role in ipairs { 'base', 'head' } do
+          assert.equals(
+            0,
+            diff_hl(role, 1),
+            role .. ': 無変更の 1 行目が変更表示になった'
+          )
+          -- 陽性対照: 窓 diff が効いていて、本当の変更行は着色される
+          assert.is_true(
+            diff_hl(role, 5) ~= 0,
+            role .. ': 変更行の 5 行目が着色されていない'
+          )
+        end
+      end
+
+      it(
+        'M → 追加 (bind_head_only) → M と開いても無変更行は着色されない',
+        function()
+          bind_x()
+          windows.bind_head_only(
+            filled('review://head/s/new.lua', { 'a one', 'a two', '', 'a four' })
+          )
+          bind_y()
+          assert_only_line5_changed()
+        end
+      )
+
+      it(
+        'ユーザーが base 窓を閉じた後の bind でも無変更行は着色されない',
+        function()
+          bind_x()
+          vim.api.nvim_win_close(windows.win 'base', true)
+          bind_y()
+          assert_only_line5_changed()
+        end
+      )
+
+      it(
+        '同じペアを再 bind しても窓 diff は張り直され差分表示が保たれる',
+        function()
+          local yb, yh = y_pair()
+          bind_pair(yb, yh)
+          bind_pair(yb, yh)
+          assert.equals(true, vim.wo[windows.win 'base'].diff)
+          assert.equals(true, vim.wo[windows.win 'head'].diff)
+          assert_only_line5_changed()
+        end
+      )
     end
   )
 

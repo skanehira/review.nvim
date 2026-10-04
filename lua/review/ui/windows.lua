@@ -94,6 +94,22 @@ local function apply_diffoff(w)
   end
 end
 
+-- review tab の diff 集合を空にする。窓 diff は「tab の diff 集合」(hidden buf を
+-- 含む) 全体と比較するため、前ファイルの buf が残ると新しいペアの無変更行が
+-- 変更表示になる。残留源は (1) set_buf 張替で hidden になった前 buf (2) diff 有効の
+-- まま閉じた窓の buf (bind_head_only の base close・ユーザーの :close)。既定
+-- diffopt の closeoff は (2) を掃除するが、closeoff の無いユーザー設定では残る
+-- (実測)。`:diffoff!` は tab の全窓を nodiff にし hidden buf も集合から外す。
+-- 残留が表示に効くのは次に窓 diff ペアを組むときだけなので、ペアを組む bind の
+-- 冒頭で掃除すれば足りる (bind_head_only は窓 diff を組まない)。
+-- nvim_win_call で review 窓の tab に限定する (review tab は専有 = ユーザーの
+-- diff ペアは同居しない — DESIGN「diff ペアの併存」)。E96 (集合 8 buffer 上限) も防ぐ。
+local function clear_diff_set(w)
+  vim.api.nvim_win_call(w, function()
+    pcall(vim.cmd, 'diffoff!')
+  end)
+end
+
 local function release_autocmd()
   if autocmd_id ~= nil then
     pcall(vim.api.nvim_del_autocmd, autocmd_id)
@@ -324,23 +340,9 @@ function M.bind(base_buf, head_buf, opts)
   opts = opts or {}
   ensure_pair()
   local bw, hw = st.base_win, st.head_win
-  -- 窓再利用で張り返しても前回 buf は hidden で diff group に残積し、group は
-  -- 全体で 8 buffer 上限 (E96 «Cannot diff more than 8 buffers»)。set_buf 前に
-  -- 現窓の buf を group から刈る (今回張る buf と同一なら diffoff しない =
-  -- 同一ファイルの再 bind で窓 diff が解けるのを防ぐ)。
-  local function detach_prev_diff(w, keep)
-    if not valid_win(w) then
-      return
-    end
-    local cur = vim.api.nvim_win_get_buf(w)
-    if cur ~= keep and vim.api.nvim_buf_is_valid(cur) then
-      vim.api.nvim_win_call(w, function()
-        pcall(vim.cmd, 'diffoff')
-      end)
-    end
-  end
-  detach_prev_diff(bw, base_buf)
-  detach_prev_diff(hw, head_buf)
+  -- set_buf 前に diff 集合を空にし、今回のペアだけで窓 diff を組み直す
+  -- (同一ファイルの再 bind も直後の apply_pair_opts で張り直される)。
+  clear_diff_set(hw)
   vim.w[bw].review_base_gate = nil
   vim.w[bw].review_base_buf = nil
   vim.w[hw].review_key_gate = nil
