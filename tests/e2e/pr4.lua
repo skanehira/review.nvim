@@ -12,16 +12,9 @@ vim.ui.input = function(opts, cb)
   cb(answers[#inputs] or 'y')
 end
 
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
-
-local function wait_for(pred, why)
-  if not vim.wait(8000, pred, 20) then
-    fail('timeout: ' .. why)
-  end
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
+local wait_for = e2e.wait_for
 
 local wt_root = assert(os.getenv 'REVIEW_E2E_WT', 'REVIEW_E2E_WT 未設定')
 local json_path = assert(os.getenv 'REVIEW_E2E_JSON', 'REVIEW_E2E_JSON 未設定')

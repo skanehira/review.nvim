@@ -10,36 +10,24 @@
 local cli = require 'review.git.cli'
 local config = require 'review.config'
 local comments_handler = require 'review.handlers.comments'
-local paths = require 'review.store.paths'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local ui_windows = require 'review.ui.windows'
+local fixtures = require 'helpers.fixtures'
+local git_env = require 'helpers.git_env'
+local nvim_env = require 'helpers.nvim_env'
+local session_env = require 'helpers.session_env'
 
 local SLUG = 'main--feature'
 
--- プロセス単一の vim 組み込みを require 時に 1 回捕捉 (before_each ごとに見ると
--- spy が入れ子になり after_each の復旧先が壊れる — session_spec と同型)。
-local REAL_INPUT = vim.ui.input
-local CY = vim.api.nvim_replace_termcodes('<C-y>', true, false, true)
+local REAL_INPUT = nvim_env.REAL_INPUT
+local CY = nvim_env.CY
 
 -- head (作業ツリー) の a.lua = new 側 5 行。実 repo dir の disk と同じ内容に
 -- する (head 実ファイル窓は :edit 相当の実在ファイル経路なので磁盘実在が前提)。
-local HEAD_TEXT = table.concat({ 'one', 'two', 'three', 'four', 'six' }, '\n') .. '\n'
+local HEAD_TEXT = fixtures.HEAD_TEXT_ONE_SIX
 
-local RAW_DIFF = table.concat({
-  'diff --git a/a.lua b/a.lua',
-  'index 1111111..2222222 100644',
-  '--- a/a.lua',
-  '+++ b/a.lua',
-  '@@ -1,3 +1,5 @@',
-  ' one',
-  '+two',
-  '+three',
-  ' four',
-  '-five',
-  ' six',
-  '',
-}, '\n')
+local RAW_DIFF = fixtures.RAW_DIFF_ONE_SIX
 
 local state = {}
 
@@ -47,27 +35,12 @@ local function use_env()
   before_each(function()
     config.reset()
     state = { notifications = {}, inputs = {}, input_answer = 'y' }
-    state.dir = vim.fn.tempname()
-    vim.fn.mkdir(state.dir, 'p')
     -- 実 repo に見せた dir (head 実ファイルがディスクに実在する = 通常経路)
-    state.repo = vim.fs.joinpath(state.dir, 'repo')
-    vim.fn.mkdir(state.repo, 'p')
-    state.repo = vim.uv.fs_realpath(state.repo) or state.repo
-    local f = io.open(vim.fs.joinpath(state.repo, 'a.lua'), 'w')
-    f:write(HEAD_TEXT)
-    f:close()
-    paths._set_data_dir(state.dir)
-    store._set_now(function()
-      return 4321
-    end)
-    store._set_notify(function() end)
-    session_handler._set_now(function()
-      return 4321
-    end)
+    session_env.make_dirs(state, { ['a.lua'] = HEAD_TEXT })
+    session_env.inject_store(state)
     comments_handler._set_now(function()
       return 4321
     end)
-    session_handler._reset()
     cli._set_system(function(cmd, _opts, on_exit)
       if cmd[2] == 'rev-parse' then
         on_exit { code = 0, stdout = state.repo .. '\n', stderr = '' }
@@ -78,14 +51,9 @@ local function use_env()
         on_exit { code = 0, stdout = RAW_DIFF, stderr = '' }
       end
     end)
-    cli._set_executable(function()
-      return 1
-    end)
+    git_env.executable_ok()
     state.tab = vim.api.nvim_get_current_tabpage()
-    state.real_notify = vim.notify
-    vim.notify = function(msg, level)
-      table.insert(state.notifications, { msg = msg, level = level })
-    end
+    session_env.capture_notify(state)
     session_handler.start { base = 'main', head = 'feature' }
     state.session = session_handler.active()
     -- head 実ファイル窓 (専有 tab 開通後 focus == head 窓)
@@ -95,42 +63,12 @@ local function use_env()
     -- 恒等行: head バッファの行 N = new 側行 N (1 one / 2 two / 3 three / 4 four / 5 six)
   end)
   after_each(function()
-    -- close はコメントあり確認として vim.ui.input を引く (headless の既定 provider は
-    -- 無限待ちになるため 'y' 応答に戻してから閉じる)。
-    vim.ui.input = function(_, cb)
-      cb 'y'
-    end
-    session_handler.close()
-    vim.ui.input = REAL_INPUT
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
-    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-      if vim.api.nvim_tabpage_is_valid(tab) then
-        vim.api.nvim_set_current_tabpage(tab)
-        pcall(vim.cmd, 'tabclose!')
-      end
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
-    vim.notify = state.real_notify
-    paths._set_data_dir(nil)
-    store._set_now(nil)
-    store._set_notify(nil)
-    session_handler._set_now(nil)
+    session_env.close_session()
+    session_env.reset_windows()
+    nvim_env.close_all_tabs()
+    nvim_env.wipe_review_buffers()
     comments_handler._set_now(nil)
-    session_handler._reset()
-    config.reset()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    vim.fn.delete(state.dir, 'rf')
+    session_env.release(state)
   end)
 end
 
@@ -168,15 +106,16 @@ describe('comments c (作成 / head バッファ恒等行)', function()
 
       local sess = saved()
       assert.equals(1, #sess.comments)
-      local c = sess.comments[1]
-      assert.equals('c1', c.id)
-      assert.equals('a.lua', c.file)
-      assert.equals(2, c.line)
-      assert.equals(2, c.end_line)
-      assert.equals('use map here', c.body)
-      assert.same({ before = 'one', line = 'two', after = 'three' }, c.anchor)
-      assert.equals(4321, c.created_at)
-      assert.equals('active', c.state)
+      assert.same({
+        id = 'c1',
+        file = 'a.lua',
+        line = 2,
+        end_line = 2,
+        body = 'use map here',
+        anchor = { before = 'one', line = 'two', after = 'three' },
+        created_at = 4321,
+        state = 'active',
+      }, sess.comments[1])
     end
   )
 
@@ -186,9 +125,17 @@ describe('comments c (作成 / head バッファ恒等行)', function()
     comments_handler.add_visual_marks()
     type_into_float 'range note'
 
-    local c = saved().comments[1]
-    assert.equals(2, c.line)
-    assert.equals(4, c.end_line)
+    -- anchor は範囲の開始行 (two) 基準
+    assert.same({
+      id = 'c1',
+      file = 'a.lua',
+      line = 2,
+      end_line = 4,
+      body = 'range note',
+      anchor = { before = 'one', line = 'two', after = 'three' },
+      created_at = 4321,
+      state = 'active',
+    }, saved().comments[1])
   end)
 
   it(
@@ -203,9 +150,16 @@ describe('comments c (作成 / head バッファ恒等行)', function()
 
       comments_handler.add_visual_marks()
       type_into_float 'live range'
-      local c = saved().comments[1]
-      assert.equals(1, c.line)
-      assert.equals(2, c.end_line)
+      assert.same({
+        id = 'c1',
+        file = 'a.lua',
+        line = 1,
+        end_line = 2,
+        body = 'live range',
+        anchor = { before = vim.NIL, line = 'one', after = 'two' },
+        created_at = 4321,
+        state = 'active',
+      }, saved().comments[1])
 
       -- Ctrl-V (blockwise) も live 位置から行範囲を取る
       local cv = vim.api.nvim_replace_termcodes('<C-v>', true, false, true)
@@ -226,41 +180,28 @@ describe('comments c (作成 / head バッファ恒等行)', function()
     type_into_float 'inline thread'
 
     local ns = vim.api.nvim_get_namespaces().review_comment
-    assert.is_true(ns ~= nil)
-    local found_cnt, found_body = false, false
-    local head_marks = vim.api.nvim_buf_get_extmarks(state.head_buf, ns, 0, -1, { details = true })
-    for _, m in ipairs(head_marks) do
-      if m[2] == 2 then
-        -- chunk は get_extmarks strict 既定 ([text, hl]) で返る (AGENTS virt_text
-        -- chunk 教訓の get 側形状)。text = chunk[1] を直接見る。
-        local function text_of(chunk)
-          if type(chunk) == 'table' then
-            local inner = chunk[1]
-            return type(inner) == 'table' and inner[1] or inner
-          end
-          return chunk
-        end
-        local function line_text(chunks)
-          local parts = {}
-          for _, chunk in ipairs(chunks or {}) do
-            parts[#parts + 1] = text_of(chunk)
-          end
-          return table.concat(parts)
-        end
-        local vt = m[4].virt_text and text_of(m[4].virt_text[1]) or ''
-        if type(vt) == 'string' and vt:find('\u{EA6B}', 1, true) ~= nil then
-          found_cnt = true
-        end
-        for _, vl in ipairs(m[4].virt_lines or {}) do
-          local t = line_text(vl)
-          if type(t) == 'string' and t:find('inline thread', 1, true) ~= nil then
-            found_body = true
+    -- 表示 mark (件数 eol + 行下スレッド) の行・件数表示・箱の中身行 (罫線と右 pad を
+    -- 除く。実窓では箱幅 = 窓幅なので pad は見ない)
+    local shown = {}
+    local marks = vim.api.nvim_buf_get_extmarks(state.head_buf, ns, 0, -1, { details = true })
+    for _, m in ipairs(marks) do
+      if m[4].virt_text ~= nil then
+        local rows = {}
+        for _, line in ipairs(m[4].virt_lines or {}) do
+          if #line >= 4 then
+            rows[#rows + 1] = line[2][1]
           end
         end
+        shown[#shown + 1] = { row = m[2], virt_text = m[4].virt_text, rows = rows }
       end
     end
-    assert.is_true(found_cnt, '件数 eol mark が無い')
-    assert.is_true(found_body, '行下スレッド本文が無い')
+    assert.same({
+      {
+        row = 2,
+        virt_text = { { ' \u{EA6B} 1', 'ReviewPanelComment' } },
+        rows = { '  [c1]', 'inline thread' },
+      },
+    }, shown)
   end)
 
   it(
@@ -560,7 +501,7 @@ describe('comments D / clear_by_command (一括削除)', function()
     local res = comments_handler.clear_by_command()
     vim.ui.input = REAL_INPUT
 
-    assert.equals(true, res.ok)
+    assert.same({ __class = 'review.Result', ok = true }, res)
     assert.equals(
       'review.nvim: delete all 2 comments? (includes outdated; deletion cannot be undone) [y/N]: ',
       state.confirm_prompt
@@ -582,7 +523,7 @@ describe('comments D / clear_by_command (一括削除)', function()
       local res = comments_handler.clear_by_command()
       vim.ui.input = REAL_INPUT
 
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
       assert.same({}, state.notifications)
       assert.equals(2, #saved().comments)
     end
@@ -597,7 +538,7 @@ describe('comments D / clear_by_command (一括削除)', function()
     local res = comments_handler.clear_by_command()
     vim.ui.input = REAL_INPUT
 
-    assert.equals(true, res.ok)
+    assert.same({ __class = 'review.Result', ok = true }, res)
     assert.equals(false, confirmed)
     assert.same({
       msg = 'review.nvim: No comments',
@@ -911,15 +852,20 @@ describe('comments r (返信 / local pending)', function()
 
       local comments = saved().comments
       assert.equals(2, #comments)
-      local c = comments[2]
-      assert.equals('c2', c.id)
-      assert.equals('a.lua', c.file)
-      assert.equals(2, c.line)
-      assert.equals(2, c.end_line)
-      assert.equals('my reply', c.body)
-      assert.equals('local', c.origin)
-      assert.equals(101, c.in_reply_to)
-      assert.is_nil(c.gh_id)
+      -- 返信は local の未 push (gh_id なし) で、in_reply_to に gh 根の id を持つ。
+      -- anchor を持たないのは現実装の挙動の固定 (DESIGN.md の anchor 行は local 返信の
+      -- 扱いを書いていない。仕様が決まったら期待値をそれに揃える)
+      assert.same({
+        id = 'c2',
+        file = 'a.lua',
+        line = 2,
+        end_line = 2,
+        body = 'my reply',
+        origin = 'local',
+        in_reply_to = 101,
+        created_at = 4321,
+        state = 'active',
+      }, comments[2])
     end
   )
 

@@ -2,12 +2,14 @@
 -- (同一 repo branch / fork は refs/pull 一時 ref) -> 開始フロー委譲
 -- (pr-worktree.md「入出力と振る舞い」PR 解決 + worktree 作成判断 mode=pr)。
 -- gh / git は同一の cli 注入スタブで引数組み立てと応答を制御する。
-local cli = require 'review.git.cli'
 local config = require 'review.config'
 local paths = require 'review.store.paths'
 local pr_handler = require 'review.handlers.pr'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
+local git_stub = require 'helpers.git_stub'
+local nvim_env = require 'helpers.nvim_env'
+local session_env = require 'helpers.session_env'
 
 local REPO_TOP = '/spec/repo-top'
 
@@ -58,91 +60,28 @@ end
 
 local state = {}
 
-local REAL_NOTIFY = vim.notify
-local REAL_INPUT = vim.ui.input
-
+-- gh api (PR 開始時のコメント取り込み pr-comments) は引数組み立てを対象とする
+-- 本 spec では空応答で通し、call 記録・応答 index・通知に含めない。3 窓開通の
+-- base scratch 充填 (git show) は窓の中身の契約として session_spec が pin 済みなので
+-- 既定応答で通す。それ以外の想定外実行は error。
 local function install_git(responses)
-  state.git_calls = {}
-  state.git_opts = {}
-  cli._set_system(function(cmd, opts, on_exit)
-    -- gh api (PR 開始時のコメント取り込み pr-comments)。引数組み立てを対象とする
-    -- 本 spec では空応答で通し、call 記録・応答 index・通知に含めない。
-    if cmd[1] == 'gh' and cmd[2] == 'api' then
-      on_exit { code = 0, stdout = '[]', stderr = '' }
-      return
-    end
-    local idx = #state.git_calls + 1
-    table.insert(state.git_calls, cmd)
-    state.git_opts[idx] = opts
-    if responses[idx] == nil then
-      -- 3 窓開通の base scratch 充填 (git show) は窓の中身の契約として
-      -- session_spec が pin 済み。本 spec の対象 (引数組み立て) でないので
-      -- 既定応答で通す。それ以外の想定外実行は従来どおり error。
-      if cmd[2] == 'show' then
-        on_exit { code = 0, stdout = 'base content\n', stderr = '' }
-        return
-      end
-      error('pr stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
-    end
-    on_exit(responses[idx](cmd, opts))
-  end)
-  cli._set_executable(function()
-    return 1
-  end)
+  git_stub.install_queue(state, responses, { gh_api_empty = true })
 end
 
 local function use_env()
   before_each(function()
     config.reset()
     state = { notifications = {}, inputs = {}, input_answer = 'y', git_calls = {} }
-    state.dir = vim.fn.tempname()
-    vim.fn.mkdir(state.dir, 'p')
-    paths._set_data_dir(state.dir)
-    store._set_now(function()
-      return 4321
-    end)
-    store._set_notify(function() end)
-    session_handler._set_now(function()
-      return 4321
-    end)
-    session_handler._reset()
-    vim.notify = function(msg, level)
-      -- worktree 作成中の過渡 notify は完了時に nvim_echo クリアで消える実態を
-      -- モデル化し、最終的な notifications に残さない (shown はフラグで観測)。
-      if type(msg) == 'string' and msg:find('creating the review worktree', 1, true) then
-        state.worktree_notify_shown = true
-        return
-      end
-      table.insert(state.notifications, { msg = msg, level = level })
-    end
-    vim.ui.input = function(opts, cb)
-      table.insert(state.inputs, opts)
-      cb(state.input_answer)
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
-      end
-    end
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    session_env.make_dirs(state)
+    session_env.inject_store(state)
+    session_env.capture_notify(state, true)
+    session_env.answer_input(state)
+    nvim_env.wipe_review_buffers()
+    nvim_env.isolate_tab(state)
   end)
   after_each(function()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
-    end
-    vim.notify = REAL_NOTIFY
-    vim.ui.input = REAL_INPUT
-    paths._set_data_dir(nil)
-    store._set_now(nil)
-    store._set_notify(nil)
-    session_handler._set_now(nil)
-    session_handler._reset()
-    config.reset()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    vim.fn.delete(state.dir, 'rf')
+    nvim_env.close_tab(state.tab)
+    session_env.release(state)
   end)
 end
 
@@ -159,8 +98,12 @@ describe('pr-handler 入力解析', function()
     install_git {}
     local res = pr_handler.start 'not-a-pr'
 
-    assert.equals(false, res.ok)
-    assert.equals('E_PR', res.code)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'review.nvim: cannot recognize the PR number or URL',
+      code = 'E_PR',
+    }, res)
     assert.equals(1, #state.notifications)
     assert.equals(vim.log.levels.WARN, state.notifications[1].level)
     assert.equals(0, #state.git_calls)
@@ -200,7 +143,7 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
       install_git(fork_seq(pr_json()))
 
       local res = pr_handler.start '7'
-      assert.equals(true, res.ok)
+      assert.same({ __class = 'review.Result', ok = true }, res)
 
       assert.same({ 'git', 'rev-parse', '--show-toplevel' }, state.git_calls[1])
       assert.equals('gh', state.git_calls[2][1])
@@ -255,15 +198,10 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
       -- shown: 作成中に vim.notify が発行された (stub がフラグ記録)
       assert.is_true(state.worktree_notify_shown)
       -- hidden: 完了時に nvim_echo クリアで消えるため最終リストには残らない
-      for _, n in ipairs(state.notifications) do
-        if type(n.msg) == 'string' then
-          assert.is_nil(n.msg:find('creating the review worktree', 1, true))
-        end
-      end
-      assert.same(
+      -- (最終の通知列は開始 INFO だけ)
+      assert.same({
         { msg = 'review.nvim: PR #7: Add widget', level = vim.log.levels.INFO },
-        state.notifications[1]
-      )
+      }, state.notifications)
       assert.equals(1, #state.notifications)
     end
   )
@@ -410,8 +348,16 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
 
       pr_handler.start '7'
 
-      assert.equals(vim.log.levels.WARN, state.notifications[1].level)
-      assert.matches('cannot create the worktree', state.notifications[1].msg)
+      assert.same({
+        {
+          msg = (
+            'review.nvim: cannot create the worktree: %s. if a worktree with the same '
+            .. 'name is left over, clean it up with `git worktree remove` and retry '
+            .. '(fatal: collision)'
+          ):format(paths.worktree_path(REPO_TOP, 'pr-7')),
+          level = vim.log.levels.WARN,
+        },
+      }, state.notifications)
       -- 作成に失敗したら diff は走らない (worktree 基準の単引数形は成立しないため)
       local has_diff = false
       for _, cmd in ipairs(state.git_calls) do

@@ -7,16 +7,9 @@
 
 local windows = require 'review.ui.windows'
 
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
-
-local function wait_for(pred, why)
-  if not vim.wait(8000, pred, 20) then
-    fail('timeout: ' .. why)
-  end
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
+local wait_for = e2e.wait_for
 
 local function run()
   local log_path = os.getenv 'REVIEW_E2E_LOG'

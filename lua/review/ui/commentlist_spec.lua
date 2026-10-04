@@ -7,6 +7,8 @@
 local config = require 'review.config'
 local chrome = require 'review.ui.chrome'
 local commentlist = require 'review.ui.commentlist'
+local nvim_env = require 'helpers.nvim_env'
+local fixtures = require 'helpers.fixtures'
 
 local SLUG = 'main--feature'
 local BUF_NAME = 'review://comments/' .. SLUG
@@ -18,62 +20,19 @@ local state = {}
 local function use_env()
   before_each(function()
     config.reset()
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
     state.win = vim.api.nvim_get_current_win()
   end)
   after_each(function()
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
-    end
+    nvim_env.wipe_review_buffers()
+    nvim_env.close_tab(state.tab)
     state.win = nil
   end)
 end
 
-local function comment(overrides)
-  local c = {
-    id = 'c1',
-    file = 'a.lua',
-    line = 1,
-    end_line = 1,
-    body = 'body',
-    anchor = vim.NIL,
-    state = 'active',
-    created_at = 1,
-  }
-  for k, v in pairs(overrides or {}) do
-    c[k] = v
-  end
-  return c
-end
+local comment = fixtures.comment
 
-local function session_stub(overrides)
-  local s = {
-    version = 1,
-    id = SLUG,
-    repo = '/repo',
-    mode = 'branch',
-    base = 'main',
-    head = 'feature',
-    pr = vim.NIL,
-    worktree = vim.NIL,
-    status = 'open',
-    files = {},
-    comments = {},
-    created_at = 1,
-    updated_at = 1,
-  }
-  for k, v in pairs(overrides or {}) do
-    s[k] = v
-  end
-  return s
-end
+local session_stub = fixtures.session_stub
 
 local function lines_of(buf)
   return vim.api.nvim_buf_get_lines(buf, 0, -1, false)

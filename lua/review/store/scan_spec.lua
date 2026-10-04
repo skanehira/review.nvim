@@ -2,7 +2,7 @@
 -- 「実装の配置」: notify と worktree 掃除兼用の store 層スキャン)。
 -- 退避・tmpdir 注入の土台は store.session と共通 (session_spec と同じ境界 DI)。
 
-local paths = require 'review.store.paths'
+local store_env = require 'helpers.store_env'
 local scan = require 'review.store.scan'
 local session = require 'review.store.session'
 
@@ -35,26 +35,7 @@ local function sample(overrides)
 end
 
 local function isolate_store()
-  local state = {}
-  before_each(function()
-    state.dir = vim.fn.tempname()
-    vim.fn.mkdir(state.dir, 'p')
-    state.notices = {}
-    paths._set_data_dir(state.dir)
-    session._set_now(function()
-      return FIXED_NOW
-    end)
-    session._set_notify(function(msg, level)
-      table.insert(state.notices, { msg = msg, level = level })
-    end)
-  end)
-  after_each(function()
-    paths._set_data_dir(nil)
-    session._set_now(nil)
-    session._set_notify(nil)
-    vim.fn.delete(state.dir, 'rf')
-  end)
-  return state
+  return store_env.isolate_store(FIXED_NOW)
 end
 
 describe('scan.open_sessions', function()

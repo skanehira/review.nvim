@@ -10,24 +10,10 @@
 
 local windows = require 'review.ui.windows'
 
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
-
-local function wait_for(pred, why)
-  if not vim.wait(8000, pred, 20) then
-    fail('timeout: ' .. why)
-  end
-end
-
-local function git(args)
-  local out = vim.system(vim.list_extend({ 'git' }, args), { text = true }):wait(10000)
-  if out.code ~= 0 then
-    fail('git ' .. table.concat(args, ' ') .. ' 失敗: ' .. (out.stderr or ''))
-  end
-  return (out.stdout or ''):gsub('[\r\n]+$', '')
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
+local wait_for = e2e.wait_for
+local git = e2e.git
 
 local run = function()
   -- 単独実行でも決定的に (先行シナリオが switch した残骸を正規化)。

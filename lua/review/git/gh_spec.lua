@@ -69,12 +69,19 @@ describe('git/gh pr_view 引数組み立て', function()
         'number,title,baseRefName,headRefName,headRepositoryOwner,url,state',
       }, state.calls[1].cmd)
       assert.equals('/repo', state.calls[1].opts.cwd)
-      assert.equals(true, received.ok)
-      assert.equals('Add widget', received.data.title)
-      assert.equals(7, received.data.number)
-      assert.equals('main', received.data.baseRefName)
-      assert.equals('topic', received.data.headRefName)
-      assert.equals('OPEN', received.data.state)
+      assert.same({
+        __class = 'review.Result',
+        ok = true,
+        data = {
+          number = 7,
+          title = 'Add widget',
+          baseRefName = 'main',
+          headRefName = 'topic',
+          headRepositoryOwner = { login = 'forkguy' },
+          url = 'https://github.com/acme/demo/pull/7',
+          state = 'OPEN',
+        },
+      }, received)
     end
   )
 
@@ -196,8 +203,15 @@ describe('git/gh repo_from_url', function()
   end)
 
   it('URL でない / nil は nil を返す', function()
-    assert.is_nil(gh.repo_from_url(nil))
-    assert.is_nil(gh.repo_from_url '7')
+    local cases = {
+      -- 対照: URL なら owner/repo が取れる (常に nil を返す実装をここで落とす)
+      { input = 'https://github.com/acme/demo/pull/7', want = { owner = 'acme', repo = 'demo' } },
+      { input = nil, want = nil },
+      { input = '7', want = nil },
+    }
+    for _, case in ipairs(cases) do
+      assert.same(case.want, gh.repo_from_url(case.input), tostring(case.input))
+    end
   end)
 end)
 
@@ -214,9 +228,11 @@ describe('git/gh api 一覧系 (引数組み立て + JSON 変換)', function()
       { 'gh', 'api', 'repos/acme/demo/pulls/7/comments', '--paginate' },
       state.calls[1].cmd
     )
-    assert.equals(true, received.ok)
-    assert.equals(10, received.data[1].id)
-    assert.equals('hi', received.data[1].body)
+    assert.same({
+      __class = 'review.Result',
+      ok = true,
+      data = { { id = 10, path = 'a.lua', body = 'hi' } },
+    }, received)
   end)
 
   it('list_reviews は pulls/{n}/reviews を GET する', function()
@@ -256,6 +272,8 @@ describe('git/gh api 書き込み系 (JSON body を --input で渡す)', functio
     state.calls = {}
     cli._set_system(function(cmd, _opts, on_exit)
       local payload = nil
+      -- argv は --input の一時ファイル名 (実行ごとに変わる) を '<input>' に置き換えた写し
+      local argv = vim.deepcopy(cmd)
       for i = 1, #cmd - 1 do
         if cmd[i] == '--input' then
           local f = io.open(cmd[i + 1], 'r')
@@ -263,9 +281,10 @@ describe('git/gh api 書き込み系 (JSON body を --input で渡す)', functio
             payload = vim.json.decode(f:read '*a')
             f:close()
           end
+          argv[i + 1] = '<input>'
         end
       end
-      table.insert(state.calls, { cmd = cmd, payload = payload })
+      table.insert(state.calls, { cmd = cmd, argv = argv, payload = payload })
       on_exit { code = 0, stdout = response_stdout, stderr = '' }
     end)
   end
@@ -283,11 +302,15 @@ describe('git/gh api 書き込み系 (JSON body を --input で渡す)', functio
       received = res
     end)
     local c = state.calls[1]
-    assert.same(
-      { 'gh', 'api', '--method', 'POST', 'repos/acme/demo/pulls/7/comments', '--input' },
-      { c.cmd[1], c.cmd[2], c.cmd[3], c.cmd[4], c.cmd[5], c.cmd[6] }
-    )
-    assert.is_string(c.cmd[7]) -- --input の一時ファイル名
+    assert.same({
+      'gh',
+      'api',
+      '--method',
+      'POST',
+      'repos/acme/demo/pulls/7/comments',
+      '--input',
+      '<input>',
+    }, c.argv)
     assert.same({ body = 'use insert', path = 'src/a.lua', line = 12 }, c.payload)
     assert.equals(50, received.data.id)
   end)
@@ -301,7 +324,10 @@ describe('git/gh api 書き込み系 (JSON body を --input で渡す)', functio
       in_reply_to = 101,
     }, function() end)
     assert.same({ body = 'reply text', in_reply_to = 101 }, state.calls[1].payload)
-    assert.matches('pulls/7/comments', table.concat(state.calls[1].cmd, ' '))
+    assert.same(
+      { 'gh', 'api', '--method', 'POST', 'repos/acme/demo/pulls/7/comments', '--input', '<input>' },
+      state.calls[1].argv
+    )
   end)
 
   it('create_review_comment は subject_type=file でファイルレベルを POST', function()
@@ -326,7 +352,10 @@ describe('git/gh api 書き込み系 (JSON body を --input で渡す)', functio
       received = res
     end)
     assert.same({ event = 'APPROVE', body = 'lgtm' }, state.calls[1].payload)
-    assert.matches('pulls/7/reviews', table.concat(state.calls[1].cmd, ' '))
+    assert.same(
+      { 'gh', 'api', '--method', 'POST', 'repos/acme/demo/pulls/7/reviews', '--input', '<input>' },
+      state.calls[1].argv
+    )
     assert.equals('APPROVED', received.data.state)
   end)
 
@@ -350,7 +379,10 @@ describe('git/gh api 書き込み系 (JSON body を --input で渡す)', functio
       body = 'summary',
       comments = { { path = 'a.lua', line = 12, body = 'note' } },
     }, state.calls[1].payload)
-    assert.matches('pulls/7/reviews', table.concat(state.calls[1].cmd, ' '))
+    assert.same(
+      { 'gh', 'api', '--method', 'POST', 'repos/acme/demo/pulls/7/reviews', '--input', '<input>' },
+      state.calls[1].argv
+    )
   end)
 
   it('list_review_comments_by_review は GET /reviews/{id}/comments', function()
@@ -379,8 +411,13 @@ describe('git/gh api 書き込み系 (JSON body を --input で渡す)', functio
         received = res
       end
     )
-    assert.same('E_GH', received.code)
-    assert.equals('gh is not logged in; run `gh auth login`', received.error)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      data = { stdout = '', code = 1 },
+      error = 'gh is not logged in; run `gh auth login`',
+      code = 'E_GH',
+    }, received)
   end)
 
   it('api の 404 失敗は E_PR に変換する', function()
@@ -389,7 +426,12 @@ describe('git/gh api 書き込み系 (JSON body を --input で渡す)', functio
     gh.list_review_comments({ repo = REPO, number = 999 }, function(res)
       received = res
     end)
-    assert.same('E_PR', received.code)
-    assert.matches('Not Found', received.error)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      data = { stdout = '', code = 1 },
+      error = 'gh: Not Found (HTTP 404)',
+      code = 'E_PR',
+    }, received)
   end)
 end)

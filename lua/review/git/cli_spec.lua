@@ -1,5 +1,6 @@
 local cli = require 'review.git.cli'
 local result = require 'review.core.result'
+local git_env = require 'helpers.git_env'
 
 -- vim.system / vim.fn.executable の注入スタブを組み、結果型への変換を検証する。
 -- 実行アダプタの境界なので DI スタブが testing.md 優先順位① (DI + fake) に該当する。
@@ -14,16 +15,7 @@ local function restore_injections_after_each()
   end)
 end
 
--- 注入用の疑似 system: 呼ばれたら (cmd, opts, on_exit) を捕捉し、
--- テストが明示的に on_exit を呼ぶまでコールバックを発火しない。
-local function stub_system(captured)
-  return function(cmd, opts, on_exit)
-    captured.cmd = cmd
-    captured.opts = opts
-    captured.on_exit = on_exit
-    captured.calls = (captured.calls or 0) + 1
-  end
-end
+local stub_system = git_env.capture_system
 
 describe('cli.run 成功', function()
   restore_injections_after_each()
@@ -110,7 +102,13 @@ usage: git diff [<options>] [<commit>]
   -u, --unified[=<n>] <n>
 ]],
     }
-    assert.equals("fatal: bad revision 'nope'", received.error)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      data = { stdout = '', code = 128 },
+      error = "fatal: bad revision 'nope'",
+      code = 'E_GIT',
+    }, received)
   end)
 
   it(
@@ -387,10 +385,13 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
 
       local res = cli.run_sync('git', { 'for-each-ref' }, { err_code = 'E_REF' })
 
-      assert.equals(false, res.ok)
-      assert.equals('E_REF', res.code)
-      assert.equals('boom1', res.error)
-      assert.equals(128, res.data.code)
+      assert.same({
+        __class = 'review.Result',
+        ok = false,
+        data = { stdout = '', code = 128 },
+        error = 'boom1',
+        code = 'E_REF',
+      }, res)
     end
   )
 
@@ -405,7 +406,13 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
 
     local res = cli.run_sync('git', { 'for-each-ref' }, { err_code = 'E_REF' })
 
-    assert.equals("error: unknown option 'nope'", res.error)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      data = { stdout = '', code = 128 },
+      error = "error: unknown option 'nope'",
+      code = 'E_REF',
+    }, res)
   end)
 
   it(
@@ -417,10 +424,14 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
 
       local res = cli.run_sync('git', { 'for-each-ref' }, { timeout_ms = 30 })
 
-      assert.equals(false, res.ok)
+      assert.same({
+        __class = 'review.Result',
+        ok = false,
+        error = 'git did not finish within the sync-run timeout',
+        code = 'E_GIT',
+      }, res)
       assert.equals(30, captured.timeout)
       assert.is_true(captured.killed ~= nil)
-      assert.equals('git did not finish within the sync-run timeout', res.error)
     end
   )
 
@@ -435,8 +446,12 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
 
     local res = cli.run_sync('git', { 'x' })
 
-    assert.equals(false, res.ok)
-    assert.equals('E_GIT', res.code)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'git not found',
+      code = 'E_GIT',
+    }, res)
     assert.equals(1, calls)
     assert.is_nil(captured.cmd)
   end)
@@ -449,7 +464,11 @@ describe('cli.run_sync (:Review start cmdline 補完専用の同期実行)', fun
 
     local res = cli.run_sync('git', { 'x' }, { err_code = 'E_REF' })
 
-    assert.equals(false, res.ok)
-    assert.equals('E_REF', res.code)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'git failed to launch',
+      code = 'E_REF',
+    }, res)
   end)
 end)

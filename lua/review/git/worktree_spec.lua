@@ -4,30 +4,18 @@
 -- 注入 system スタブで引数検証、add/list/remove は実 git 1 ケースで Round-trip。
 local worktree = require 'review.git.worktree'
 local cli = require 'review.git.cli'
-local config = require 'review.config'
+local git_env = require 'helpers.git_env'
 
-local state = { dirs = {} }
+local state = {}
 
-local function restore_after_each()
-  after_each(function()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    config.reset()
-    for _, dir in ipairs(state.dirs) do
-      vim.fn.delete(dir, 'rf')
-    end
-    state.dirs = {}
-  end)
-end
+local restore_after_each = git_env.restore_after_each
 
 local function stub_system()
   state.calls = {}
   cli._set_system(function(cmd, opts, on_exit)
     table.insert(state.calls, { cmd = cmd, opts = opts, on_exit = on_exit })
   end)
-  cli._set_executable(function()
-    return 1
-  end)
+  git_env.executable_ok()
 end
 
 local function last()
@@ -35,14 +23,7 @@ local function last()
 end
 
 local function await_result(call)
-  local received
-  call(function(res)
-    received = res
-  end)
-  vim.wait(8000, function()
-    return received ~= nil
-  end, 10)
-  return received
+  return git_env.await_result(call, 8000, 10)
 end
 
 describe('git/worktree add / remove / prune 引数組み立て', function()
@@ -169,8 +150,13 @@ describe('git/worktree status / list', function()
         stderr = "fatal: cannot change to '/gone': No such file or directory\n",
       }
 
-      assert.equals('E_WORKTREE', received.code)
-      assert.equals(false, received.ok)
+      assert.same({
+        __class = 'review.Result',
+        ok = false,
+        data = { stdout = '', code = 128 },
+        error = "fatal: cannot change to '/gone': No such file or directory",
+        code = 'E_WORKTREE',
+      }, received)
     end
   )
 
@@ -226,7 +212,7 @@ describe('git/worktree remove_dir (掃除用の自前作 dir 再帰削除)', fun
     function()
       local root = vim.fn.tempname()
       vim.fn.mkdir(vim.fs.joinpath(root, 'd/e'), 'p')
-      table.insert(state.dirs, root)
+      git_env.track(root)
       local f = io.open(vim.fs.joinpath(root, 'd/e/f.txt'), 'w')
       f:write 'x\n'
       f:close()
@@ -254,7 +240,7 @@ describe('git/worktree remove_dir (掃除用の自前作 dir 再帰削除)', fun
       -- unlink するのが契約 (外部へのシンボリックリンクも実体を消さない)。
       local root = vim.fn.tempname()
       vim.fn.mkdir(vim.fs.joinpath(root, 'node_modules/pkg'), 'p')
-      table.insert(state.dirs, root)
+      git_env.track(root)
       local f = io.open(vim.fs.joinpath(root, 'node_modules/pkg/keep.txt'), 'w')
       f:write 'x\n'
       f:close()
@@ -271,7 +257,7 @@ describe('git/worktree remove_dir (掃除用の自前作 dir 再帰削除)', fun
   it('ファイルへの symlink も unlink で消す', function()
     local root = vim.fn.tempname()
     vim.fn.mkdir(root, 'p')
-    table.insert(state.dirs, root)
+    git_env.track(root)
     local target = vim.fs.joinpath(root, 'target.txt')
     local f = io.open(target, 'w')
     f:write 'x\n'
@@ -287,20 +273,7 @@ describe('git/worktree 実 git round-trip', function()
   restore_after_each()
 
   local function build_repo()
-    local dir = vim.fn.tempname()
-    vim.fn.mkdir(dir, 'p')
-    table.insert(state.dirs, dir)
-    local function git(args)
-      local out =
-        vim.system(vim.list_extend({ 'git' }, args), { cwd = dir, text = true }):wait(10000)
-      if out.code ~= 0 then
-        error('git ' .. table.concat(args, ' ') .. ' 失敗: ' .. out.stderr, 0)
-      end
-      return out.stdout
-    end
-    git { 'init', '-q', '-b', 'main' }
-    git { 'config', 'user.email', 'spec@example.com' }
-    git { 'config', 'user.name', 'spec' }
+    local dir, git = git_env.init_repo()
     local f = io.open(vim.fs.joinpath(dir, 'a.txt'), 'w')
     f:write 'a\n'
     f:close()
@@ -315,7 +288,7 @@ describe('git/worktree 実 git round-trip', function()
     function()
       local dir = build_repo()
       local wt = vim.fs.joinpath(vim.fn.tempname(), 'wt')
-      table.insert(state.dirs, vim.fs.dirname(wt))
+      git_env.track(vim.fs.dirname(wt))
 
       local added = await_result(function(cb)
         worktree.add({ repo = dir, path = wt, ref = 'HEAD' }, cb)
@@ -376,7 +349,7 @@ describe('git/worktree 実 git round-trip', function()
     function()
       local dir = build_repo()
       local wt = vim.fs.joinpath(vim.fn.tempname(), 'wt')
-      table.insert(state.dirs, vim.fs.dirname(wt))
+      git_env.track(vim.fs.dirname(wt))
 
       local first = await_result(function(cb)
         worktree.add({ repo = dir, path = wt, ref = 'HEAD' }, cb)

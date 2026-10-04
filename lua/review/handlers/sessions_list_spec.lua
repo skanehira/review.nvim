@@ -9,30 +9,19 @@ local session_handler = require 'review.handlers.session'
 local sessions_list = require 'review.handlers.sessions_list'
 local store = require 'review.store.session'
 local ui_list = require 'review.ui.list'
+local fixtures = require 'helpers.fixtures'
 
 local REAL_NOTIFY = vim.notify
 local state = {}
 
 local function session_stub(id, overrides)
-  local s = {
-    version = 1,
+  return fixtures.session_stub(vim.tbl_extend('force', {
     id = id,
     repo = '/spec/repo',
-    mode = 'branch',
     base = id:match '^(.-)%-%-' or id,
     head = id:match '%-%-(.*)$' or id,
-    pr = vim.NIL,
-    worktree = vim.NIL,
     status = 'closed',
-    files = {},
-    comments = {},
-    created_at = 1,
-    updated_at = 1,
-  }
-  for k, v in pairs(overrides or {}) do
-    s[k] = v
-  end
-  return s
+  }, overrides or {}))
 end
 
 describe('sessions_list.delete_current (一覧 d)', function()
@@ -109,7 +98,7 @@ describe('sessions_list.delete_current (一覧 d)', function()
       end
     end
     assert.is_not_nil(rhs, 'd がマップされていない')
-    assert.is_true(rhs:find('delete_current', 1, true) ~= nil, rhs)
+    assert.equals(":lua require('review.handlers.sessions_list').delete_current()<CR>", rhs)
   end)
 end)
 
@@ -200,7 +189,11 @@ describe('sessions_list 追随 (実 delete / refresh / 複数窓 winbar)', funct
         #lines,
         '削除後に一覧が再 render されていない: ' .. vim.inspect(lines)
       )
-      assert.is_truthy(lines[1]:find('a--a', 1, true), lines[1])
+      local kept = store.load(state.repo, 'a--a').data
+      assert.equals(
+        'a--a  closed  branch  a..a  0 comments  ' .. os.date('%Y-%m-%d %H:%M %Z', kept.updated_at),
+        lines[1]
+      )
       assert.equals('review.nvim · 1 session', vim.w[vim.api.nvim_get_current_win()].review_winbar)
       -- 実 delete: メモリでなくディスクの JSON が消えている (INV 判定)
       assert.is_true(vim.uv.fs_stat(paths.session_file(state.repo, 'b--b')) == nil)
@@ -240,20 +233,12 @@ describe('sessions_list 追随 (実 delete / refresh / 複数窓 winbar)', funct
         #state.git_calls,
         '削除済み行の <CR> で resume 経路が動いた'
       )
-      local warned = false
-      for _, n in ipairs(state.notifications) do
-        if
-          n.level == vim.log.levels.WARN
-          and n.msg:find('it was already deleted', 1, true) ~= nil
-          and n.msg:find('b--b', 1, true) ~= nil
-        then
-          warned = true
-        end
-      end
-      assert.is_true(
-        warned,
-        '削除済みの旨 WARN が出ていない: ' .. vim.inspect(state.notifications)
-      )
+      assert.same({
+        {
+          msg = 'review.nvim: cannot open session b--b: it was already deleted',
+          level = vim.log.levels.WARN,
+        },
+      }, state.notifications)
       assert.is_true(vim.uv.fs_stat(paths.session_file(state.repo, 'b--b')) == nil)
     end
   )

@@ -8,20 +8,10 @@
 
 local windows = require 'review.ui.windows'
 
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
-
-local function wait_for(pred, why)
-  if not vim.wait(8000, pred, 20) then
-    fail('timeout: ' .. why)
-  end
-end
-
-local function realpath(p)
-  return vim.uv.fs_realpath(p) or p
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
+local wait_for = e2e.wait_for
+local realpath = e2e.realpath
 
 local run = function()
   local user_tab = vim.api.nvim_get_current_tabpage()

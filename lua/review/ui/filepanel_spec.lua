@@ -6,31 +6,13 @@
 -- 併存・viewed 混在・filter 併用) を全体一致で pin する。
 local config = require 'review.config'
 local filepanel = require 'review.ui.filepanel'
+local nvim_env = require 'helpers.nvim_env'
+local fixtures = require 'helpers.fixtures'
 
 local SLUG = 'main--feature'
 local BUF_NAME = 'review://sidebar/' .. SLUG
 
-local function session_stub(overrides)
-  local s = {
-    version = 1,
-    id = SLUG,
-    repo = '/repo',
-    mode = 'branch',
-    base = 'main',
-    head = 'feature',
-    pr = vim.NIL,
-    worktree = vim.NIL,
-    status = 'open',
-    files = {},
-    comments = {},
-    created_at = 1,
-    updated_at = 1,
-  }
-  for k, v in pairs(overrides or {}) do
-    s[k] = v
-  end
-  return s
-end
+local session_stub = fixtures.session_stub
 
 local function f(path, status, added, deleted)
   return { path = path, status = status, added = added, deleted = deleted, hunks = {} }
@@ -46,21 +28,13 @@ local state = {}
 local function use_env()
   before_each(function()
     config.reset()
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
     state.win = vim.api.nvim_get_current_win()
   end)
   after_each(function()
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
+    nvim_env.wipe_review_buffers()
     filepanel._set_icon_resolver(nil)
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
-    end
+    nvim_env.close_tab(state.tab)
     state.win = nil
   end)
 end
@@ -309,7 +283,10 @@ describe('filepanel.row_entry / winbar', function()
   end)
 
   it('winbar 文字列は b: 変数に持たない (窓変数 only 契約)', function()
-    local buf = filepanel.render(session_stub(), files2(), TREE_OPTS)
+    local session = session_stub()
+    local buf = filepanel.render(session, files2(), TREE_OPTS)
+    -- winbar 文字列は filepanel.winbar が返し (handlers が窓へ当てる)、buffer には置かない
+    assert.equals('main..feature · 2 files · 0 comments', filepanel.winbar(session, files2(), {}))
     assert.is_nil(vim.b[buf].review_winbar)
   end)
 end)

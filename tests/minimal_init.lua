@@ -19,6 +19,12 @@ end
 vim.opt.runtimepath:append(vim.fn.getcwd())
 vim.opt.runtimepath:append(plenary)
 
+-- 複数 spec で共有するヘルパー (tests/helpers/*.lua) を require 'helpers.<name>' で
+-- 読めるようにする。rtp ローダは <rtp>/lua/ しか見ないので package.path に足す。
+-- -u は相対パスで渡される (run-tests.sh / plenary の子 nvim) ため :p で絶対化する。
+local tests_dir = vim.fn.fnamemodify(debug.getinfo(1, 'S').source:sub(2), ':p:h')
+package.path = tests_dir .. '/?.lua;' .. package.path
+
 -- headless テストで swap / shada によるファイル汚染を作らない。
 vim.opt.swapfile = false
 vim.cmd 'set shada&'

@@ -7,48 +7,14 @@
 -- (bin 実行不能) だけに通す。
 local repo = require 'review.git.repo'
 local cli = require 'review.git.cli'
-local config = require 'review.config'
+local git_env = require 'helpers.git_env'
 
-local created_dirs = {}
-
-local function restore_after_each()
-  after_each(function()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    config.reset()
-    for _, dir in ipairs(created_dirs) do
-      vim.fn.delete(dir, 'rf')
-    end
-    created_dirs = {}
-  end)
-end
-
-local function await_result(call)
-  local received
-  call(function(res)
-    received = res
-  end)
-  vim.wait(6000, function()
-    return received ~= nil
-  end)
-  return received
-end
+local restore_after_each = git_env.restore_after_each
+local await_result = git_env.await_result
 
 -- main (x.txt=main-content) / feature (x.txt=feature-content) の実 repo。
 local function build_repo()
-  local dir = vim.fn.tempname()
-  vim.fn.mkdir(dir, 'p')
-  table.insert(created_dirs, dir)
-  local function git(args)
-    local out = vim.system(vim.list_extend({ 'git' }, args), { cwd = dir, text = true }):wait(10000)
-    if out.code ~= 0 then
-      error('git ' .. table.concat(args, ' ') .. ' 失敗: ' .. out.stderr, 0)
-    end
-    return out.stdout
-  end
-  git { 'init', '-q', '-b', 'main' }
-  git { 'config', 'user.email', 'spec@example.com' }
-  git { 'config', 'user.name', 'spec' }
+  local dir, git = git_env.init_repo()
   local f = io.open(vim.fs.joinpath(dir, 'x.txt'), 'w')
   f:write 'main-content\n'
   f:close()
@@ -128,9 +94,12 @@ describe('git/repo switch 実行不能 (bin 不在)', function()
       repo.switch({ ref = 'feature', cwd = '/tmp' }, cb)
     end)
 
-    assert.equals(false, res.ok)
-    assert.equals('E_GIT', res.code)
-    assert.equals('git not found', res.error)
+    assert.same({
+      __class = 'review.Result',
+      ok = false,
+      error = 'git not found',
+      code = 'E_GIT',
+    }, res)
     assert.is_false(spawned)
   end)
 end)

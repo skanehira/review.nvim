@@ -14,16 +14,9 @@
 local windows = require 'review.ui.windows'
 local filepanel = require 'review.ui.filepanel'
 
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
-
-local function wait_for(pred, why)
-  if not vim.wait(8000, pred, 20) then
-    fail('timeout: ' .. why)
-  end
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
+local wait_for = e2e.wait_for
 
 local function buf_name(w)
   return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))

@@ -1,9 +1,7 @@
 -- E2E crash 模擬 (DoD シナリオ 3 前半)。Review pr 7 -> worktree 生成を確認して
 -- close せず qa! (VimLeave の掃除も走らない異常終了経路の模擬)。
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
 
 local wt_root = assert(os.getenv 'REVIEW_E2E_WT', 'REVIEW_E2E_WT 未設定')
 

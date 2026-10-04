@@ -1,9 +1,7 @@
 -- E2E crash 回復 (DoD シナリオ 3 後半)。dir を外から消された open セッションを
 -- 新プロセスが scan で回収 -> :Review 復元時に worktree が再生成される。
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
 
 local wt_root = assert(os.getenv 'REVIEW_E2E_WT', 'REVIEW_E2E_WT 未設定')
 

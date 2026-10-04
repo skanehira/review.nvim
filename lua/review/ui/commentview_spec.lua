@@ -140,9 +140,12 @@ describe('commentview.open: nvim border + buffer 中身', function()
   )
 
   it('read-only (modifiable=false) で、q 単打で閉じる', function()
+    local prev = vim.api.nvim_get_current_win()
     local win, buf = open({ 'a.lua:1 [c1]', 'x' }, { title = ' Comment a.lua' })
+    assert.equals(win, vim.api.nvim_get_current_win())
     assert.is_false(vim.bo[buf].modifiable)
     vim.cmd 'normal q'
     assert.is_false(vim.api.nvim_win_is_valid(win), 'q で閉じていない')
+    assert.equals(prev, vim.api.nvim_get_current_win())
   end)
 end)

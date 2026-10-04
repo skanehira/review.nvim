@@ -8,35 +8,21 @@
 local cli = require 'review.git.cli'
 local comments_handler = require 'review.handlers.comments'
 local config = require 'review.config'
-local paths = require 'review.store.paths'
 local prompt_handler = require 'review.handlers.prompt'
 local session_handler = require 'review.handlers.session'
-local store = require 'review.store.session'
 local ui_windows = require 'review.ui.windows'
+local fixtures = require 'helpers.fixtures'
+local git_env = require 'helpers.git_env'
+local nvim_env = require 'helpers.nvim_env'
+local session_env = require 'helpers.session_env'
 
 local SENTINEL = 'SENTINEL-MUST-NOT-BE-CLOBBERED'
 
 -- head (作業ツリー) の a.lua = new 側 5 行。head 実ファイル窓は :edit 相当の
 -- 実在ファイル経路なのでディスク実在が前提 (恒等行の源)。
-local HEAD_TEXT = table.concat({ 'one', 'two', 'three', 'four', 'six' }, '\n') .. '\n'
+local HEAD_TEXT = fixtures.HEAD_TEXT_ONE_SIX
 
-local RAW_DIFF = table.concat({
-  'diff --git a/a.lua b/a.lua',
-  'index 1111111..2222222 100644',
-  '--- a/a.lua',
-  '+++ b/a.lua',
-  '@@ -1,3 +1,5 @@',
-  ' one',
-  '+two',
-  '+three',
-  ' four',
-  '-five',
-  ' six',
-  '',
-}, '\n')
-
-local REAL_NOTIFY = vim.notify
-local REAL_INPUT = vim.ui.input
+local RAW_DIFF = fixtures.RAW_DIFF_ONE_SIX
 
 local state = {}
 
@@ -44,26 +30,11 @@ local function use_env()
   before_each(function()
     config.reset()
     state = { notifications = {} }
-    state.dir = vim.fn.tempname()
-    vim.fn.mkdir(state.dir, 'p')
-    state.repo = vim.fs.joinpath(state.dir, 'repo')
-    vim.fn.mkdir(state.repo, 'p')
-    state.repo = vim.uv.fs_realpath(state.repo) or state.repo
-    local f = io.open(vim.fs.joinpath(state.repo, 'a.lua'), 'w')
-    f:write(HEAD_TEXT)
-    f:close()
-    paths._set_data_dir(state.dir)
-    store._set_now(function()
-      return 4321
-    end)
-    store._set_notify(function() end)
-    session_handler._set_now(function()
-      return 4321
-    end)
+    session_env.make_dirs(state, { ['a.lua'] = HEAD_TEXT })
+    session_env.inject_store(state)
     comments_handler._set_now(function()
       return 4321
     end)
-    session_handler._reset()
     cli._set_system(function(cmd, _opts, on_exit)
       if cmd[2] == 'rev-parse' then
         on_exit { code = 0, stdout = state.repo .. '\n', stderr = '' }
@@ -74,23 +45,11 @@ local function use_env()
         on_exit { code = 0, stdout = RAW_DIFF, stderr = '' }
       end
     end)
-    cli._set_executable(function()
-      return 1
-    end)
-    state.real_notify = vim.notify
-    vim.notify = function(msg, level)
-      table.insert(state.notifications, { msg = msg, level = level })
-    end
+    git_env.executable_ok()
+    session_env.capture_notify(state)
     -- 3 窓 UI と review:// buf はプロセス共有 (comments_spec / session_spec と同型)。
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    ui_windows.reset()
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
-      end
-    end
+    session_env.reset_windows()
+    nvim_env.wipe_review_buffers()
     -- 外部状態の分離: レジスタと provider 定義を退避し sentinel で初期化する
     -- (after_each で復元。provider 無し経路と有り経路の両方を決定的に検証するため)。
     -- provider 定義は has_provider の検出元 4 系統すべてを消す。g:clipboard だけ
@@ -131,8 +90,7 @@ local function use_env()
     vim.fn.setreg('0', SENTINEL)
     vim.fn.setreg('+', SENTINEL)
     vim.fn.setreg('*', SENTINEL)
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
     session_handler.start { base = 'main', head = 'feature' }
     state.session = session_handler.active()
     -- head==HEAD 一致の通常経路 (作成判断は mode=pr のみで branch は worktree なし)。
@@ -143,33 +101,10 @@ local function use_env()
     vim.api.nvim_set_current_win(state.head_win)
   end)
   after_each(function()
-    -- close はコメントあり確認として vim.ui.input を引く (headless の既定 provider は
-    -- 無限待ちになるため 'y' 応答に戻してから閉じる)。
-    vim.ui.input = function(_, cb)
-      cb 'y'
-    end
-    session_handler.close()
-    vim.ui.input = REAL_INPUT
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    ui_windows.reset()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
-    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-      if vim.api.nvim_tabpage_is_valid(tab) then
-        vim.api.nvim_set_current_tabpage(tab)
-        pcall(vim.cmd, 'tabclose!')
-      end
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
-    vim.notify = REAL_NOTIFY
+    session_env.close_session()
+    session_env.reset_windows()
+    nvim_env.close_all_tabs()
+    nvim_env.wipe_review_buffers()
     -- provider#clipboard#Call を先に元へ戻してから register を復元する
     -- (関数が無いまま +/* を触ると nvim core が例外を投げ、復元が中断する — 実測)。
     -- 実 runtime の autoload を再 source する (対応コマンドがある環境では登録済み、
@@ -187,16 +122,8 @@ local function use_env()
     package.preload.clipboard = nil
     package.loaded.clipboard = nil
     prompt_handler._set_clipboard_probe(nil)
-    paths._set_data_dir(nil)
-    store._set_now(nil)
-    store._set_notify(nil)
-    session_handler._set_now(nil)
     comments_handler._set_now(nil)
-    session_handler._reset()
-    config.reset()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    vim.fn.delete(state.dir, 'rf')
+    session_env.release(state)
   end)
 end
 

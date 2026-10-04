@@ -34,6 +34,27 @@ local function inner_chunks(line)
   return t
 end
 
+-- 箱の全行の表示文字列 (chunk 連結)
+local function box_texts(vl)
+  return vim.tbl_map(line_text, vl or {})
+end
+
+-- 罫線の箱の期待行 (外幅 = 内側幅 + 4)。rows は中身 (左寄せ・右は空白 pad)、
+-- '├' はコメント間の区切り罫線。箱の配置そのものが表示契約なので行全体で比較する。
+local function box(inner_width, rows)
+  local rule = ('─'):rep(inner_width + 2)
+  local out = { '┌' .. rule .. '┐' }
+  for _, r in ipairs(rows) do
+    if r == '├' then
+      out[#out + 1] = '├' .. rule .. '┤'
+    else
+      out[#out + 1] = '│ ' .. r .. (' '):rep(inner_width - vim.fn.strdisplaywidth(r)) .. ' │'
+    end
+  end
+  out[#out + 1] = '└' .. rule .. '┘'
+  return out
+end
+
 local function comment(over)
   local c = {
     id = 'c1',
@@ -104,19 +125,10 @@ describe('commentmarks.apply: 併合 extmark', function()
       assert.equals(1, #heads, 'virt_text mark が 1 個ではない')
       local h = heads[1]
       assert.equals(1, h[2], 'row は line-1 (0-based)')
-      local vt = h[4].virt_text[1][1]
-      assert.is_true(
-        vt:find('\u{EA6B}', 1, true) ~= nil,
-        '件数 eol 表示が無い: ' .. tostring(vt)
-      )
-      assert.equals('ReviewPanelComment', h[4].virt_text[1][2])
-      local vl = h[4].virt_lines
-      assert.is_true(#vl >= 1, '行下スレッド本文が無い')
-      -- 1 行目 = メタデータ行 (id のみ)、2 行目 = 本文
-      local meta = line_text(vl[2])
-      assert.is_true(meta:find('[c1]', 1, true) ~= nil, 'id メタデータ行が無い: ' .. meta)
-      local body = line_text(vl[3])
-      assert.is_true(body:find('first thought', 1, true) ~= nil, '本文行が無い: ' .. body)
+      -- 件数 eol 表示 (nf-cod-comment + 件数)
+      assert.same({ { ' \u{EA6B} 1', 'ReviewPanelComment' } }, h[4].virt_text)
+      -- 箱: 上罫線 + メタデータ行 (id のみ) + 本文 + 下罫線
+      assert.same(box(16, { '  [c1]', 'first thought' }), box_texts(h[4].virt_lines))
     end
   )
 
@@ -152,20 +164,18 @@ describe('commentmarks.apply: 併合 extmark', function()
       buf,
       'a.lua'
     )
-    local heads = 0
-    local thread_len = 0
+    local heads = {}
     for _, m in ipairs(marks(buf)) do
       if m[4].virt_text ~= nil then
-        heads = heads + 1
-        thread_len = #(m[4].virt_lines or {})
-        assert.is_true(
-          m[4].virt_text[1][1]:find('\u{EA6B} 2', 1, true) ~= nil,
-          m[4].virt_text[1][1]
-        )
+        heads[#heads + 1] = m
       end
     end
-    assert.equals(1, heads, '併合されずに mark が二つある')
-    assert.is_true(thread_len >= 2, '両コメント本文行が無い: ' .. thread_len)
+    assert.equals(1, #heads, '併合されずに mark が二つある')
+    assert.same({ { ' \u{EA6B} 2', 'ReviewPanelComment' } }, heads[1][4].virt_text)
+    assert.same(
+      box(16, { '  [c1]', 'first thought', '├', '  [c2]', 'second' }),
+      box_texts(heads[1][4].virt_lines)
+    )
   end)
 
   it('eol anchor + right_gravity=true: 前行挿入で mark が行に追従する', function()
@@ -265,8 +275,8 @@ describe('commentmarks.apply: 範囲コメントの anchor (最終行の下)', f
     local m = marks(buf)[1]
     assert.equals(1, m[2], 'row が line-1 でない')
     assert.equals('ReviewCommentLine', m[4].hl_group, '下線 hl が無い')
-    assert.is_true(m[4].virt_text ~= nil, '件数 eol 表示が無い')
-    assert.is_true(#(m[4].virt_lines or {}) >= 1, '行下スレッドが無い')
+    assert.same({ { ' \u{EA6B} 1', 'ReviewPanelComment' } }, m[4].virt_text)
+    assert.same(box(16, { '  [c1]', 'first thought' }), box_texts(m[4].virt_lines))
   end)
 
   it(
@@ -284,33 +294,16 @@ describe('commentmarks.apply: 範囲コメントの anchor (最終行の下)', f
       local heads = virt_text_marks(buf)
       assert.equals(1, #heads, '同じ最終行の群が 1 mark にまとまっていない')
       assert.equals(3, heads[1][2], '群の行が最終行 (end_line-1) でない')
-      assert.is_true(
-        heads[1][4].virt_text[1][1]:find('\u{EA6B} 2', 1, true) ~= nil,
-        '件数が 2 でない: ' .. tostring(heads[1][4].virt_text[1][1])
-      )
+      assert.same({ { ' \u{EA6B} 2', 'ReviewPanelComment' } }, heads[1][4].virt_text)
       local underlines = underline_marks(buf)
       assert.equals(1, #underlines, '下線が群につき 1 本でない')
       assert.equals(1, underlines[1][2], '下線の開始が min(line)-1 でない')
       assert.equals(3, underlines[1][4].end_row, '下線の終端が end_line-1 でない')
       -- 箱: 上罫線 + c1 (メタデータ + 本文) + 区切り + c2 (メタデータ + 本文) + 下罫線
-      local vl = heads[1][4].virt_lines or {}
-      local texts = {}
-      for _, line in ipairs(vl) do
-        texts[#texts + 1] = line_text(line)
-      end
-      assert.equals(
-        7,
-        #vl,
-        '2 件の箱が 上罫線+c1+区切り+c2+下罫線 でない: ' .. vim.inspect(texts)
+      assert.same(
+        box(16, { '  [c1]', 'first thought', '├', '  [c2]', 'second' }),
+        box_texts(heads[1][4].virt_lines)
       )
-      assert.is_true(
-        texts[4]:find('├', 1, true) ~= nil,
-        'コメント間の区切り罫線が無い'
-      )
-      assert.is_true(texts[2]:find('[c1]', 1, true) ~= nil)
-      assert.is_true(texts[3]:find('first thought', 1, true) ~= nil)
-      assert.is_true(texts[5]:find('[c2]', 1, true) ~= nil)
-      assert.is_true(texts[6]:find('second', 1, true) ~= nil)
     end
   )
 
@@ -583,9 +576,10 @@ describe('commentmarks.apply: 罫線の箱', function()
       }, inner_chunks(vl[2]))
       assert.same({ { '  [c1]', 'ReviewCommentOutdated' } }, inner_chunks(vl[3]))
       assert.same({ { 'gone place', 'ReviewCommentBody' } }, inner_chunks(vl[4]))
-      assert.is_true(
-        line_text(vl[5]):find('├', 1, true) ~= nil,
-        'コメント間の区切り罫線が無い'
+      assert.equals(
+        '├' .. ('─'):rep(36) .. '┤',
+        line_text(vl[5]),
+        'コメント間の区切り罫線'
       )
       assert.same({ { '  [c2]', 'ReviewCommentOutdated' } }, inner_chunks(vl[6]))
       assert.same({ { 'also gone', 'ReviewCommentBody' } }, inner_chunks(vl[7]))
@@ -667,7 +661,7 @@ describe('commentmarks.apply: 罫線の箱', function()
       assert.same({ { 't)', 'ReviewCommentOutdated' } }, inner_chunks(vl[4]))
       assert.same({ { '  [c1]', 'ReviewCommentOutdated' } }, inner_chunks(vl[5]))
       assert.same({ { 'gone', 'ReviewCommentBody' } }, inner_chunks(vl[6]))
-      assert.is_true(line_text(vl[7]):find('├', 1, true) ~= nil, '区切り罫線が無い')
+      assert.equals('├' .. ('─'):rep(18) .. '┤', line_text(vl[7]), '区切り罫線')
       assert.same({ { '  [c2]', 'ReviewCommentOutdated' } }, inner_chunks(vl[8]))
       assert.same({ { 'also gone', 'ReviewCommentBody' } }, inner_chunks(vl[9]))
       assert.equals('ReviewCommentBorder', vl[10][1][2], '集約の末行が下罫線でない')
@@ -907,17 +901,11 @@ describe(
       return {}
     end
 
-    local function thread_text(buf)
-      return table.concat(vim.tbl_map(line_text, thread_lines(buf)), '\n')
-    end
-
     it('gh コメントは作者 login を接頭辞に表示する', function()
       local buf = mk_buf { 'line1', 'line2', 'line3' }
       local gh_c = comment { origin = 'gh', gh_id = 10, gh_user = 'octocat' }
       commentmarks.apply(pr_session { gh_c }, buf, 'a.lua')
-      local t = thread_text(buf)
-      assert.is_true(t:find('  [octocat] ', 1, true) ~= nil, t)
-      assert.is_true(t:find('first thought', 1, true) ~= nil, t)
+      assert.same(box(16, { '  [octocat]', 'first thought' }), box_texts(thread_lines(buf)))
     end)
 
     it('gh の未 submit コメントには ⚠ マーカーを付ける', function()
@@ -925,8 +913,10 @@ describe(
       local gh_pending =
         comment { origin = 'gh', gh_id = 10, gh_user = 'octocat', gh_state = 'pending' }
       commentmarks.apply(pr_session { gh_pending }, buf, 'a.lua')
-      local t = thread_text(buf)
-      assert.is_true(t:find('[octocat \u{26A0}]', 1, true) ~= nil, t)
+      assert.same(
+        box(16, { '  [octocat \u{26A0}]', 'first thought' }),
+        box_texts(thread_lines(buf))
+      )
     end)
 
     it(
@@ -935,15 +925,12 @@ describe(
         local buf = mk_buf { 'line1', 'line2', 'line3' }
         local local_pending = comment { origin = 'local', id = 'c2' }
         commentmarks.apply(pr_session { local_pending }, buf, 'a.lua')
-        local first = thread_text(buf)
-        assert.is_true(first:find('[c2 \u{26A0}]', 1, true) ~= nil, first)
+        assert.same(box(16, { '  [c2 \u{26A0}]', 'first thought' }), box_texts(thread_lines(buf)))
 
         -- branch モードでは local コメントに ⚠ を付けない (旧表示のまま)
         local buf2 = mk_buf { 'line1', 'line2', 'line3' }
         commentmarks.apply(session_of { comment { origin = 'local', id = 'c2' } }, buf2, 'a.lua')
-        local first2 = thread_text(buf2)
-        assert.is_true(first2:find('[c2] ', 1, true) ~= nil, first2)
-        assert.is_nil(first2:find('\u{26A0}', 1, true), first2)
+        assert.same(box(16, { '  [c2]', 'first thought' }), box_texts(thread_lines(buf2)))
       end
     )
 
@@ -966,10 +953,7 @@ describe(
             above = m[4].virt_lines
           end
         end
-        assert.is_true(#above > 0, 'ファイルレベル box が無い')
-        local t = table.concat(vim.tbl_map(line_text, above), '\n')
-        assert.is_true(t:find('[file] a.lua', 1, true) ~= nil, t)
-        assert.is_true(t:find('[alice]', 1, true) ~= nil, t)
+        assert.same(box(16, { '[file] a.lua', '  [alice]', 'first thought' }), box_texts(above))
       end
     )
 

@@ -10,6 +10,7 @@ local config = require 'review.config'
 local keygate = require 'review.ui.keygate'
 local windows = require 'review.ui.windows'
 local session_handler = require 'review.handlers.session'
+local nvim_env = require 'helpers.nvim_env'
 
 local state = {}
 
@@ -19,12 +20,10 @@ local function use_env()
   before_each(function()
     config.reset()
     state = { notifications = {} }
-    state.REAL_NOTIFY = vim.notify
     vim.notify = function(msg, level)
       table.insert(state.notifications, { msg = msg, level = level })
     end
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
     state.user_win = vim.api.nvim_get_current_win()
   end)
   after_each(function()
@@ -33,12 +32,8 @@ local function use_env()
     end
     state.finally = nil
     windows.close()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
-    state.REAL_NOTIFY = state.REAL_NOTIFY or vim.notify
-    vim.notify = state.REAL_NOTIFY
+    nvim_env.close_tab(state.tab)
+    vim.notify = nvim_env.REAL_NOTIFY
     config.reset()
     windows.reset()
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
@@ -66,6 +61,17 @@ local function scratch_buf(name, meta)
     vim.b[buf].review_meta = meta
   end
   return buf
+end
+
+-- dispatch spy (SPY:<name>) の通知だけを順に取り出す。
+local function spy_msgs()
+  local out = {}
+  for _, n in ipairs(state.notifications) do
+    if n.msg:find('SPY:', 1, true) == 1 then
+      table.insert(out, n.msg)
+    end
+  end
+  return out
 end
 
 local function open_review_tab()
@@ -407,6 +413,8 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
         state.notifications = {}
         press(head_buf, case.key, windows.win 'head')
         wait_msg(case.spy)
+        nvim_env.drain_scheduled()
+        assert.same({ case.spy }, spy_msgs(), case.key)
       end
     end
   )
@@ -554,6 +562,8 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       state.notifications = {}
       press(base_buf, '[F', windows.win 'base')
       wait_msg 'SPY:first_file'
+      nvim_env.drain_scheduled()
+      assert.same({ 'SPY:first_file' }, spy_msgs())
       -- ユーザー窓 (gate 不成立) では同じキーが built-in 化し handlers は走らない
       -- (head 実ファイルと同じ buf をユーザー窓で見る = review で想定する事故形)。
       vim.api.nvim_win_set_buf(state.user_win, head_buf)
@@ -584,20 +594,10 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
             key .. ' の fallback が built-in へ返らない'
           )
         end
-        vim.wait(100, function()
-          for _, n in ipairs(state.notifications) do
-            if n.msg:find('SPY:', 1, true) ~= nil then
-              return true
-            end
-          end
-          return false
-        end, 10)
-        for _, n in ipairs(state.notifications) do
-          assert.is_true(
-            n.msg:find('SPY:', 1, true) == nil,
-            key .. ' が gate 不成立窓で発火した'
-          )
-        end
+        nvim_env.settle(function()
+          return #spy_msgs() > 0
+        end)
+        assert.same({}, spy_msgs(), key .. ' が gate 不成立窓で発火した')
       end
     end
   )
@@ -609,19 +609,12 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       vim.api.nvim_set_current_win(state.user_win)
       local res = press(head_buf, 'q', state.user_win)
       -- 戻り値 = 元キーそのもの (built-in 再実行用)。schedule は予約されていない
-      -- ことが契約なので、最小の drain 後も SPY が出ないことを見る。
+      -- ことが契約なので、予約済みの schedule と timer を待った後も SPY が出ないことを見る。
       assert.equals('q', res)
-      vim.wait(100, function()
-        for _, n in ipairs(state.notifications) do
-          if n.msg:find('SPY:', 1, true) ~= nil then
-            return true
-          end
-        end
-        return false
-      end, 10)
-      for _, n in ipairs(state.notifications) do
-        assert.is_true(n.msg:find('SPY:', 1, true) == nil)
-      end
+      nvim_env.settle(function()
+        return #spy_msgs() > 0
+      end)
+      assert.same({}, spy_msgs())
     end
   )
 
@@ -704,12 +697,11 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       local out = press(head_scratch, 'c', windows.win 'head')
       wait_msg 'no active session'
       assert.is_not.equals('c', out)
-      for _, n in ipairs(state.notifications) do
-        assert.is_true(
-          n.msg:find('comments are not available in this window', 1, true) == nil,
-          '縮退 head scratch が WARN 扱い: ' .. n.msg
-        )
-      end
+      -- 不可窓 WARN ではなく、active 不在の comments 経路 WARN だけが出る
+      assert.same(
+        { { msg = 'review.nvim: no active session', level = vim.log.levels.WARN } },
+        state.notifications
+      )
     end
   )
 
@@ -725,5 +717,7 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
     state.notifications = {}
     press(deleted, 'q', windows.win 'head')
     wait_msg 'SPY:close_by_key'
+    nvim_env.drain_scheduled()
+    assert.same({ 'SPY:close_by_key' }, spy_msgs())
   end)
 end)

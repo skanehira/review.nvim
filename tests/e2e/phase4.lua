@@ -3,10 +3,8 @@
 -- popup 自体の描画は headless で不安定なため (既知の制約: :normal のみ安定)、
 -- customlist の呼び出し側 = review.complete の戻り値をキー入力相当の
 -- (引数, cmdline) 組で検証する。UI 実表示は手動確認。
-local function fail(why)
-  print('E2E-FAIL: ' .. why)
-  vim.cmd 'cquit!'
-end
+local e2e = require 'helpers.e2e'
+local fail = e2e.fail
 
 local function run()
   local review = require 'review'

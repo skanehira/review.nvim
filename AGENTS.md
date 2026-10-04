@@ -47,13 +47,21 @@ make e2e          # 実 headless nvim + 実 git の golden path (tests/e2e/phase
   - 例: headless の `:normal` は insert が継続せず `mode()` を返さない =
     「insert 残留しない」系の assert を unit に置くと無効
 - git/gh 系は `cli._set_system` の**応答キュー**で駆動する。呼び出し順が仕様の一部
-  (アサート対象)。`worktree remove` の同期/非同期の区別 (競合テスト) は
-  `install_git_deferred_remove` を使う
+  (アサート対象)。応答キュー stub は `tests/helpers/git_stub.lua` の `install_queue`。
+  `worktree remove` の同期/非同期の区別 (競合テスト) は
+  `install_git_deferred_remove` (`tests/helpers/session_fixtures.lua`) を使う
 - 永続化の検証はメモリ状態ではなく**ディスクの JSON を読んで**判定する (INV-4)
 - UI 系 spec は `tabnew` で隔離 tab に状態.tab を保ち、`review://*` バッファを
-  前後フックで掃除する既存パターン (use_env) に従う
+  前後フックで掃除する。手続きは `tests/helpers/nvim_env.lua` (`isolate_tab` /
+  `close_tab` / `close_all_tabs` / `wipe_review_buffers`) を使い、フックの登録と
+  呼び出し順は各 spec の `use_env()` が持つ
 - spec はソースと同ディレクトリの `*_spec.lua`。例外: `plugin/review.lua` の spec は
   `lua/review/plugin_spec.lua` (plugin/ 直下に置くと rtp 起動時に自動 source される)
+- 複数 spec で共有するヘルパーは `tests/helpers/*.lua` に置き `require 'helpers.<name>'`
+  で読む (配布物の `lua/review/` には入れない。`tests/minimal_init.lua` /
+  `tests/e2e_init.lua` が `tests/` を package.path に足す)。handlers 系の土俵は
+  `session_env` / `git_stub`、`handlers/session*_spec.lua` の開始部品は
+  `session_fixtures`、e2e シナリオの `fail` / `wait_for` 等は `e2e`
 
 ## UI/窓の契約 (歴代の壊れ方と対策。詳細は docs/design/features/diff-review.md)
 

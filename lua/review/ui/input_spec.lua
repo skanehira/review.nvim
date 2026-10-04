@@ -7,8 +7,9 @@
 -- nvim_input/feedkeys の typeahead が消費されないため :normal が唯一の投入経路
 -- (DESIGN.md「既知の制約」)。
 local input = require 'review.ui.input'
+local nvim_env = require 'helpers.nvim_env'
 
-local CY = vim.api.nvim_replace_termcodes('<C-y>', true, false, true)
+local CY = nvim_env.CY
 local CR = vim.api.nvim_replace_termcodes('<CR>', true, true, true)
 local ESC = vim.api.nvim_replace_termcodes('<Esc>', true, false, true)
 
@@ -19,23 +20,18 @@ local state = {}
 -- plenary busted は describe 外のフックを持たない (init_spec.lua と同じ helper 方式)。
 local function use_isolated_tabpage()
   before_each(function()
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
     state.confirmed = {}
     state.notifications = {}
-    state.real_notify = vim.notify
     vim.notify = function(msg, level)
       table.insert(state.notifications, { msg = msg, level = level })
     end
     input._set_now(nil)
   end)
   after_each(function()
-    vim.notify = state.real_notify
+    vim.notify = nvim_env.REAL_NOTIFY
     input._set_now(nil)
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
-    end
+    nvim_env.close_tab(state.tab)
   end)
 end
 
@@ -153,8 +149,10 @@ describe('input.open 閉じる / 破棄', function()
       assert.equals(2, tab_wins())
       assert.same({}, state.confirmed)
       assert.equals(1, #state.notifications)
-      assert.is_true(state.notifications[1].msg:find('confirm', 1, true) ~= nil)
-      assert.is_true(state.notifications[1].level == vim.log.levels.WARN)
+      assert.same({
+        msg = 'review.nvim: body has text; <CR> in Normal confirms, press q again to discard',
+        level = vim.log.levels.WARN,
+      }, state.notifications[1])
 
       state.now = state.now + 1.5
       vim.cmd 'normal q'
@@ -238,13 +236,11 @@ describe('input.open 表示契約', function()
 
   it('窓 title に確定/閉じる的操作ヒントが表示される', function()
     open()
-    local text = title_text()
-    assert.is_true(text:find('<CR> confirm', 1, true) ~= nil)
-    assert.is_true(text:find('q close', 1, true) ~= nil)
+    assert.equals(' Comment  <CR> confirm  q close ', title_text())
   end)
 
   it('opts.hint (対象行の示唆) が title に載る', function()
     open { hint = 'a.lua:4-5' }
-    assert.is_true(title_text():find('a.lua:4-5', 1, true) ~= nil)
+    assert.equals(' Comment [a.lua:4-5]  <CR> confirm  q close ', title_text())
   end)
 end)

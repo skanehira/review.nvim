@@ -398,6 +398,11 @@ describe('comment.reply_target', function()
   end)
 
   it('スレッドが無い行は nil を返す', function()
+    local comments = { mk('c1', { line = 5 }) }
+    -- 対照: スレッドのある行は根を返す (常に nil を返す実装をここで落とす)
+    assert.equals('c1', comment.reply_target(comments, 'a.lua', 5))
+    assert.is_nil(comment.reply_target(comments, 'a.lua', 6))
+    assert.is_nil(comment.reply_target(comments, 'b.lua', 5))
     assert.is_nil(comment.reply_target({}, 'a.lua', 5))
   end)
 
@@ -449,9 +454,18 @@ describe('comment.from_gh', function()
       subject_type = 'file',
     }
     local c = comment.from_gh(gh, { id = 'c8' })
-    assert.equals('file', c.subject_type)
-    assert.is_nil(c.line)
-    assert.equals(0, c.created_at)
+    -- line / end_line を持たず、解析できない created_at は 0
+    assert.same({
+      id = 'c8',
+      file = 'src/a.lua',
+      body = 'note on the file',
+      origin = 'gh',
+      gh_id = 501,
+      gh_user = 'octocat',
+      subject_type = 'file',
+      created_at = 0,
+      state = 'active',
+    }, c)
   end)
 
   it('line が無いコメントは original_line を仮置きする (outdated 予備)', function()
@@ -466,8 +480,18 @@ describe('comment.from_gh', function()
       subject_type = 'line',
     }
     local c = comment.from_gh(gh, { id = 'c9' })
-    assert.equals(3, c.line)
-    assert.equals(3, c.end_line)
+    assert.same({
+      id = 'c9',
+      file = 'a.lua',
+      body = 'stale',
+      origin = 'gh',
+      gh_id = 502,
+      gh_user = 'x',
+      line = 3,
+      end_line = 3,
+      created_at = 1704164645,
+      state = 'active',
+    }, c)
   end)
 
   it('line が vim.NIL (JSON null) でも line として扱わない', function()
@@ -485,8 +509,17 @@ describe('comment.from_gh', function()
       subject_type = 'line',
     }
     local c = comment.from_gh(gh, { id = 'c10' })
-    assert.is_nil(c.line)
-    assert.is_nil(c.end_line)
+    -- line / end_line キーを持たないことを全体比較で pin する
+    assert.same({
+      id = 'c10',
+      file = 'a.lua',
+      body = 'null line',
+      origin = 'gh',
+      gh_id = 503,
+      gh_user = 'x',
+      created_at = 1704164645,
+      state = 'active',
+    }, c)
   end)
 
   it('line が vim.NIL でも original_line があればそれを仮置きする', function()
@@ -501,7 +534,17 @@ describe('comment.from_gh', function()
       subject_type = 'line',
     }
     local c = comment.from_gh(gh, { id = 'c11' })
-    assert.equals(4, c.line)
-    assert.equals(4, c.end_line)
+    assert.same({
+      id = 'c11',
+      file = 'a.lua',
+      body = 'null line with original',
+      origin = 'gh',
+      gh_id = 504,
+      gh_user = 'x',
+      line = 4,
+      end_line = 4,
+      created_at = 1704164645,
+      state = 'active',
+    }, c)
   end)
 end)

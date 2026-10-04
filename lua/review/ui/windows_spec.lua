@@ -11,6 +11,7 @@
 --   * role は窓変数 gate + 表示 buf 指紋から導く (別窓で同じ buf を見せても head 不成立)
 local windows = require 'review.ui.windows'
 local chrome = require 'review.ui.chrome'
+local nvim_env = require 'helpers.nvim_env'
 
 local OTHER_DIR = vim.uv.fs_realpath '/tmp' or '/tmp'
 
@@ -29,9 +30,7 @@ local state = {}
 local function use_env()
   before_each(function()
     scratch_bufs = {}
-    state.old_notify = vim.notify
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    nvim_env.isolate_tab(state)
   end)
   after_each(function()
     if windows.state() ~= nil then
@@ -43,21 +42,14 @@ local function use_env()
         pcall(vim.cmd, 'tabclose!')
       end
     end
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
-      end
-    end
+    nvim_env.close_tab(state.tab)
+    nvim_env.wipe_review_buffers()
     for _, buf in ipairs(scratch_bufs) do
       if vim.api.nvim_buf_is_valid(buf) then
         vim.api.nvim_buf_delete(buf, { force = true })
       end
     end
-    vim.notify = state.old_notify
+    vim.notify = nvim_env.REAL_NOTIFY
     windows.reset()
     require('review.config').reset()
   end)
@@ -192,6 +184,12 @@ describe('windows.bind / set_panel_buf: role 導出', function()
       assert.is_nil(windows.role_of(windows.win 'base'))
       assert.is_nil(windows.role_of(windows.win 'head'))
       assert.is_nil(windows.role_of(windows.win 'panel'))
+      -- 対照: 同じ窓に bind した後は role が導ける (常に nil を返す実装をここで落とす)
+      windows.bind(base_buf, head_buf)
+      assert.equals('base', windows.role_of(windows.win 'base'))
+      assert.equals('head', windows.role_of(windows.win 'head'))
+      vim.api.nvim_win_set_buf(windows.win 'panel', scratch_buf 'review://sidebar/sx')
+      assert.equals('panel', windows.role_of(windows.win 'panel'))
     end
   )
 
@@ -302,6 +300,9 @@ describe('windows.bind / set_panel_buf: role 導出', function()
       vim.api.nvim_set_current_tabpage(state.tab)
       local uw = vim.api.nvim_get_current_win()
       vim.api.nvim_win_set_buf(uw, real)
+      -- 対照: 同じ buf を表示するレビューの head 窓は head と導ける
+      assert.equals('head', windows.role_of(windows.win 'head'))
+      assert.equals(real, vim.api.nvim_win_get_buf(uw))
       assert.is_nil(windows.role_of(uw))
     end
   )
@@ -826,7 +827,9 @@ describe('windows: q (close) と :tabclose の両経路', function()
       windows.close()
       assert.is_nil(windows.state())
       assert.is_false(vim.api.nvim_tabpage_is_valid(tab))
-      vim.wait(50)
+      nvim_env.settle(function()
+        return called > 0
+      end)
       assert.equals(0, called, 'programmatic close は tab 消滅経路と区別される')
     end
   )
@@ -869,18 +872,34 @@ describe('windows: q (close) と :tabclose の両経路', function()
       local review_t = windows.state().tab
       vim.api.nvim_set_current_tabpage(state.tab)
       vim.cmd 'tabclose!'
-      vim.wait(100)
+      nvim_env.settle(function()
+        return called > 0
+      end)
 
       assert.equals(0, called)
       assert.is_true(vim.api.nvim_tabpage_is_valid(review_t))
       assert.is_not_nil(windows.state())
       assert.equals(review_t, vim.api.nvim_win_get_tabpage(windows.win 'head'))
+      -- 対照: 同じ hook でレビュー tab 自身を閉じれば 1 回発火する
+      vim.api.nvim_set_current_tabpage(review_t)
+      vim.cmd 'tabclose!'
+      nvim_env.drain_scheduled()
+      assert.equals(1, called)
+      assert.is_nil(windows.state())
     end
   )
 
   it('state が無いときの close は no-op で安全', function()
+    -- 対照: state があれば close は tab を閉じて state を落とす
+    windows.open { dir = OTHER_DIR }
     windows.close()
     assert.is_nil(windows.state())
+    local tabs = #vim.api.nvim_list_tabpages()
+    local cur = vim.api.nvim_get_current_tabpage()
+    windows.close()
+    assert.is_nil(windows.state())
+    assert.equals(tabs, #vim.api.nvim_list_tabpages())
+    assert.equals(cur, vim.api.nvim_get_current_tabpage())
   end)
 
   it(

@@ -11,6 +11,9 @@ local session_handler = require 'review.handlers.session'
 local sessions_list = require 'review.handlers.sessions_list'
 local store = require 'review.store.session'
 local ui_windows = require 'review.ui.windows'
+local git_env = require 'helpers.git_env'
+local nvim_env = require 'helpers.nvim_env'
+local session_env = require 'helpers.session_env'
 
 -- repo path の実在チェック (sessions_list の grey 判定) があるため、
 -- 偽パスでなく mktemp の実ディレクトリを repo として使う。
@@ -31,10 +34,6 @@ local RAW_1HUNK = table.concat({
   '',
 }, '\n')
 
-local REAL_NOTIFY = vim.notify
-local REAL_INPUT = vim.ui.input
-local REAL_SELECT = vim.ui.select
-
 local state = {}
 
 -- core/diff 経由で files_by_path を作る (verify の入力を実パーサ産に固定)
@@ -51,49 +50,17 @@ local function use_env()
   before_each(function()
     config.reset()
     state = { notifications = {}, inputs = {}, input_answer = 'y', select_answer = 1 }
-    state.dir = vim.fn.tempname()
-    vim.fn.mkdir(state.dir, 'p')
-    paths._set_data_dir(state.dir)
-    store._set_now(function()
-      return 4321
-    end)
-    store._set_notify(function() end)
-    session_handler._set_now(function()
-      return 4321
-    end)
-    session_handler._reset()
-    vim.notify = function(msg, level)
-      -- worktree 作成中の過渡 notify は完了時に nvim_echo クリアで消える実態を
-      -- モデル化し、最終的な notifications に残さない (shown はフラグで観測)。
-      if type(msg) == 'string' and msg:find('creating the review worktree', 1, true) then
-        state.worktree_notify_shown = true
-        return
-      end
-      table.insert(state.notifications, { msg = msg, level = level })
-    end
-    vim.ui.input = function(opts, cb)
-      table.insert(state.inputs, opts)
-      cb(state.input_answer)
-    end
+    session_env.make_dirs(state)
+    session_env.inject_store(state)
+    session_env.capture_notify(state, true)
+    session_env.answer_input(state)
     vim.ui.select = function(items, _opts, on_choice)
       on_choice(items[state.select_answer])
     end
     -- 3 窓 UI は窓・tab・buf がプロセス共有 (session_spec use_env と同型の掃除)
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    ui_windows.reset()
-    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-      if vim.api.nvim_tabpage_is_valid(tab) then
-        vim.api.nvim_set_current_tabpage(tab)
-        pcall(vim.cmd, 'tabclose!')
-      end
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
-      end
-    end
+    session_env.reset_windows()
+    nvim_env.close_all_tabs()
+    nvim_env.wipe_review_buffers()
     state.git_stdout = RAW_1HUNK
     cli._set_system(function(cmd, _opts, on_exit)
       if cmd[2] == 'rev-parse' then
@@ -108,44 +75,14 @@ local function use_env()
         on_exit { code = 0, stdout = '' }
       end
     end)
-    cli._set_executable(function()
-      return 1
-    end)
-    vim.cmd 'tabnew'
-    state.tab = vim.api.nvim_get_current_tabpage()
+    git_env.executable_ok()
+    nvim_env.isolate_tab(state)
   end)
   after_each(function()
-    if ui_windows.state() ~= nil then
-      ui_windows.close()
-    end
-    ui_windows.reset()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
-    end
-    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-      if vim.api.nvim_tabpage_is_valid(tab) then
-        vim.api.nvim_set_current_tabpage(tab)
-        pcall(vim.cmd, 'tabclose!')
-      end
-    end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-      end
-    end
-    vim.notify = REAL_NOTIFY
-    vim.ui.input = REAL_INPUT
-    vim.ui.select = REAL_SELECT
-    paths._set_data_dir(nil)
-    store._set_now(nil)
-    store._set_notify(nil)
-    session_handler._set_now(nil)
-    session_handler._reset()
-    config.reset()
-    cli._set_system(nil)
-    cli._set_executable(nil)
-    vim.fn.delete(state.dir, 'rf')
+    session_env.reset_windows()
+    nvim_env.close_all_tabs()
+    nvim_env.wipe_review_buffers()
+    session_env.release(state)
   end)
 end
 
@@ -590,9 +527,12 @@ describe(':Review (resume_or_select) と起動時 notify', function()
     write_open_session('a--b', 'a', 'b')
     write_open_session('c--d', 'c', 'd')
     restore.notify_open_sessions()
-    local msg = state.notifications[1].msg
-    assert.equals(true, msg:find '2 reviews' ~= nil)
-    assert.equals(true, msg:find 'a--b' ~= nil)
+    assert.same({
+      {
+        msg = 'review.nvim: 2 reviews can be resumed (e.g. a--b). :Review to restore',
+        level = vim.log.levels.INFO,
+      },
+    }, state.notifications)
   end)
 
   it('VimEnter scan: open 0 件では何も通知しない', function()
