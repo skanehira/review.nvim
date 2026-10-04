@@ -33,6 +33,15 @@ local function texts(rows)
   return out
 end
 
+-- 行データ (row_entry / collapsed 集合のキー) の射影。表示文字列は texts で別に見る。
+local function entries(rows)
+  local out = {}
+  for _, r in ipairs(rows) do
+    out[#out + 1] = { kind = r.kind, path = r.path }
+  end
+  return out
+end
+
 describe('treelist.build tree モード', function()
   it(
     'ヘッダ 2 行 + Changes ツリー + 空行 + Reviewed セクション (viewed はセクションで表現)',
@@ -49,13 +58,14 @@ describe('treelist.build tree モード', function()
         'Reviewed (1)',
         'M a.lua +2 -2',
       }, texts(rows))
-      assert.equals('header', rows[1].kind)
-      assert.is_nil(rows[1].path)
-      assert.equals('file', rows[3].kind)
-      assert.equals('b.lua', rows[3].path)
-      assert.equals('separator', rows[4].kind)
-      assert.equals('file', rows[6].kind)
-      assert.equals('a.lua', rows[6].path)
+      assert.same({
+        { kind = 'header' },
+        { kind = 'header' },
+        { kind = 'file', path = 'b.lua' },
+        { kind = 'separator' },
+        { kind = 'header' },
+        { kind = 'file', path = 'a.lua' },
+      }, entries(rows))
     end
   )
 
@@ -93,7 +103,13 @@ describe('treelist.build tree モード', function()
 
   it('縮退時は head 表示名が ref 名 (ヘッダ 2 行目が base..<ref>)', function()
     local rows = treelist.build({ f('a.lua', 'M', 1, 0) }, tree_opts { head_display = 'hotfix' })
-    assert.equals('Showing changes for: main..hotfix', rows[2].text)
+    assert.same({
+      'Changes (1)',
+      'Showing changes for: main..hotfix',
+      'M a.lua +1 -0',
+      '',
+      'Reviewed (0)',
+    }, texts(rows))
   end)
 
   it('単一 child dir 連鎖は連結表示し、末尾 / で dir を識別する', function()
@@ -110,10 +126,16 @@ describe('treelist.build tree モード', function()
       '',
       'Reviewed (0)',
     }, texts(rows))
-    assert.equals('dir', rows[3].kind)
     -- 連結後 deepest の dir path がキー (collapsed 集合と row_entry の同一語)
-    assert.equals('src/deep', rows[3].path)
-    assert.equals('src/deep/new.lua', rows[4].path)
+    assert.same({
+      { kind = 'header' },
+      { kind = 'header' },
+      { kind = 'dir', path = 'src/deep' },
+      { kind = 'file', path = 'src/deep/new.lua' },
+      { kind = 'file', path = 'a.lua' },
+      { kind = 'separator' },
+      { kind = 'header' },
+    }, entries(rows))
   end)
 
   it('dir status は全 descendant の集約: 全同一はそのまま / 混在は *', function()
@@ -132,8 +154,16 @@ describe('treelist.build tree モード', function()
       '',
       'Reviewed (0)',
     }, texts(rows))
-    assert.equals('lib', rows[3].path)
-    assert.equals('lib/y', rows[4].path)
+    assert.same({
+      { kind = 'header' },
+      { kind = 'header' },
+      { kind = 'dir', path = 'lib' },
+      { kind = 'dir', path = 'lib/y' },
+      { kind = 'file', path = 'lib/y/r.go' },
+      { kind = 'file', path = 'lib/x.go' },
+      { kind = 'separator' },
+      { kind = 'header' },
+    }, entries(rows))
   end)
 
   it('同一 dir 配下は dir 先行 -> file、各々名前昇順', function()
@@ -174,10 +204,15 @@ describe('treelist.build tree モード', function()
         'Reviewed (0)',
       }, texts(rows))
       -- 行データは kind で区別できる (path は同じ語になりうる)
-      assert.equals('dir', rows[3].kind)
-      assert.equals('cmd', rows[3].path)
-      assert.equals('file', rows[5].kind)
-      assert.equals('cmd', rows[5].path)
+      assert.same({
+        { kind = 'header' },
+        { kind = 'header' },
+        { kind = 'dir', path = 'cmd' },
+        { kind = 'file', path = 'cmd/main.go' },
+        { kind = 'file', path = 'cmd' },
+        { kind = 'separator' },
+        { kind = 'header' },
+      }, entries(rows))
     end
   )
 
@@ -199,7 +234,16 @@ describe('treelist.build tree モード', function()
         '',
         'Reviewed (0)',
       }, texts(rows))
-      assert.equals('src/deep', rows[4].path)
+      assert.same({
+        { kind = 'header' },
+        { kind = 'header' },
+        { kind = 'dir', path = 'src' },
+        { kind = 'dir', path = 'src/deep' },
+        { kind = 'file', path = 'src/top.lua' },
+        { kind = 'file', path = 'a.lua' },
+        { kind = 'separator' },
+        { kind = 'header' },
+      }, entries(rows))
     end
   )
 
@@ -262,8 +306,16 @@ describe('treelist.build tree モード', function()
         end
         return nil
       end
+      assert.same({
+        { kind = 'header' },
+        { kind = 'header' },
+        { kind = 'dir', path = 'src' },
+        { kind = 'file', path = 'src/a.lua' },
+        { kind = 'file', path = 'src/b.lua' },
+        { kind = 'separator' },
+        { kind = 'header' },
+      }, entries(rows))
       local dir = rows[3]
-      assert.equals('dir', dir.kind)
       for _, s in ipairs(dir.spans) do
         assert.not_equals('ReviewPanelActive', s.group, 'dir 行が active 色になっている')
       end
@@ -296,15 +348,21 @@ describe('treelist.build tree モード', function()
       end
 
       -- viewed=true は Reviewed セクションへ (行頭 [✓] は廃止 — セクションで表現)
+      assert.same({
+        'Changes (0)',
+        'Showing changes for: main..working tree',
+        '',
+        'Reviewed (1)',
+        'A src/deep/',
+        '    A new.lua +12 -3',
+      }, texts(rows))
       local dir = rows[5]
-      assert.equals('A src/deep/', dir.text)
       assert.same({
         { text = 'A', group = 'ReviewPanelStatus' },
         { text = 'src/deep/', group = 'ReviewPanelDir' },
       }, pieces(dir))
 
       local file = rows[6]
-      assert.equals('    A new.lua +12 -3', file.text)
       assert.same({
         { text = 'A', group = 'ReviewPanelStatus' },
         { text = 'new.lua', group = 'ReviewPanelFile' },
@@ -370,14 +428,14 @@ describe('treelist.build list モード', function()
         'Reviewed (1)',
         'M b.lua +2 -1',
       }, texts(rows))
-      assert.equals('header', rows[1].kind)
-      assert.equals('file', rows[2].kind)
-      assert.equals('a.lua', rows[2].path)
-      assert.equals('file', rows[3].kind)
-      assert.equals('src/deep/new.lua', rows[3].path)
-      assert.equals('separator', rows[4].kind)
-      assert.equals('file', rows[6].kind)
-      assert.equals('b.lua', rows[6].path)
+      assert.same({
+        { kind = 'header' },
+        { kind = 'file', path = 'a.lua' },
+        { kind = 'file', path = 'src/deep/new.lua' },
+        { kind = 'separator' },
+        { kind = 'header' },
+        { kind = 'file', path = 'b.lua' },
+      }, entries(rows))
     end
   )
 
@@ -426,7 +484,14 @@ describe('treelist.build list モード', function()
 
   it('collapsed/mode 省略時は tree が既定 (既定がフォルダツリー)', function()
     local rows = treelist.build({ f('src/deep/new.lua', 'A', 1, 0) }, nil)
-    assert.equals('Changes (1)', rows[1].text)
-    assert.equals('dir', rows[3] and rows[3].kind or 'none')
+    -- dir 行がある = tree モード (ヘッダ文言は base/head 未指定の縮退なので見ない)
+    assert.same({
+      { kind = 'header' },
+      { kind = 'header' },
+      { kind = 'dir', path = 'src/deep' },
+      { kind = 'file', path = 'src/deep/new.lua' },
+      { kind = 'separator' },
+      { kind = 'header' },
+    }, entries(rows))
   end)
 end)
