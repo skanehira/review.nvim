@@ -14,10 +14,10 @@ local ui_windows = require 'review.ui.windows'
 local M = {}
 
 -- 注入時刻 (store / session_handler の now)。
-M.NOW = 4321
+local NOW = 4321
 
 local function now()
-  return M.NOW
+  return NOW
 end
 
 --- state.dir = 新しい tmpdir。files (relpath -> 本文) を渡すと state.dir/repo に

@@ -14,12 +14,6 @@ function M.wait_for(pred, why)
   end
 end
 
-function M.expect(cond, why)
-  if not cond then
-    M.fail(why)
-  end
-end
-
 --- 実パス正規化 (macOS /var -> /private/var)。git 出力由来の末尾改行は落とす。
 function M.realpath(p)
   local s = (p or ''):gsub('[\r\n]+$', '')

@@ -6,23 +6,8 @@ local git_env = require 'helpers.git_env'
 
 local M = {}
 
---- { code = 0, stdout = stdout, stderr = '' }
-function M.result_ok(stdout)
+local function result_ok(stdout)
   return { code = 0, stdout = stdout, stderr = '' }
-end
-
---- 呼ぶと result_ok(stdout) を返す応答関数。
-function M.respond_ok(stdout)
-  return function()
-    return M.result_ok(stdout)
-  end
-end
-
---- 呼ぶと { code = code, stdout = '', stderr = stderr } を返す応答関数。
-function M.respond_code(code, stderr)
-  return function()
-    return { code = code, stdout = '', stderr = stderr or '' }
-  end
 end
 
 --- gh api (PR 開始時のコメント取り込み) を空一覧で通す。処理したら true。
@@ -65,7 +50,7 @@ function M.install_queue(state, responses, opts)
     end
     if cmd[2] == 'show' then
       local stdout = opts.show_stdout and opts.show_stdout(cmd) or 'base content\n'
-      on_exit(M.result_ok(stdout))
+      on_exit(result_ok(stdout))
       return
     end
     error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)

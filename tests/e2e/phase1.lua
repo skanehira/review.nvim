@@ -17,8 +17,13 @@ local filepanel = require 'review.ui.filepanel'
 local e2e = require 'helpers.e2e'
 local fail = e2e.fail
 local wait_for = e2e.wait_for
-local expect = e2e.expect
 local realpath = e2e.realpath
+
+local function expect(cond, why)
+  if not cond then
+    fail(why)
+  end
+end
 
 local function win_buf_name(w)
   return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
