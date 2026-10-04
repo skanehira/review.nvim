@@ -82,7 +82,7 @@ local function install_git(responses)
         on_exit { code = 0, stdout = 'base content\n', stderr = '' }
         return
       end
-      error('pr stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
+      error('git stub: 想定外の追加実行 ' .. table.concat(cmd, ' '), 0)
     end
     on_exit(responses[idx](cmd, opts))
   end)
@@ -121,7 +121,7 @@ local function use_env()
     end
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
       end
     end
     vim.cmd 'tabnew'
@@ -130,7 +130,7 @@ local function use_env()
   after_each(function()
     if vim.api.nvim_tabpage_is_valid(state.tab) then
       vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
+      pcall(vim.cmd, 'tabclose!')
     end
     vim.notify = REAL_NOTIFY
     vim.ui.input = REAL_INPUT

@@ -91,7 +91,7 @@ local function use_env()
     end
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
       end
     end
     state.git_stdout = RAW_1HUNK
@@ -119,10 +119,6 @@ local function use_env()
       ui_windows.close()
     end
     ui_windows.reset()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
-    end
     for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
       if vim.api.nvim_tabpage_is_valid(tab) then
         vim.api.nvim_set_current_tabpage(tab)

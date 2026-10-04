@@ -34,7 +34,7 @@ local function use_isolated_tabpage()
     input._set_now(nil)
     if vim.api.nvim_tabpage_is_valid(state.tab) then
       vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
+      pcall(vim.cmd, 'tabclose!')
     end
   end)
 end

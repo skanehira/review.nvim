@@ -77,7 +77,6 @@ local function use_env()
     cli._set_executable(function()
       return 1
     end)
-    state.real_notify = vim.notify
     vim.notify = function(msg, level)
       table.insert(state.notifications, { msg = msg, level = level })
     end
@@ -88,7 +87,7 @@ local function use_env()
     ui_windows.reset()
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf):match '^review://' then
-        vim.api.nvim_buf_delete(buf, { force = true })
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
       end
     end
     -- 外部状態の分離: レジスタと provider 定義を退避し sentinel で初期化する
@@ -154,10 +153,6 @@ local function use_env()
       ui_windows.close()
     end
     ui_windows.reset()
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
     for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
       if vim.api.nvim_tabpage_is_valid(tab) then
         vim.api.nvim_set_current_tabpage(tab)

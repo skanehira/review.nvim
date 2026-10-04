@@ -19,6 +19,7 @@ local SLUG = 'main--feature'
 
 -- プロセス単一の vim 組み込みを require 時に 1 回捕捉 (before_each ごとに見ると
 -- spy が入れ子になり after_each の復旧先が壊れる — session_spec と同型)。
+local REAL_NOTIFY = vim.notify
 local REAL_INPUT = vim.ui.input
 local CY = vim.api.nvim_replace_termcodes('<C-y>', true, false, true)
 
@@ -82,7 +83,6 @@ local function use_env()
       return 1
     end)
     state.tab = vim.api.nvim_get_current_tabpage()
-    state.real_notify = vim.notify
     vim.notify = function(msg, level)
       table.insert(state.notifications, { msg = msg, level = level })
     end
@@ -105,10 +105,7 @@ local function use_env()
     if ui_windows.state() ~= nil then
       ui_windows.close()
     end
-    if vim.api.nvim_tabpage_is_valid(state.tab) then
-      vim.api.nvim_set_current_tabpage(state.tab)
-      pcall(vim.cmd, 'tabclose!')
-    end
+    ui_windows.reset()
     for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
       if vim.api.nvim_tabpage_is_valid(tab) then
         vim.api.nvim_set_current_tabpage(tab)
@@ -120,7 +117,7 @@ local function use_env()
         pcall(vim.api.nvim_buf_delete, buf, { force = true })
       end
     end
-    vim.notify = state.real_notify
+    vim.notify = REAL_NOTIFY
     paths._set_data_dir(nil)
     store._set_now(nil)
     store._set_notify(nil)

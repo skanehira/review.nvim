@@ -30,7 +30,7 @@ local function use_env()
     end
     if vim.api.nvim_tabpage_is_valid(state.tab) then
       vim.api.nvim_set_current_tabpage(state.tab)
-      vim.cmd 'tabclose!'
+      pcall(vim.cmd, 'tabclose!')
     end
     state.win = nil
   end)

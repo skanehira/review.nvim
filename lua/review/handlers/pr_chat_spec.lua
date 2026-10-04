@@ -100,6 +100,7 @@ local function use_env()
     if ui_windows.state() ~= nil then
       ui_windows.close()
     end
+    ui_windows.reset()
     if vim.api.nvim_tabpage_is_valid(state.tab) then
       vim.api.nvim_set_current_tabpage(state.tab)
       pcall(vim.cmd, 'tabclose!')
