@@ -527,9 +527,12 @@ describe(':Review (resume_or_select) と起動時 notify', function()
     write_open_session('a--b', 'a', 'b')
     write_open_session('c--d', 'c', 'd')
     restore.notify_open_sessions()
-    local msg = state.notifications[1].msg
-    assert.equals(true, msg:find '2 reviews' ~= nil)
-    assert.equals(true, msg:find 'a--b' ~= nil)
+    assert.same({
+      {
+        msg = 'review.nvim: 2 reviews can be resumed (e.g. a--b). :Review to restore',
+        level = vim.log.levels.INFO,
+      },
+    }, state.notifications)
   end)
 
   it('VimEnter scan: open 0 件では何も通知しない', function()

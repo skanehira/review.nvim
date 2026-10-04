@@ -367,29 +367,24 @@ describe(
           git_ok, -- 二段目 prune ok (dir は残る)
         }
 
-        local function find_msg(pat)
-          for _, n in ipairs(state.notifications) do
-            if n.msg:find(pat, 1, true) ~= nil then
-              return n.msg
-            end
-          end
-          return nil
-        end
-        assert.same(
-          'review.nvim: failed to fetch the worktree diff and cleanup '
-            .. 'also failed: fatal: boom remove',
-          find_msg 'failed to fetch the worktree diff'
-        )
-        assert.same(
-          'review.nvim: failed to delete the worktree dir. dirs without '
-            .. 'our own record cannot be reclaimed by the '
-            .. 'startup scan; delete '
-            .. wt
-            .. ' manually',
-          find_msg 'startup scan; delete '
-        )
-        assert.is_nil(load_saved())
-        assert.is_nil(find_msg 'startup scan / :Review delete')
+        -- 差分取得失敗 -> 掃除失敗 -> 手動削除案内 (記録が無いので «起動 scan が回収» とは
+        -- 言わない) の順。diff 失敗そのものの WARN が最後に続く。
+        assert.same({
+          {
+            msg = 'review.nvim: failed to fetch the worktree diff and cleanup '
+              .. 'also failed: fatal: boom remove',
+            level = vim.log.levels.WARN,
+          },
+          {
+            msg = 'review.nvim: failed to delete the worktree dir. dirs without '
+              .. 'our own record cannot be reclaimed by the '
+              .. 'startup scan; delete '
+              .. wt
+              .. ' manually',
+            level = vim.log.levels.WARN,
+          },
+          { msg = 'review.nvim: fatal: boom', level = vim.log.levels.WARN },
+        }, state.notifications)
 
         vim.fn.system { 'chmod', '755', wt }
         assert.equals(0, vim.v.shell_error)

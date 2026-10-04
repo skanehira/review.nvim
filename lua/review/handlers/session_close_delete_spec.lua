@@ -131,12 +131,8 @@ describe('session.close / session.delete (q 経路 = close と tab 消滅)', fun
       session_handler.close_by_key()
       assert.equals('closed', load_saved().status)
       assert.is_nil(session_handler.active())
-      for _, n in ipairs(state.notifications) do
-        assert.is_true(
-          n.msg:find('closed the review tab', 1, true) == nil,
-          'q 経路で tab 消滅 INFO が出た: ' .. n.msg
-        )
-      end
+      -- q 経路は tab 消滅 INFO を含め何も通知しない
+      assert.same({}, state.notifications)
     end
   )
 
@@ -181,14 +177,12 @@ describe('session.close / session.delete (q 経路 = close と tab 消滅)', fun
         'tab 消滅を close と解釈しない (status=open 維持)'
       )
       assert.equals(1, #saved.comments) -- save 済み (INV-4 + tab 消滅 save)
-      local notify = nil
-      for _, n in ipairs(state.notifications) do
-        if n.msg:find('closed the review tab', 1, true) ~= nil then
-          notify = n
-        end
-      end
-      assert.is_not_nil(notify, 'tab 消滅 INFO が無い')
-      assert.equals(vim.log.levels.INFO, notify.level)
+      assert.same({
+        {
+          msg = 'review.nvim: closed the review tab (session saved; reopen with `:Review`)',
+          level = vim.log.levels.INFO,
+        },
+      }, state.notifications)
       -- extmark 残骸 0 (張った head 実バッファを明示 clear — 開き直しまで残さない)
       local head_buf = vim.fn.bufnr(state.repo .. '/a.lua')
       local ns = vim.api.nvim_get_namespaces().review_comment
@@ -699,17 +693,15 @@ describe('delete の worktree / ref 掃除', function()
       state.deferred { code = 255, stdout = '', stderr = 'fatal: remove boom\n' }
 
       assert.same({ 'git', 'worktree', 'prune' }, state.git_calls[4])
-      local function has_msg(pat)
-        for _, n in ipairs(state.notifications) do
-          if n.msg:find(pat, 1, true) ~= nil then
-            return true
-          end
-        end
-        return false
-      end
-      assert.is_true(has_msg 'failed to remove the orphaned worktree dir')
-      assert.is_false(has_msg 'worktree cleanup failed') -- close の旧経路文言はもう無い
-      assert.is_false(has_msg 'failed to delete the worktree dir')
+      assert.same({
+        {
+          msg = (
+            'review.nvim: failed to remove the orphaned worktree dir. refusing to delete '
+            .. 'the session rather than leave an orphaned dir: %s'
+          ):format(wt),
+          level = vim.log.levels.WARN,
+        },
+      }, state.notifications)
       -- JSON を消さない = closed + created_by_us=true の記録が残る (起動 scan 回収可)。
       assert.is_true(vim.uv.fs_stat(json_path()) ~= nil)
       assert.equals('closed', load_saved().status)

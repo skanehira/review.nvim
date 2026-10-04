@@ -149,8 +149,10 @@ describe('input.open 閉じる / 破棄', function()
       assert.equals(2, tab_wins())
       assert.same({}, state.confirmed)
       assert.equals(1, #state.notifications)
-      assert.is_true(state.notifications[1].msg:find('confirm', 1, true) ~= nil)
-      assert.is_true(state.notifications[1].level == vim.log.levels.WARN)
+      assert.same({
+        msg = 'review.nvim: body has text; <CR> in Normal confirms, press q again to discard',
+        level = vim.log.levels.WARN,
+      }, state.notifications[1])
 
       state.now = state.now + 1.5
       vim.cmd 'normal q'

@@ -233,20 +233,12 @@ describe('sessions_list 追随 (実 delete / refresh / 複数窓 winbar)', funct
         #state.git_calls,
         '削除済み行の <CR> で resume 経路が動いた'
       )
-      local warned = false
-      for _, n in ipairs(state.notifications) do
-        if
-          n.level == vim.log.levels.WARN
-          and n.msg:find('it was already deleted', 1, true) ~= nil
-          and n.msg:find('b--b', 1, true) ~= nil
-        then
-          warned = true
-        end
-      end
-      assert.is_true(
-        warned,
-        '削除済みの旨 WARN が出ていない: ' .. vim.inspect(state.notifications)
-      )
+      assert.same({
+        {
+          msg = 'review.nvim: cannot open session b--b: it was already deleted',
+          level = vim.log.levels.WARN,
+        },
+      }, state.notifications)
       assert.is_true(vim.uv.fs_stat(paths.session_file(state.repo, 'b--b')) == nil)
     end
   )

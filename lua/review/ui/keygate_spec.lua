@@ -413,6 +413,8 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
         state.notifications = {}
         press(head_buf, case.key, windows.win 'head')
         wait_msg(case.spy)
+        nvim_env.drain_scheduled()
+        assert.same({ case.spy }, spy_msgs(), case.key)
       end
     end
   )
@@ -560,6 +562,8 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       state.notifications = {}
       press(base_buf, '[F', windows.win 'base')
       wait_msg 'SPY:first_file'
+      nvim_env.drain_scheduled()
+      assert.same({ 'SPY:first_file' }, spy_msgs())
       -- ユーザー窓 (gate 不成立) では同じキーが built-in 化し handlers は走らない
       -- (head 実ファイルと同じ buf をユーザー窓で見る = review で想定する事故形)。
       vim.api.nvim_win_set_buf(state.user_win, head_buf)
@@ -689,12 +693,11 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
       local out = press(head_scratch, 'c', windows.win 'head')
       wait_msg 'no active session'
       assert.is_not.equals('c', out)
-      for _, n in ipairs(state.notifications) do
-        assert.is_true(
-          n.msg:find('comments are not available in this window', 1, true) == nil,
-          '縮退 head scratch が WARN 扱い: ' .. n.msg
-        )
-      end
+      -- 不可窓 WARN ではなく、active 不在の comments 経路 WARN だけが出る
+      assert.same(
+        { { msg = 'review.nvim: no active session', level = vim.log.levels.WARN } },
+        state.notifications
+      )
     end
   )
 
@@ -710,5 +713,7 @@ describe('keygate.fire: window role gate 発火マトリクス', function()
     state.notifications = {}
     press(deleted, 'q', windows.win 'head')
     wait_msg 'SPY:close_by_key'
+    nvim_env.drain_scheduled()
+    assert.same({ 'SPY:close_by_key' }, spy_msgs())
   end)
 end)

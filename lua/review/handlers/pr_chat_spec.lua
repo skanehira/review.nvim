@@ -106,9 +106,12 @@ describe('handlers/pr_chat open / reply / refresh', function()
   it('branch モードは WARN で開かない', function()
     state.session.mode = 'branch'
     pr_chat.open()
-    assert.is_true(
-      state.notifications[1].msg:find('only available for PR sessions', 1, true) ~= nil
-    )
+    assert.same({
+      {
+        msg = 'review.nvim: PR conversation is only available for PR sessions (:Review pr)',
+        level = vim.log.levels.WARN,
+      },
+    }, state.notifications)
   end)
 
   it('q で閉じる (セッション状態は変えない)', function()

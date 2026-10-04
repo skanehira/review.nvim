@@ -194,15 +194,10 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
       -- shown: 作成中に vim.notify が発行された (stub がフラグ記録)
       assert.is_true(state.worktree_notify_shown)
       -- hidden: 完了時に nvim_echo クリアで消えるため最終リストには残らない
-      for _, n in ipairs(state.notifications) do
-        if type(n.msg) == 'string' then
-          assert.is_nil(n.msg:find('creating the review worktree', 1, true))
-        end
-      end
-      assert.same(
+      -- (最終の通知列は開始 INFO だけ)
+      assert.same({
         { msg = 'review.nvim: PR #7: Add widget', level = vim.log.levels.INFO },
-        state.notifications[1]
-      )
+      }, state.notifications)
       assert.equals(1, #state.notifications)
     end
   )
@@ -349,8 +344,16 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
 
       pr_handler.start '7'
 
-      assert.equals(vim.log.levels.WARN, state.notifications[1].level)
-      assert.matches('cannot create the worktree', state.notifications[1].msg)
+      assert.same({
+        {
+          msg = (
+            'review.nvim: cannot create the worktree: %s. if a worktree with the same '
+            .. 'name is left over, clean it up with `git worktree remove` and retry '
+            .. '(fatal: collision)'
+          ):format(paths.worktree_path(REPO_TOP, 'pr-7')),
+          level = vim.log.levels.WARN,
+        },
+      }, state.notifications)
       -- 作成に失敗したら diff は走らない (worktree 基準の単引数形は成立しないため)
       local has_diff = false
       for _, cmd in ipairs(state.git_calls) do

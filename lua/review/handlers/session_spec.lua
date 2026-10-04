@@ -245,7 +245,6 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
           .. '(base/head args of start are <Tab>-completable)',
         level = vim.log.levels.WARN,
       }, state.notifications[1])
-      assert.not_equals(nil, state.notifications[1].msg:find('"nope"', 1, true))
       assert.equals(1, #state.notifications)
       assert.is_nil(load_saved())
       assert.equals(0, vim.fn.bufexists(SIDEBAR_NAME))

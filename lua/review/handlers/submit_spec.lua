@@ -156,9 +156,9 @@ describe('handlers/submit submit_review', function()
       assert.equals(201, state.session.comments[2].gh_id)
       assert.equals(300, state.session.general[1].gh_id)
       assert.equals(1, refreshed)
-      assert.is_true(
-        state.notifications[#state.notifications].msg:find('review submitted', 1, true) ~= nil
-      )
+      assert.same({
+        { msg = 'review.nvim: review submitted (event=APPROVE)', level = vim.log.levels.INFO },
+      }, state.notifications)
     end
   )
 
@@ -167,9 +167,12 @@ describe('handlers/submit submit_review', function()
     local before = #state.gh_calls
     submit_handler.submit_review()
     assert.equals(before, #state.gh_calls)
-    assert.is_true(
-      state.notifications[1].msg:find('only available for PR sessions', 1, true) ~= nil
-    )
+    assert.same({
+      {
+        msg = 'review.nvim: submitting a review is only available for PR sessions (:Review pr)',
+        level = vim.log.levels.WARN,
+      },
+    }, state.notifications)
   end)
 
   it(
@@ -202,7 +205,12 @@ describe('handlers/submit submit_review', function()
 
       submit_handler.submit_review()
 
-      assert.is_true(state.notifications[1].msg:find('failed to submit the review', 1, true) ~= nil)
+      assert.same({
+        {
+          msg = 'review.nvim: failed to submit the review: gh: Validation Failed (HTTP 422)',
+          level = vim.log.levels.WARN,
+        },
+      }, state.notifications)
       assert.is_nil(state.session.comments[1].gh_id) -- pending 保持
       assert.equals(0, refreshed)
       -- 以後へ進まない (POST /reviews の 1 回だけ)
