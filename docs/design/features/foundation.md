@@ -26,7 +26,8 @@ review.nvim の骨格: `:Review` コマンド登録、`setup()` と config 合�
 | setup / config 合成 | facade | `lua/review/init.lua`, `lua/review/config.lua` |
 | 結果型 | core | `lua/review/core/result.lua` |
 | git/gh 共通実行 | adapters | `lua/review/git/cli.lua` |
-| テスト初期化 | tests | `tests/minimal_init.lua` (`PLENARY_PATH` 未設定なら exit 1) |
+| テスト初期化 | tests | `tests/minimal_init.lua` (`PLENARY_PATH` 未設定なら exit 1。`tests/` を package.path に足す) |
+| テスト共有ヘルパー | tests | `tests/helpers/*.lua` (`require 'helpers.<name>'`。複数 spec / e2e シナリオで共有する環境部品と fixture) |
 | make ターゲット | tooling | `Makefile` (test / test-file / lint / format / format-check / check)、`scripts/run-tests.sh`, `scripts/lint.sh`, `scripts/plugin-check.sh`。`scripts/e2e.sh` と `tests/e2e/*.lua` は golden path 群として実在 (`make e2e` で実行) |
 | CI | tooling | `.github/workflows/ci.yml` (test / lint / format / e2e の matrix。nvim v0.10.0 と stable) |
 | ヘルプ | doc | `doc/review.txt` |

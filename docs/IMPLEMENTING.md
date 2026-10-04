@@ -96,21 +96,23 @@ CI matrix は **nvim v0.10.0 と stable の両方**で走る。手元 nightly �
 - `cli._set_system` は**応答キューの消化順 = 仕様の一部**。`table.concat` join で
   「git をどの順で叩いたか」を pin する (`git diff:<repo>` 形式のラベル)。
   worktree の remove 同期/非同期の競合系は `install_git_deferred_remove`
+  (`tests/helpers/session_fixtures.lua`。応答キュー本体は `tests/helpers/git_stub.lua`)
 - 永続化は**ディスクの JSON を読んで**判定 (memory 状態のアサートは不可。INV-4)
 - 自動リアクション (BufWritePost・in-flight まとめ) は**発火タイミングを inject 可能に
   `_set_now` / `_set_diffupdate` で切り、呼び出し順序を spy で検証**する。
   「保存すべきときに呼ばれる」+「会员外で呼ばれない」の陽性/陰性両 pin が必要
   (陰性側の欠落は #15/#17 で指摘済み、pending フォロー)
 - UI の振る舞い test は `tabnew` 隔離 tab + `review://*` buffer の前後フック掃除
-  (既存 use_env / use_bufs パターン)。操作 contract の判定は**押下時点のバッファ内容
-  比較**(TextChanged 系は headless で発火しない)
+  (各 spec の use_env が `tests/helpers/nvim_env.lua` の手続きを呼ぶ)。操作 contract の
+  判定は**押下時点のバッファ内容比較**(TextChanged 系は headless で発火しない)
 - 変異検査 (old→new の置換が test を落とすか) は review-impl がスクリプト
   (`~/.claude/scripts/mutate-check.ts`) で実施済み。実装側も同じ検出自習を
   「old 実装のコード片を残す→失敗を見る→消す」で回すと速い
 - e2e (`scripts/e2e.sh`) の新 scenario: `tests/e2e/<name>.lua` にマーカー
   (`E2E-XX=値`) を標準出力し、`run <name> "$TMP"` の後 **shell 側で `grep -q` する**。
   fixture は mktemp + exit trap。nvim 側に assert を置くと失敗理由が log の中で
-  見づらくなるので、期待値は shell のメッセージにする
+  見づらくなるので、期待値は shell のメッセージにする。`fail` / `wait_for` /
+  `realpath` / `git` / `expect` は `require 'helpers.e2e'` から取る
 - 実 PTY でしか取れない契約 (窓限定キーの isolation / insert 残留) は
   `tmux + nvim --listen + --remote-expr` で実測し、**手順と結果を commit msg** に
   (AGENTS.md の約束。スクリプトは /tmp でよいが手順をコミットに転記する)
