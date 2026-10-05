@@ -2726,7 +2726,7 @@ describe(
           msg = 'review.nvim: no changes (main..feature): nothing to review',
           level = vim.log.levels.INFO,
         }, state.notifications[1])
-        assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[3])
+        assert.same({ 'git', 'worktree', 'remove', '--force', wt_path() }, state.git_calls[3])
         assert.is_nil(load_saved())
         assert.is_nil(session_handler.active())
       end
@@ -2759,7 +2759,7 @@ describe(
         }
         session_handler.begin(opts) -- #1: add -> diff 0 -> remove 投入 (未完)
 
-        assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[3])
+        assert.same({ 'git', 'worktree', 'remove', '--force', wt_path() }, state.git_calls[3])
         assert.is_true(state.deferred ~= nil)
 
         -- 同一 slug の 2 度目の開始: #1 は 0 差分で save していないので existing
@@ -2809,7 +2809,7 @@ describe(
           head = 'feature',
         }
 
-        assert.same({ 'git', 'worktree', 'remove', wt }, state.git_calls[3])
+        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[3])
         assert.is_nil(session_handler.active())
         -- 開始は開かない = 新規 save はしないが、既存 JSON の整合は保つ
         assert.same(
@@ -2835,7 +2835,7 @@ describe(
           git_ok, -- 掃除の remove
         }
 
-        assert.same({ 'git', 'worktree', 'remove', wt_path() }, state.git_calls[3])
+        assert.same({ 'git', 'worktree', 'remove', '--force', wt_path() }, state.git_calls[3])
         assert.same({
           msg = 'review.nvim: cannot resolve the reviewed ref: '
             .. '"main". specify an existing branch/commit '
@@ -2879,7 +2879,7 @@ describe(
           head = 'feature',
         }
 
-        assert.same({ 'git', 'worktree', 'remove', wt }, state.git_calls[3])
+        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[3])
         assert.is_nil(session_handler.active())
         assert.same(
           existing_stub { mode = 'pr', worktree = vim.NIL, updated_at = 4321 },
@@ -3029,7 +3029,7 @@ describe(
 
         -- 掃除は走った (remove ok) が、記録の所有が非自前なら nil 化しない
         -- (path 一致だけの gate だと他者/legacy 記録を黙って消す)
-        assert.same({ 'git', 'worktree', 'remove', wt }, state.git_calls[3])
+        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[3])
         assert.same(
           existing_stub {
             mode = 'pr',

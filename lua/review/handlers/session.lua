@@ -1194,10 +1194,17 @@ end
 -- 掃除 body は finish_close と同形: dir を消す全経路の E211 契約 (remove の spawn
 -- より先に worktree 配下 loaded バッファを同期破棄)。再利用分では以前のレビュー
 -- tab が開いたバッファが残り得るため、作成分だけでなく無条件で必要。
+-- remove は `--force` で行う: 一段目が失敗しても二段目 (prune + 自前 dir 再帰
+-- 削除) が dirty でも無条件に dir を消す契約なので、force 無しは「拒否 -> WARN
+-- -> どのみち消す」になるだけで安全性を足さない。利用者の post-checkout hook が
+-- worktree 作成時に tracked ファイルを書き換える repo (依存 install + 生成物の
+-- 上書き。実測) では force 無しの remove が必ず拒否され、WARN と prunable な
+-- 登録残骸が出る。記録再利用分に未コミット編集があっても、force 無しの時点で
+-- 二段目が消していたので失うものは変わらない (確認付きで消すのは delete 側)。
 local function sweep_worktree_unused(repo, wt, fail_msg, recoverable, on_swept)
   wt_buffers.destroy(wt.path)
   wt_with_lock(wt.path, function()
-    git_worktree.remove({ repo = repo, path = wt.path }, function(rres)
+    git_worktree.remove({ repo = repo, path = wt.path, force = true }, function(rres)
       if not rres.ok then
         notify_warn(fail_msg:format(rres.error))
         prune_and_rm_dir(repo, wt.path, recoverable, function()
