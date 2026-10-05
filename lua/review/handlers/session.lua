@@ -1659,7 +1659,7 @@ local function build_file_state(session, files)
 end
 
 -- begin_session: diff パース結果からセッションを組み立て UI を開く。
--- args = { repo, id, mode, base, head, pr, info? } (pr-worktree.md「PR 解決」3 の
+-- args = { repo, id, mode, base, head, pr, info? } (pr-worktree.md「PR 解決」4 の
 -- 開始時に handler が組み立てる)。worktree は解決済み値 (記録 | vim.NIL)、
 -- degraded は head 解決フローの解 (scratch 縮退時 true。リフレッシュの再取得
 -- 引数形を開始時解決と一致させるため active に保持する。session JSON には

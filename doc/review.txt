@@ -48,7 +48,9 @@ Everything runs through one command and its subcommands:
 	  gh runs synchronously). The head is expanded into a git worktree and the
 	  head side of the review windows (tcd done) becomes the real files under
 	  the worktree (worktree creation is pr mode only; removal only on session
-	  delete: |review-sessions|)
+	  delete: |review-sessions|). The base is the PR's base branch fetched
+	  from the remote on every start and compared as the remote-tracking
+	  ref (e.g. `origin/main`), so it need not exist as a local branch
 
 	:Review list			saved-session list |review-list|
 

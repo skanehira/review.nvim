@@ -480,7 +480,7 @@ local function start_done(base, head)
 end
 
 -- worktree 作成判断は mode=pr のみ。pr 開始は add/再利用 -> diff (cwd=worktree、
--- 単引数) の順 (pr-worktree.md「PR 解決」3)。handlers/pr と同じ入口 (session.begin)。
+-- 単引数) の順 (pr-worktree.md「PR 解決」4)。handlers/pr と同じ入口 (session.begin)。
 local function begin_pr(responses, opts)
   install_git(responses)
   return session_handler.begin {
