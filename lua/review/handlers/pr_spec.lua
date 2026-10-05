@@ -56,6 +56,13 @@ local git_ok = function()
   return { code = 0, stdout = '', stderr = '' }
 end
 
+local origin_ok = function()
+  return { code = 0, stdout = 'origin\n', stderr = '' }
+end
+
+-- PR の base は常に remote-tracking ref (pr-worktree.md「PR 解決」手順 3)
+local BASE_FETCH = { 'git', 'fetch', 'origin', '+refs/heads/main:refs/remotes/origin/main' }
+
 local state = {}
 
 local REAL_NOTIFY = vim.notify
@@ -187,15 +194,16 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         return { code = 0, stdout = 'origin\nupstream\n', stderr = '' }
       end, -- 4 remotes
       git_ok, -- 5 fetch refs/pull/7/head:review-nvim/pr-7
-      git_ok, -- 6 worktree add (mode=pr は常時作成)
+      git_ok, -- 6 fetch base (remote は 4 の結果を再利用 = git remote は 1 回)
+      git_ok, -- 7 worktree add (mode=pr は常時作成)
       function()
         return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
-      end, -- 7 diff <base> (cwd=worktree、作業ツリー基準)
+      end, -- 8 diff <remote>/<base> (cwd=worktree、作業ツリー基準)
     }
   end
 
   it(
-    'gh -> rev-parse 失敗 -> fetch -> worktree add -> diff(cwd=wt) -> pr-7 開始 (INFO: PR タイトル)',
+    'gh -> rev-parse 失敗 -> fetch -> base fetch -> add -> diff(cwd=wt) -> pr-7 開始 (INFO)',
     function()
       install_git(fork_seq(pr_json()))
 
@@ -210,14 +218,15 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         { 'git', 'fetch', 'origin', 'refs/pull/7/head:review-nvim/pr-7' },
         state.git_calls[5]
       )
+      assert.same(BASE_FETCH, state.git_calls[6])
       local wt = paths.worktree_path(REPO_TOP, 'pr-7')
       assert.same(
         { 'git', 'worktree', 'add', '--detach', wt, 'review-nvim/pr-7' },
-        state.git_calls[6]
+        state.git_calls[7]
       )
       -- 作業ツリー基準: add した worktree の cwd で `git diff <base>` の単引数形
-      assert.same({ 'git', 'diff', 'main' }, state.git_calls[7])
-      assert.equals(wt, state.git_opts[7].cwd)
+      assert.same({ 'git', 'diff', 'origin/main' }, state.git_calls[8])
+      assert.equals(wt, state.git_opts[8].cwd)
 
       local saved = store.load(REPO_TOP, 'pr-7').data
       assert.same({
@@ -225,7 +234,7 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         id = 'pr-7',
         repo = REPO_TOP,
         mode = 'pr',
-        base = 'main',
+        base = 'origin/main',
         head = 'review-nvim/pr-7',
         pr = { number = 7, url = 'https://github.com/acme/demo/pull/7' },
         worktree = { path = wt, created_by_us = true },
@@ -281,6 +290,7 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
           return { code = 0, stdout = 'gitlab\n', stderr = '' }
         end,
         git_ok, -- fetch
+        git_ok, -- base fetch
         git_ok, -- worktree add
         function()
           return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
@@ -293,6 +303,12 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         { 'git', 'fetch', 'gitlab', 'refs/pull/7/head:review-nvim/pr-7' },
         state.git_calls[5]
       )
+      -- base も同じ remote から取る
+      assert.same(
+        { 'git', 'fetch', 'gitlab', '+refs/heads/main:refs/remotes/gitlab/main' },
+        state.git_calls[6]
+      )
+      assert.same({ 'git', 'diff', 'gitlab/main' }, state.git_calls[8])
     end
   )
 
@@ -351,6 +367,8 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
         top_ok,
         json_ok(pr_json()),
         sha_ok, -- rev-parse topic ok
+        origin_ok, -- git remote (base fetch の remote 選択)
+        git_ok, -- base fetch
         git_ok, -- worktree add
         function()
           return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
@@ -360,14 +378,18 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
       pr_handler.start '7'
 
       local wt = paths.worktree_path(REPO_TOP, 'pr-7')
-      assert.same({ 'git', 'worktree', 'add', '--detach', wt, 'topic' }, state.git_calls[4])
-      assert.same({ 'git', 'diff', 'main' }, state.git_calls[5])
-      assert.equals(wt, state.git_opts[5].cwd)
+      assert.same({ 'git', 'remote' }, state.git_calls[4])
+      assert.same(BASE_FETCH, state.git_calls[5])
+      assert.same({ 'git', 'worktree', 'add', '--detach', wt, 'topic' }, state.git_calls[6])
+      assert.same({ 'git', 'diff', 'origin/main' }, state.git_calls[7])
+      assert.equals(wt, state.git_opts[7].cwd)
       -- 初期開き (ui/windows + session.open_file) = base scratch 充填の git show。
       -- 引数・窓契約は session_spec が pin 済みなのでここでは発生のみ見る。
-      assert.same({ 'git', 'show', 'main:a.lua' }, state.git_calls[6])
-      assert.equals(6, #state.git_calls)
-      assert.equals('topic', store.load(REPO_TOP, 'pr-7').data.head)
+      assert.same({ 'git', 'show', 'origin/main:a.lua' }, state.git_calls[8])
+      assert.equals(8, #state.git_calls)
+      local saved = store.load(REPO_TOP, 'pr-7').data
+      assert.equals('topic', saved.head)
+      assert.equals('origin/main', saved.base)
     end
   )
 
@@ -399,6 +421,8 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
         top_ok,
         json_ok(pr_json()),
         sha_ok,
+        origin_ok, -- git remote
+        git_ok, -- base fetch
         function()
           return { code = 255, stdout = '', stderr = 'fatal: collision\n' }
         end, -- add fail
@@ -430,6 +454,8 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
       top_ok,
       json_ok(pr_json { state = 'MERGED' }),
       sha_ok,
+      origin_ok, -- git remote
+      git_ok, -- base fetch
       git_ok, -- worktree add
       function()
         return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
@@ -445,62 +471,69 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
     assert.equals('pr-7', session_handler.active().id)
   end)
 
-  it('既存 pr-7 セッションの開始は継承確認 -> comments 保持で再開', function()
-    store.save {
-      version = 1,
-      id = 'pr-7',
-      repo = REPO_TOP,
-      mode = 'pr',
-      base = 'main',
-      head = 'review-nvim/pr-7',
-      pr = { number = 7, url = 'https://github.com/acme/demo/pull/7' },
-      worktree = vim.NIL,
-      status = 'closed',
-      files = {},
-      comments = {
-        {
-          id = 'c1',
-          file = 'a.lua',
-          line = 2,
-          end_line = 2,
-          body = 'keep',
-          anchor = { before = 'line1', line = 'line2', after = vim.NIL },
-          state = 'active',
-          created_at = 100,
+  it(
+    '既存 pr-7 (旧形式 base=baseRefName) は base を <remote>/<base> へ移し継承確認 -> 再開',
+    function()
+      store.save {
+        version = 1,
+        id = 'pr-7',
+        repo = REPO_TOP,
+        mode = 'pr',
+        base = 'main',
+        head = 'review-nvim/pr-7',
+        pr = { number = 7, url = 'https://github.com/acme/demo/pull/7' },
+        worktree = vim.NIL,
+        status = 'closed',
+        files = {},
+        comments = {
+          {
+            id = 'c1',
+            file = 'a.lua',
+            line = 2,
+            end_line = 2,
+            body = 'keep',
+            anchor = { before = 'line1', line = 'line2', after = vim.NIL },
+            state = 'active',
+            created_at = 100,
+          },
         },
-      },
-      created_at = 1,
-    }
-    install_git {
-      top_ok,
-      json_ok(pr_json()),
-      function()
-        return { code = 128, stdout = '', stderr = "fatal: ambiguous argument 'topic'\n" }
-      end,
-      function()
-        return { code = 0, stdout = 'origin\n', stderr = '' }
-      end,
-      git_ok, -- fetch
-      git_ok, -- worktree add (mode=pr)
-      function()
-        return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
-      end, -- diff (cwd=worktree)
-    }
+        created_at = 1,
+      }
+      install_git {
+        top_ok,
+        json_ok(pr_json()),
+        function()
+          return { code = 128, stdout = '', stderr = "fatal: ambiguous argument 'topic'\n" }
+        end,
+        origin_ok,
+        git_ok, -- fetch
+        git_ok, -- base fetch
+        git_ok, -- worktree add (mode=pr)
+        function()
+          return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
+        end, -- diff (cwd=worktree)
+      }
 
-    pr_handler.start '7'
+      pr_handler.start '7'
 
-    assert.equals(1, #state.inputs)
-    assert.equals(
-      'review.nvim: the existing session pr-7 '
-        .. '(main..review-nvim/pr-7, 1 comments) shares the same refs as '
-        .. 'this start '
-        .. 'inherit its comments and open? [y/N]: ',
-      state.inputs[1].prompt
-    )
-    local saved = store.load(REPO_TOP, 'pr-7').data
-    assert.equals('keep', saved.comments[1].body)
-    assert.equals('open', saved.status)
-  end)
+      assert.equals(1, #state.inputs)
+      assert.equals(
+        'review.nvim: the existing session pr-7 '
+          .. '(origin/main..review-nvim/pr-7, 1 comments) shares the same refs as '
+          .. 'this start '
+          .. 'inherit its comments and open? [y/N]: ',
+        state.inputs[1].prompt
+      )
+      local saved = store.load(REPO_TOP, 'pr-7').data
+      assert.equals('keep', saved.comments[1].body)
+      assert.equals('open', saved.status)
+      assert.equals('origin/main', saved.base)
+      -- slug 衝突 WARN を出していない (旧形式の base でも同じ PR として継承できる)
+      for _, n in ipairs(state.notifications) do
+        assert.are_not.equal(vim.log.levels.WARN, n.level)
+      end
+    end
+  )
 
   it(
     'URL 入力では gh へ URL をそのまま渡し、番号は /pull/<n> から採る (pr-12)',
@@ -509,6 +542,8 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
         top_ok,
         json_ok(pr_json { number = 12, url = 'https://github.com/acme/demo/pull/12' }),
         sha_ok,
+        origin_ok, -- git remote
+        git_ok, -- base fetch
         git_ok, -- worktree add
         function()
           return { code = 0, stdout = RAW_DIFF_A, stderr = '' }
@@ -520,6 +555,59 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
       assert.equals('https://github.com/acme/demo/pull/12', state.git_calls[2][4])
       local saved = store.load(REPO_TOP, 'pr-12').data
       assert.same({ number = 12, url = 'https://github.com/acme/demo/pull/12' }, saved.pr)
+    end
+  )
+
+  it(
+    '同一 repo head でも remote 0 件なら base を取れないので URL 入力を促す WARN で中断 (fetch / add なし)',
+    function()
+      install_git {
+        top_ok,
+        json_ok(pr_json()),
+        sha_ok, -- rev-parse topic ok
+        git_ok, -- git remote: 0 件
+      }
+
+      pr_handler.start '7'
+
+      assert.same({
+        msg = 'review.nvim: cannot resolve the git remote; run inside the PR target repository, '
+          .. 'or identify the repository with :Review pr <URL>',
+        level = vim.log.levels.WARN,
+      }, state.notifications[1])
+      assert.equals(4, #state.git_calls) -- top, gh, rev-parse, remotes
+      assert.is_nil(session_handler.active())
+    end
+  )
+
+  it(
+    'base の fetch 失敗は PR base 用の WARN で中断し、worktree を作らない',
+    function()
+      install_git {
+        top_ok,
+        json_ok(pr_json()),
+        sha_ok,
+        origin_ok,
+        function()
+          return {
+            code = 128,
+            stdout = '',
+            stderr = "fatal: couldn't find remote ref refs/heads/main\n",
+          }
+        end, -- base fetch 失敗
+      }
+
+      pr_handler.start '7'
+
+      assert.same({
+        msg = 'review.nvim: cannot fetch the PR base branch "main" from origin: '
+          .. "fatal: couldn't find remote ref refs/heads/main",
+        level = vim.log.levels.WARN,
+      }, state.notifications[1])
+      assert.equals(1, #state.notifications)
+      assert.equals(5, #state.git_calls) -- top, gh, rev-parse, remotes, base fetch (add なし)
+      assert.is_nil(store.load(REPO_TOP, 'pr-7').data)
+      assert.is_nil(session_handler.active())
     end
   )
 end)

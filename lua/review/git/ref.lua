@@ -157,6 +157,23 @@ function M.fetch_pull(opts, cb)
   )
 end
 
+--- cb(result) result.data = remote-tracking ref 名 (`<remote>/<branch>`)。
+--- `git fetch <remote> +refs/heads/<branch>:refs/remotes/<remote>/<branch>`
+--- (pr-worktree.md「PR 解決」手順 3: PR の base は常に remote から取る)。
+--- refspec を明示するのは remote の fetch 設定 (--single-branch clone 等) に
+--- 依存せず remote-tracking ref を更新するため。`+` は非 ff (base の force push)
+--- でも上書きする。失敗は E_REF。
+function M.fetch_branch(opts, cb)
+  local spec = ('+refs/heads/%s:refs/remotes/%s/%s'):format(opts.branch, opts.remote, opts.branch)
+  run({ 'fetch', opts.remote, spec }, opts, function(res)
+    if not res.ok then
+      cb(res)
+      return
+    end
+    cb(result.ok(('%s/%s'):format(opts.remote, opts.branch)))
+  end)
+end
+
 -- fetch の右辺が短縮名 `review-nvim/pr-<n>` のとき git が実保存するフルネーム
 -- (refs/heads/ 底下。`git update-ref -d` は短縮名を "bad name" で拒否するため
 -- 掃除はこの形が要る — 2.x 実測、DESIGN.md「既知の制約」)。

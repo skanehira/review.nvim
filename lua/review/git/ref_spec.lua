@@ -319,6 +319,61 @@ describe('git/ref fetch_pull / delete_ref / remotes (pr-worktree fork 経路)', 
   )
 
   it(
+    'fetch_branch は +refs/heads/<b>:refs/remotes/<remote>/<b> を fetch し <remote>/<b> を返す',
+    function()
+      local captured = {}
+      cli._set_system(stub_system(captured))
+      stub_ok_executable()
+
+      local received
+      ref.fetch_branch({ remote = 'origin', branch = 'feat/x', cwd = '/repo' }, function(res)
+        received = res
+      end)
+      assert.same({
+        'git',
+        'fetch',
+        'origin',
+        '+refs/heads/feat/x:refs/remotes/origin/feat/x',
+      }, captured.cmd)
+      assert.equals('/repo', captured.opts.cwd)
+      captured.on_exit { code = 0, stdout = '', stderr = '' }
+
+      assert.same({
+        __class = 'review.Result',
+        ok = true,
+        data = 'origin/feat/x',
+      }, received)
+    end
+  )
+
+  it(
+    'fetch_branch の失敗 (remote に branch 不在) は code=E_REF の err に stderr 主行で返す',
+    function()
+      local captured = {}
+      cli._set_system(stub_system(captured))
+      stub_ok_executable()
+
+      local received
+      ref.fetch_branch({ remote = 'origin', branch = 'gone' }, function(res)
+        received = res
+      end)
+      captured.on_exit {
+        code = 128,
+        stdout = '',
+        stderr = "fatal: couldn't find remote ref refs/heads/gone\n",
+      }
+
+      assert.same({
+        __class = 'review.Result',
+        ok = false,
+        data = { stdout = '', code = 128 },
+        error = "fatal: couldn't find remote ref refs/heads/gone",
+        code = 'E_REF',
+      }, received)
+    end
+  )
+
+  it(
     'delete_ref は `git update-ref -d <full-ref>` を実行する (:Review delete の自前 ref 掃除)',
     function()
       local captured = {}

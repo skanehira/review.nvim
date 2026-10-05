@@ -1,5 +1,5 @@
--- PR セッション開始の調停: gh で PR 解決 -> head ref 解決 -> 開始フロー委譲
--- (pr-worktree.md「入出力と振る舞い」PR 解決 1〜3)。worktree 作成判断と UI 開局は
+-- PR セッション開始の調停: gh で PR 解決 -> head ref 解決 -> base ref 解決 ->
+-- 開始フロー委譲 (pr-worktree.md「入出力と振る舞い」PR 解決 1〜4)。worktree 作成判断と UI 開局は
 -- handlers/session / session.begin 共通経路に載せる (PR 専用経路を作らない)。
 -- gh / git の失敗は結果型の理由文字列を WARN 通知し、開始を中断する
 -- (E_GH / E_PR はアダプタ側で確定。gh 実行中の成否は非同期 = 戻り値は受理)。
@@ -9,6 +9,7 @@ local git_ref = require 'review.git.ref'
 local paths = require 'review.store.paths'
 local result = require 'review.core.result'
 local session = require 'review.handlers.session'
+local store = require 'review.store.session'
 
 local M = {}
 
@@ -46,8 +47,34 @@ local function pick_remote(names)
   return names[1]
 end
 
+local NO_REMOTE_MSG = 'cannot resolve the git remote; run inside the PR target repository, '
+  .. 'or identify the repository with :Review pr <URL>'
+
+-- 旧形式 (base = 素の baseRefName) で保存された同じ PR のセッションを、
+-- 解決後の base (<remote>/<baseRefName>) へ移す。refs 組の一意性 (slug_conflict)
+-- は文字列比較なので、移さないと同じ PR の再開始が slug 衝突で拒否される。
+-- head が違う既存は別の refs 組なので触らない (従来どおり衝突として扱う)。
+local function migrate_legacy_base(repo, slug, meta, head, base)
+  local existing = store.load(repo, slug).data
+  if
+    existing == nil
+    or existing.mode ~= 'pr'
+    or existing.base ~= meta.baseRefName
+    or existing.head ~= head
+  then
+    return
+  end
+  existing.base = base
+  local sres = store.save(existing)
+  if not sres.ok then
+    notify_warn(sres.error)
+  end
+end
+
 -- 解決した refs で開始フロー (継承確認 -> diff -> worktree 判断 -> UI)。
-local function begin_pr(repo, meta, number, head)
+local function begin_pr(repo, meta, number, head, base)
+  local slug = paths.pr_slug(number)
+  migrate_legacy_base(repo, slug, meta, head, base)
   local state_note = ''
   if meta.state ~= nil and meta.state ~= 'OPEN' then
     -- closed/merged PR もレビュー可能。状態は開始時 INFO に添えるだけ (エッジケース)
@@ -55,13 +82,46 @@ local function begin_pr(repo, meta, number, head)
   end
   session.begin {
     repo = repo,
-    id = paths.pr_slug(number),
+    id = slug,
     mode = 'pr',
-    base = meta.baseRefName,
+    base = base,
     head = head,
     pr = { number = tonumber(number) or number, url = meta.url },
     info = ('PR #%s: %s%s'):format(number, meta.title or '', state_note),
   }
+end
+
+-- base ref: ローカル branch の有無・鮮度に依存せず、常に remote から fetch した
+-- remote-tracking ref (<remote>/<baseRefName>) を使う (pr-worktree.md「PR 解決」
+-- 手順 3。stacked PR の base はローカルに無いことが多い)。remote は head 解決で
+-- 選んだもの (fork 経路) を受け取り、無ければ git remote から選ぶ。
+local function resolve_base(repo, meta, remote, cb)
+  local function fetch(name)
+    git_ref.fetch_branch({ remote = name, branch = meta.baseRefName, cwd = repo }, function(fres)
+      if not fres.ok then
+        notify_warn(
+          ('cannot fetch the PR base branch "%s" from %s: %s'):format(
+            meta.baseRefName,
+            name,
+            fres.error
+          )
+        )
+        return
+      end
+      cb(fres.data)
+    end)
+  end
+  if remote ~= nil then
+    fetch(remote)
+    return
+  end
+  git_ref.remotes({ cwd = repo }, function(rr)
+    if not rr.ok or #rr.data == 0 then
+      notify_warn(NO_REMOTE_MSG)
+      return
+    end
+    fetch(pick_remote(rr.data))
+  end)
 end
 
 --- `:Review pr <number|url>`。戻り値はディスパッチ受理 (gh / git を伴う成否は
@@ -89,19 +149,19 @@ function M.start(target)
       -- DESIGN.md「既知の制約」fork PR 行)。
       git_ref.rev_parse({ ref = meta.headRefName, cwd = repo }, function(hr)
         if hr.ok then
-          begin_pr(repo, meta, number, meta.headRefName)
+          resolve_base(repo, meta, nil, function(base)
+            begin_pr(repo, meta, number, meta.headRefName, base)
+          end)
           return
         end
         git_ref.remotes({ cwd = repo }, function(rr)
           if not rr.ok or #rr.data == 0 then
-            notify_warn(
-              'cannot resolve the git remote; run inside the PR target repository, '
-                .. 'or identify the repository with :Review pr <URL>'
-            )
+            notify_warn(NO_REMOTE_MSG)
             return
           end
+          local remote = pick_remote(rr.data)
           git_ref.fetch_pull({
-            remote = pick_remote(rr.data),
+            remote = remote,
             number = number,
             cwd = repo,
           }, function(fres)
@@ -109,7 +169,9 @@ function M.start(target)
               notify_warn(fres.error)
               return
             end
-            begin_pr(repo, meta, number, fres.data)
+            resolve_base(repo, meta, remote, function(base)
+              begin_pr(repo, meta, number, fres.data, base)
+            end)
           end)
         end)
       end)
