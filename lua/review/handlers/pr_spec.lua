@@ -611,3 +611,64 @@ describe('pr-handler 同一 repo branch / 失敗分岐', function()
     end
   )
 end)
+
+-- 旧形式 base の書き換えは「base が素の baseRefName」かつ「head 一致」のときだけ
+-- (pr-worktree.md「PR 解決」3)。それ以外の既存は別の refs 組なので JSON を
+-- 書き換えず、従来どおり slug 衝突 WARN を出す (同一 repo head = topic で開始)。
+describe('pr-handler 旧形式 base の書き換え条件', function()
+  use_env()
+
+  local function saved_pr7(base, head)
+    store.save {
+      version = 1,
+      id = 'pr-7',
+      repo = REPO_TOP,
+      mode = 'pr',
+      base = base,
+      head = head,
+      pr = { number = 7, url = 'https://github.com/acme/demo/pull/7' },
+      worktree = vim.NIL,
+      status = 'closed',
+      files = {},
+      comments = {},
+      created_at = 1,
+    }
+    return store.load(REPO_TOP, 'pr-7').data
+  end
+
+  for _, case in ipairs {
+    {
+      name = '旧形式 base でも head が違えば書き換えず slug 衝突',
+      base = 'main',
+      head = 'review-nvim/pr-7',
+    },
+    {
+      name = 'head が同じでも base が別ブランチ (PR の付け替え) なら書き換えず slug 衝突',
+      base = 'develop',
+      head = 'topic',
+    },
+  } do
+    it(case.name, function()
+      local before = saved_pr7(case.base, case.head)
+      install_git {
+        top_ok,
+        json_ok(pr_json()),
+        sha_ok, -- rev-parse topic ok (同一 repo head)
+        origin_ok,
+        git_ok, -- base fetch
+      }
+
+      pr_handler.start '7'
+
+      assert.same({
+        msg = ('review.nvim: slug pr-7: an existing session (%s..%s) is registered. '):format(
+          case.base,
+          case.head
+        ) .. 'delete it with :Review delete pr-7',
+        level = vim.log.levels.WARN,
+      }, state.notifications[1])
+      assert.same(before, store.load(REPO_TOP, 'pr-7').data)
+      assert.equals(5, #state.git_calls) -- worktree add へ進まない
+    end)
+  end
+end)
