@@ -91,8 +91,9 @@ local PR_QUERY = 'query($owner:String!,$name:String!,$number:Int!){'
   .. 'baseRef{target{oid}} headRefOid}}}'
 
 -- 番号指定は owner/repo を gh の placeholder (`-F` のみ展開される) に任せ、
--- `gh pr view <n>` と同じ規則で cwd の repo を解決させる。URL 指定は URL の
--- host / owner / repo を明示する。明示値を `-f` で渡すのは、`-F` の型変換で
+-- cwd の repo から解決させる。host は `gh api` の既定 (GH_HOST、未設定なら
+-- github.com) で、`gh pr view <n>` と違って cwd の repo からは推定されない。
+-- URL 指定は URL の host / owner / repo を明示する。明示値を `-f` で渡すのは、`-F` の型変換で
 -- 数字だけの owner 名が Int になりクエリが型エラーになるため。
 local function pr_view_args(opts)
   local args = { 'api' }

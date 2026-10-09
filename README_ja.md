@@ -38,7 +38,7 @@ GitHub の Files changed 風に、ブランチ (git ref) 間の差分と PR の�
 :Review start main
 ```
 
-`main..現在のブランチ` の差分が 3 窓 (追加ファイルは base 窓を閉じて head のみ) で開く。対象は現在のチェックアウトの作業ツリーなので、未コミット変更もレビューに含まれる。head を明示する場合は `:Review start main feature` (main に対して feature をレビュー)。PR は `:Review pr 42` (PR の base ブランチは remote-tracking ref (例 `origin/main`) として比較するので、ローカルに無くてよい。base と PR の head は GitHub より古いときだけ fetch する)。開始中はメッセージ欄にいまの段階 (PR の解決 / fetch / worktree 作成 / 差分の取得) を表示する。
+`main..現在のブランチ` の差分が 3 窓 (追加ファイルは base 窓を閉じて head のみ) で開く。対象は現在のチェックアウトの作業ツリーなので、未コミット変更もレビューに含まれる。head を明示する場合は `:Review start main feature` (main に対して feature をレビュー)。PR は `:Review pr 42` (PR の base ブランチは remote-tracking ref (例 `origin/main`) として比較するので、ローカルに無くてよい。base と fork PR の head は GitHub より古いときだけ fetch する。head のブランチがこの repo にある PR はそのローカル branch をそのまま使う)。開始中はメッセージ欄にいまの段階 (PR の解決 / fetch / worktree 作成 / 差分の取得) を表示する。
 
 **2. コメントを書く**
 

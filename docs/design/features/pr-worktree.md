@@ -11,7 +11,7 @@
 
 **PR 解決** `:Review pr <number|url>`:
 
-1. url からは PR 番号を抽出 (`/pull/<n>` 末尾)。PR の解決は `gh api graphql` 1 回で行い、number・title・url・state・baseRefName・headRefName・headRepositoryOwner に加えて、GitHub 上の tip 2 つを得る。base ブランチの**現在の** tip (`baseRef.target.oid`) と、PR head の sha (`headRefOid`) である。番号指定は owner/repo を gh の placeholder (`-F owner={owner} -F name={repo}`) に任せ、`gh pr view <n>` と同じ規則で cwd の repo から解決させる。URL 指定は URL の host / owner / repo を `--hostname <host>` と `-f owner=<owner> -f name=<repo>` で明示する (`-F` は型変換するため、数字だけの owner 名がクエリの型エラーになる)。`gh pr view --json baseRefOid` を使わないのは、その値が PR 更新時点の base で、base ブランチの現在の tip ではないため (2026-10-09 実測: PR #53 で merge-base を返し、main の現在の tip と違った)。gh 不在・未 auth・PR 非存在は `E_GH` / `E_PR` を通知する (`state` は closed/merged PR の開始時 INFO 注記に使う)
+1. url からは PR 番号を抽出 (`/pull/<n>` 末尾)。PR の解決は `gh api graphql` 1 回で行い、number・title・url・state・baseRefName・headRefName・headRepositoryOwner に加えて、GitHub 上の tip 2 つを得る。base ブランチの**現在の** tip (`baseRef.target.oid`) と、PR head の sha (`headRefOid`) である。番号指定は owner/repo を gh の placeholder (`-F owner={owner} -F name={repo}`) に任せ、cwd の repo から解決させる。問い合わせ先の host は `gh api` の既定 (`GH_HOST`、未設定なら github.com) で、`gh pr view <n>` と違って cwd の repo からは推定されない (エッジケース「GitHub Enterprise」)。URL 指定は URL の host / owner / repo を `--hostname <host>` と `-f owner=<owner> -f name=<repo>` で明示する (`-F` は型変換するため、数字だけの owner 名がクエリの型エラーになる)。`gh pr view --json baseRefOid` を使わないのは、その値が PR 更新時点の base で、base ブランチの現在の tip ではないため (2026-10-09 実測: PR #53 で merge-base を返し、main の現在の tip と違った)。gh 不在・未 auth・PR 非存在は `E_GH` / `E_PR` を通知する (`state` は closed/merged PR の開始時 INFO 注記に使う)
 2. remote の選択と head ref の用意: remote は `git remote` に origin があれば origin、無ければ最初の 1 件を使う。0 件なら «cannot resolve the git remote; run inside the PR target repository, or identify the repository with :Review pr <URL>» を WARN 通知して開始を中断する。head は、同一リポジトリの branch (`<headRefName>` が `rev-parse --verify` で解決できる) ならそのまま使う。それ以外 (fork) は自前一時 ref `review-nvim/pr-<n>` を使い、その sha が `headRefOid` と違う (または ref が無い) ときだけ `git fetch <remote> refs/pull/<n>/head:review-nvim/pr-<n>` で更新する (ref 名は決定的なので次回以降も同じ ref を更新する)
 3. base ref の用意: base は**常に** remote-tracking ref `<remote>/<baseRefName>` (例 `origin/main`) とし、ローカル branch の有無・鮮度には依存しない。stacked PR の base はローカル branch に無いことが多く、素の `<baseRefName>` は `git diff` で解決できないため。`refs/remotes/<remote>/<baseRefName>` の sha が base の現在の tip と違う (または ref が無い) ときだけ `git fetch <remote> +refs/heads/<baseRefName>:refs/remotes/<remote>/<baseRefName>` で更新する。base ブランチが GitHub から消えていて tip が得られない (`baseRef` が null) ときは照合せずに fetch し、失敗をそのまま通知する。refspec を明示するのは remote の fetch 設定 (`--single-branch` clone 等) に依存せず更新するためで、`+` は base の force push でも上書きする
    - **fetch は古い ref だけ**: 最新の ref を fetch しても転送が 0 になるだけで、所要時間の大半を占める remote への接続確立は省けない (2026-10-09 実測、ssh remote: `git fetch` 1 回 2.2 s・`--dry-run` でも同じ・`ssh -T git@github.com` 単体 1.6 s)。照合を `git ls-remote` で行わないのも同じ理由である (1 回 2.2 s)。fork PR で head と base の両方が古いときは、2 つの refspec を並べた 1 回の fetch にまとめる
@@ -41,6 +41,7 @@
 | 差分取得 | «loading the diff...» | 開始・復元の全モード |
 
 - 同時に走る段階が複数あれば、開始順に `, ` で 1 行に併記する (例 «review.nvim: A, B...»)
+- 1 行の表示幅がメッセージエリアの幅 (`v:echospace`) を超えるときは、末尾を切り詰めて `...` で終える。base ブランチ名の長さに上限は無く、折り返すと Press ENTER の確認待ちになって後続の段階が止まり、段階文言も消えないため (tmux 80 列の実 PTY で再現)
 - 消すのは全終了経路 (成功 / 失敗 / キャンセル) で、失敗の WARN は段階を消した**後**に出す。メッセージエリアに段階文言が残ったまま WARN や継承確認の [y/N] を重ねないため
 - 既定の `vim.notify` は echo のみで id 指定の非表示が無いため、消去は全段階が終わった時点の `nvim_echo({}, false, {})` で行う。カスタム notify プロバイダ向けの `{hide=id}` は使わない
 
@@ -89,6 +90,7 @@
 - 既に同名 worktree がユーザーによって作られている: 触らず衝突エラー (`E_WORKTREE`)。自前作成分以外は削除対象外 (INV-3)
 - PR が closed/merged でもレビュー可能 (PR の解決は成功するため)。開始時に INFO で状態を添えるだけ。merge 後に base ブランチが消えた PR は base の tip が得られないので照合せず fetch し、失敗は base の fetch 失敗として通知して中断する
 - worktree 内をユーザーが編集していても close は何も捨てない (worktree を残すため。dirty 判定も確認も不要)。編集を破棄して消すのは `:Review delete` のときだけで、dirty 判定はディスク (`git status`) に加えて worktree 配下の modified バッファも見る (バッファ上の未保存編集はディスクに無いため git status は clean を返す)。どちらかがあれば `--force` 確認を 1 回出し、承認したときだけ消える (ディスクの未コミット変更もバッファ上の未保存編集も破棄)。キャンセルは delete 全体の中止。v1 ではこの確認の 1 段階のみ。編集の取り込み (PR への push) は対象外
+- GitHub Enterprise: 番号指定 (`:Review pr <n>`) は `gh api` の既定 host に問い合わせるので、GHE の repo では `GH_HOST` を設定するか URL で指定する (URL 指定は host を `--hostname` で渡す)。GHE 実機では未検証
 - 複数 fork remote: refs/pull/N/head を持つ remote を 1 つ選んで fetch (選択不能時にエラー)。head 内容解決は refs/pull ベースなので fork 名に依存しない
 - Windows プラットフォーム: worktree 対応とパス区切りは `vim.fs.joinpath` で吸収するが実機検証外 (v1 の検証済みは macOS/Linux のみ。DESIGN.md「既知の制約」参照)
 
