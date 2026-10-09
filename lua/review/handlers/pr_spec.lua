@@ -297,11 +297,20 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
   )
 
   it(
-    'worktree 作成中は過渡メッセージを出し、完了でクリアする (notify には残らない)',
+    'PR 解決・fetch・worktree 作成・diff 取得の各段階を過渡メッセージで示し、段階ごとにクリアする',
     function()
       install_git(fork_seq(pr_json()))
       pr_handler.start '7'
-      assert.same({ 'review.nvim: creating the review worktree...', '<clear>' }, state.progress)
+      assert.same({
+        'review.nvim: resolving PR #7...',
+        '<clear>',
+        'review.nvim: fetching the head of PR #7 and origin/main...',
+        '<clear>',
+        'review.nvim: creating the review worktree...',
+        '<clear>',
+        'review.nvim: loading the diff...',
+        '<clear>',
+      }, state.progress)
       assert.same(
         { msg = 'review.nvim: PR #7: Add widget', level = vim.log.levels.INFO },
         state.notifications[1]
@@ -402,42 +411,49 @@ describe('pr-handler fetch は remote tip と違う ref だけ', function()
   for _, case in ipairs {
     {
       name = '同一 repo・base 最新なら fetch しない',
+      fetch_label = nil,
       refs = { base_fresh, sha_ok },
       fetch = nil,
       head = 'topic',
     },
     {
       name = '同一 repo・base が古ければ base だけ fetch する',
+      fetch_label = 'fetching origin/main',
       refs = { base_stale, sha_ok },
       fetch = BASE_FETCH,
       head = 'topic',
     },
     {
       name = '同一 repo・remote-tracking ref が無ければ base を fetch する',
+      fetch_label = 'fetching origin/main',
       refs = { ref_missing, sha_ok },
       fetch = BASE_FETCH,
       head = 'topic',
     },
     {
       name = 'fork・base も pull ref も最新なら fetch しない',
+      fetch_label = nil,
       refs = { base_fresh, not_a_branch, head_fresh },
       fetch = nil,
       head = 'review-nvim/pr-7',
     },
     {
       name = 'fork・pull ref だけ古ければ pull ref だけ fetch する',
+      fetch_label = 'fetching the head of PR #7 from origin',
       refs = { base_fresh, not_a_branch, ref_missing },
       fetch = HEAD_FETCH,
       head = 'review-nvim/pr-7',
     },
     {
       name = 'fork・base だけ古ければ base だけ fetch する',
+      fetch_label = 'fetching origin/main',
       refs = { base_stale, not_a_branch, head_fresh },
       fetch = BASE_FETCH,
       head = 'review-nvim/pr-7',
     },
     {
       name = 'fork・両方古ければ 1 回の fetch で両方取る',
+      fetch_label = 'fetching the head of PR #7 and origin/main',
       refs = { base_stale, not_a_branch, ref_missing },
       fetch = BOTH_FETCH,
       head = 'review-nvim/pr-7',
@@ -468,6 +484,18 @@ describe('pr-handler fetch は remote tip と違う ref だけ', function()
       })
       assert.same(expected, vim.list_slice(state.git_calls, 3, #seq))
       assert.equals('pr-7', session_handler.active().id)
+
+      local shown = { 'review.nvim: resolving PR #7...', '<clear>' }
+      if case.fetch_label ~= nil then
+        vim.list_extend(shown, { ('review.nvim: %s...'):format(case.fetch_label), '<clear>' })
+      end
+      vim.list_extend(shown, {
+        'review.nvim: creating the review worktree...',
+        '<clear>',
+        'review.nvim: loading the diff...',
+        '<clear>',
+      })
+      assert.same(shown, state.progress)
     end)
   end
 
@@ -504,6 +532,61 @@ describe('pr-handler fetch は remote tip と違う ref だけ', function()
       assert.is_nil(session_handler.active())
     end
   )
+
+  for _, case in ipairs {
+    {
+      name = 'gh の失敗',
+      seq = {
+        top_ok,
+        function()
+          return { code = 1, stdout = '', stderr = 'gh: Could not resolve to a PullRequest\n' }
+        end,
+      },
+      shown = { 'review.nvim: resolving PR #7...', '<clear>' },
+      warn = 'review.nvim: gh: Could not resolve to a PullRequest',
+    },
+    {
+      name = 'base の fetch 失敗',
+      seq = {
+        top_ok,
+        json_ok(pr_json()),
+        origin_ok,
+        base_stale,
+        sha_ok,
+        function()
+          return { code = 128, stdout = '', stderr = 'fatal: unable to access\n' }
+        end,
+      },
+      shown = {
+        'review.nvim: resolving PR #7...',
+        '<clear>',
+        'review.nvim: fetching origin/main...',
+        '<clear>',
+      },
+      warn = 'review.nvim: cannot fetch the PR base branch "main" from origin: '
+        .. 'fatal: unable to access',
+    },
+  } do
+    it(
+      ('%sでは過渡メッセージを消してから WARN を出す'):format(case.name),
+      function()
+        install_git(case.seq)
+        local timeline = {}
+        progress._set_sink(function(text)
+          table.insert(timeline, text == nil and '<clear>' or text)
+        end)
+        vim.notify = function(msg)
+          table.insert(timeline, msg)
+        end
+
+        pr_handler.start '7'
+
+        local expected = vim.deepcopy(case.shown)
+        table.insert(expected, case.warn)
+        assert.same(expected, timeline)
+      end
+    )
+  end
 
   it(
     'fork の pull ref だけの fetch 失敗は git の理由を WARN して中断する',

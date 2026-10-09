@@ -1260,7 +1260,9 @@ function M.fetch_prepared(args, cb)
         cb(wres)
         return
       end
+      local stage = progress.start 'loading the diff'
       git_diff.fetch({ base = args.base, cwd = wres.data.path }, function(res)
+        progress.stop(stage)
         if not res.ok then
           -- diff 失敗で開始 / 復元へ進まないときも作りたての自前 worktree を
           -- 孤児にしない (0 差分掃除と同形。記録再利用か否かで二段目 WARN の
@@ -1285,11 +1287,13 @@ function M.fetch_prepared(args, cb)
     return
   end
   resolve_head(args, function(degraded)
+    local stage = progress.start 'loading the diff'
     git_diff.fetch({
       base = args.base,
       head = degraded and args.head or nil,
       cwd = args.repo,
     }, function(res)
+      progress.stop(stage)
       if not res.ok then
         cb(res)
         return

@@ -607,6 +607,15 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
     end
   )
 
+  it(
+    'branch の開始でも diff 取得中は過渡メッセージを出し、取得後にクリアする',
+    function()
+      start_done('main', 'feature')
+
+      assert.same({ 'review.nvim: loading the diff...', '<clear>' }, state.progress)
+    end
+  )
+
   it('head/base 窓の opts (窓 diff / scrollbind / cursorbind / fold / wrap)', function()
     start_done('main', 'feature')
     for _, role in ipairs { 'base', 'head' } do

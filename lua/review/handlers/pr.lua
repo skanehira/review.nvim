@@ -8,6 +8,7 @@ local gh = require 'review.git.gh'
 local usermsg = require 'review.handlers.usermsg'
 local git_ref = require 'review.git.ref'
 local paths = require 'review.store.paths'
+local progress = require 'review.handlers.progress'
 local result = require 'review.core.result'
 local session = require 'review.handlers.session'
 local store = require 'review.store.session'
@@ -110,13 +111,16 @@ end
 -- (fetch の所要時間の大半は remote への接続確立なので、2 回に分けない)。
 local function fetch_stale(repo, meta, number, remote, stale, cb)
   local base_label = ('"%s"'):format(meta.baseRefName)
+  local tracking = ('%s/%s'):format(remote, meta.baseRefName)
   if stale.head and stale.base then
+    local stage = progress.start(('fetching the head of PR #%s and %s'):format(number, tracking))
     git_ref.fetch_pull_and_branch({
       remote = remote,
       number = number,
       branch = meta.baseRefName,
       cwd = repo,
     }, function(res)
+      progress.stop(stage)
       if not res.ok then
         notify_warn(
           ('cannot fetch the head and base branch %s of PR #%s from %s: %s'):format(
@@ -133,7 +137,9 @@ local function fetch_stale(repo, meta, number, remote, stale, cb)
     return
   end
   if stale.head then
+    local stage = progress.start(('fetching the head of PR #%s from %s'):format(number, remote))
     git_ref.fetch_pull({ remote = remote, number = number, cwd = repo }, function(res)
+      progress.stop(stage)
       if not res.ok then
         notify_warn(res.error)
         return
@@ -143,7 +149,9 @@ local function fetch_stale(repo, meta, number, remote, stale, cb)
     return
   end
   if stale.base then
+    local stage = progress.start('fetching ' .. tracking)
     git_ref.fetch_branch({ remote = remote, branch = meta.baseRefName, cwd = repo }, function(res)
+      progress.stop(stage)
       if not res.ok then
         notify_warn(
           ('cannot fetch the PR base branch %s from %s: %s'):format(base_label, remote, res.error)
@@ -210,7 +218,9 @@ function M.start(target)
     end
     local repo = tres.data
     local url = type(target) == 'string' and not target:match '^%d+$' and target or nil
+    local stage = progress.start(('resolving PR #%s'):format(number))
     gh.pr_view({ number = number, url = url, cwd = repo }, function(vres)
+      progress.stop(stage)
       if not vres.ok then
         notify_warn(usermsg.gh_error(vres.error))
         return

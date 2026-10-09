@@ -720,13 +720,18 @@ describe('restore の worktree 解决 (mode=pr は resume でも常時作成/再
   )
 
   it(
-    '復元時の worktree 作成でも過渡メッセージを出し、完了でクリアする',
+    '復元時も worktree 作成と diff 取得の過渡メッセージを出し、段階ごとにクリアする',
     function()
       pr_session()
 
       restore.resume_session(store.load(REPO_TOP, 'pr-7').data)
 
-      assert.same({ 'review.nvim: creating the review worktree...', '<clear>' }, state.progress)
+      assert.same({
+        'review.nvim: creating the review worktree...',
+        '<clear>',
+        'review.nvim: loading the diff...',
+        '<clear>',
+      }, state.progress)
     end
   )
 

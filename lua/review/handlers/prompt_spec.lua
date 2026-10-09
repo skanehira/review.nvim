@@ -10,6 +10,7 @@ local comments_handler = require 'review.handlers.comments'
 local config = require 'review.config'
 local paths = require 'review.store.paths'
 local prompt_handler = require 'review.handlers.prompt'
+local progress = require 'review.handlers.progress'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local ui_windows = require 'review.ui.windows'
@@ -57,6 +58,9 @@ local function use_env()
       return 4321
     end)
     store._set_notify(function() end)
+    -- 開始フローの段階別過渡メッセージは本 spec の対象外 (pr_spec が pin 済み)
+    progress._reset()
+    progress._set_sink(function() end)
     session_handler._set_now(function()
       return 4321
     end)
@@ -190,6 +194,8 @@ local function use_env()
     paths._set_data_dir(nil)
     store._set_now(nil)
     store._set_notify(nil)
+    progress._set_sink(nil)
+    progress._reset()
     session_handler._set_now(nil)
     comments_handler._set_now(nil)
     session_handler._reset()
