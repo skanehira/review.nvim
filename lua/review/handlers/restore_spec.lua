@@ -7,6 +7,7 @@ local cli = require 'review.git.cli'
 local config = require 'review.config'
 local paths = require 'review.store.paths'
 local restore = require 'review.handlers.restore'
+local progress = require 'review.handlers.progress'
 local session_handler = require 'review.handlers.session'
 local sessions_list = require 'review.handlers.sessions_list'
 local store = require 'review.store.session'
@@ -63,14 +64,15 @@ local function use_env()
     end)
     session_handler._reset()
     vim.notify = function(msg, level)
-      -- worktree 作成中の過渡 notify は完了時に nvim_echo クリアで消える実態を
-      -- モデル化し、最終的な notifications に残さない (shown はフラグで観測)。
-      if type(msg) == 'string' and msg:find('creating the review worktree', 1, true) then
-        state.worktree_notify_shown = true
-        return
-      end
       table.insert(state.notifications, { msg = msg, level = level })
     end
+    -- 段階別の過渡メッセージは notify とは別の出力先で順序ごと記録する
+    -- (クリアは '<clear>')。
+    progress._reset()
+    state.progress = {}
+    progress._set_sink(function(text)
+      table.insert(state.progress, text == nil and '<clear>' or text)
+    end)
     vim.ui.input = function(opts, cb)
       table.insert(state.inputs, opts)
       cb(state.input_answer)
@@ -135,6 +137,8 @@ local function use_env()
       end
     end
     vim.notify = REAL_NOTIFY
+    progress._set_sink(nil)
+    progress._reset()
     vim.ui.input = REAL_INPUT
     vim.ui.select = REAL_SELECT
     paths._set_data_dir(nil)
@@ -716,18 +720,13 @@ describe('restore の worktree 解决 (mode=pr は resume でも常時作成/再
   )
 
   it(
-    '復元時の worktree 作成でも過渡 notify を出し、完了後は notifications に残らない',
+    '復元時の worktree 作成でも過渡メッセージを出し、完了でクリアする',
     function()
       pr_session()
 
       restore.resume_session(store.load(REPO_TOP, 'pr-7').data)
 
-      assert.is_true(state.worktree_notify_shown)
-      for _, n in ipairs(state.notifications) do
-        if type(n.msg) == 'string' then
-          assert.is_nil(n.msg:find('creating the review worktree', 1, true))
-        end
-      end
+      assert.same({ 'review.nvim: creating the review worktree...', '<clear>' }, state.progress)
     end
   )
 

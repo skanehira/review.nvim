@@ -10,6 +10,7 @@ local cli = require 'review.git.cli'
 local config = require 'review.config'
 local paths = require 'review.store.paths'
 local commentmarks = require 'review.ui.commentmarks'
+local progress = require 'review.handlers.progress'
 local session_handler = require 'review.handlers.session'
 local store = require 'review.store.session'
 local ui_scratchwin = require 'review.ui.scratchwin'
@@ -360,14 +361,15 @@ local function use_env()
     end)
     session_handler._reset()
     vim.notify = function(msg, level)
-      -- worktree 作成中の過渡 notify は完了時に nvim_echo クリアで消える実態を
-      -- モデル化し、最終的な notifications に残さない (shown はフラグで観測)。
-      if type(msg) == 'string' and msg:find('creating the review worktree', 1, true) then
-        state.worktree_notify_shown = true
-        return
-      end
       table.insert(state.notifications, { msg = msg, level = level })
     end
+    -- 段階別の過渡メッセージは notify とは別の出力先で順序ごと記録する
+    -- (クリアは '<clear>')。
+    progress._reset()
+    state.progress = {}
+    progress._set_sink(function(text)
+      table.insert(state.progress, text == nil and '<clear>' or text)
+    end)
     vim.ui.input = function(opts, cb)
       table.insert(state.inputs, opts)
       cb(state.input_answer)
@@ -409,6 +411,8 @@ local function use_env()
       end
     end
     vim.notify = REAL_NOTIFY
+    progress._set_sink(nil)
+    progress._reset()
     vim.ui.input = REAL_INPUT
     paths._set_data_dir(nil)
     store._set_now(nil)

@@ -33,6 +33,7 @@ local ui_windows = require 'review.ui.windows'
 local usermsg = require 'review.handlers.usermsg'
 local wt_buffers = require 'review.handlers.worktree_buffers'
 local pr_comments = require 'review.handlers.pr_comments'
+local progress = require 'review.handlers.progress'
 
 local M = {}
 
@@ -244,12 +245,11 @@ end
 
 -- add -> (衝突時) prune 再試行 -> (自前記録あり) dir 削除して再々試行。
 -- 「衝突した残骸が自前作成分でない限り自動削除しない」(INV-3 / pr-worktree.md)。
--- 作成中は過渡 notify を出し、全終了経路 (成功 / 失敗) で消す (既定の vim.notify
--- は echo のみで id 非表示が無いため、完了は nvim_echo のクリアで実現する)。
+-- 作成中の過渡メッセージは全終了経路 (成功 / 失敗) で消す。
 local function add_with_recovery(args, path, record, cb)
-  vim.notify('review.nvim: creating the review worktree...', vim.log.levels.INFO)
+  local stage = progress.start 'creating the review worktree'
   local function finish(res)
-    vim.api.nvim_echo({}, false, {})
+    progress.stop(stage)
     cb(res)
   end
   local function add(reason_cb)
