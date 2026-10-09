@@ -1,5 +1,6 @@
--- PR セッション開始の調停: gh で PR 解決 -> head ref 解決 -> base ref 解決 ->
--- 開始フロー委譲 (pr-worktree.md「入出力と振る舞い」PR 解決 1〜4)。worktree 作成判断と UI 開局は
+-- PR セッション開始の調停: gh で PR 解決 (remote tip 込み) -> remote 選択 ->
+-- base / head の ref を remote tip と照合 -> 古いものだけ fetch -> 開始フロー委譲
+-- (pr-worktree.md「入出力と振る舞い」PR 解決 1〜4)。worktree 作成判断と UI 開局は
 -- handlers/session / session.begin 共通経路に載せる (PR 専用経路を作らない)。
 -- gh / git の失敗は結果型の理由文字列を WARN 通知し、開始を中断する
 -- (E_GH / E_PR はアダプタ側で確定。gh 実行中の成否は非同期 = 戻り値は受理)。
@@ -91,36 +92,106 @@ local function begin_pr(repo, meta, number, head, base)
   }
 end
 
--- base ref: ローカル branch の有無・鮮度に依存せず、常に remote から fetch した
--- remote-tracking ref (<remote>/<baseRefName>) を使う (pr-worktree.md「PR 解決」
--- 手順 3。stacked PR の base はローカルに無いことが多い)。remote は head 解決で
--- 選んだもの (fork 経路) を受け取り、無ければ git remote から選ぶ。
-local function resolve_base(repo, meta, remote, cb)
-  local function fetch(name)
-    git_ref.fetch_branch({ remote = name, branch = meta.baseRefName, cwd = repo }, function(fres)
-      if not fres.ok then
+-- ローカルの ref が remote tip (GraphQL で得た sha) と一致するか。tip が無い
+-- (remote にブランチが無い) ときは照合せず不一致として fetch に任せ、失敗を
+-- そのまま利用者へ見せる。
+local function is_current(repo, ref, tip, cb)
+  if tip == nil then
+    cb(false)
+    return
+  end
+  git_ref.rev_parse({ ref = ref, cwd = repo }, function(res)
+    cb(res.ok and res.data == tip)
+  end)
+end
+
+-- 手元が古い ref だけを fetch する (pr-worktree.md「PR 解決」手順 2・3)。
+-- fork PR で head と base の両方が古いときは 1 回の fetch にまとめる
+-- (fetch の所要時間の大半は remote への接続確立なので、2 回に分けない)。
+local function fetch_stale(repo, meta, number, remote, stale, cb)
+  local base_label = ('"%s"'):format(meta.baseRefName)
+  if stale.head and stale.base then
+    git_ref.fetch_pull_and_branch({
+      remote = remote,
+      number = number,
+      branch = meta.baseRefName,
+      cwd = repo,
+    }, function(res)
+      if not res.ok then
         notify_warn(
-          ('cannot fetch the PR base branch "%s" from %s: %s'):format(
-            meta.baseRefName,
-            name,
-            fres.error
+          ('cannot fetch the head and base branch %s of PR #%s from %s: %s'):format(
+            base_label,
+            number,
+            remote,
+            res.error
           )
         )
         return
       end
-      cb(fres.data)
+      cb()
     end)
-  end
-  if remote ~= nil then
-    fetch(remote)
     return
   end
+  if stale.head then
+    git_ref.fetch_pull({ remote = remote, number = number, cwd = repo }, function(res)
+      if not res.ok then
+        notify_warn(res.error)
+        return
+      end
+      cb()
+    end)
+    return
+  end
+  if stale.base then
+    git_ref.fetch_branch({ remote = remote, branch = meta.baseRefName, cwd = repo }, function(res)
+      if not res.ok then
+        notify_warn(
+          ('cannot fetch the PR base branch %s from %s: %s'):format(base_label, remote, res.error)
+        )
+        return
+      end
+      cb()
+    end)
+    return
+  end
+  cb()
+end
+
+-- head ref: 同一リポジトリに headRefName があればそのまま、無ければ (fork)
+-- refs/pull/<n>/head から作る自前一時 ref (pr-worktree.md 手順 2、DESIGN.md
+-- 「既知の制約」fork PR 行)。cb(head, head_stale)。
+local function resolve_head(repo, meta, number, cb)
+  git_ref.rev_parse({ ref = meta.headRefName, cwd = repo }, function(hr)
+    if hr.ok then
+      cb(meta.headRefName, false)
+      return
+    end
+    is_current(repo, git_ref.pr_ref_storage(number), meta.head_tip, function(current)
+      cb(git_ref.pr_ref(number), not current)
+    end)
+  end)
+end
+
+-- base ref は常に remote-tracking ref (<remote>/<baseRefName>)。ローカル branch
+-- の有無・鮮度には依存しない (stacked PR の base はローカルに無いことが多い)。
+local function resolve_refs(repo, meta, number, cb)
   git_ref.remotes({ cwd = repo }, function(rr)
     if not rr.ok or #rr.data == 0 then
       notify_warn(NO_REMOTE_MSG)
       return
     end
-    fetch(pick_remote(rr.data))
+    local remote = pick_remote(rr.data)
+    local tracking = ('refs/remotes/%s/%s'):format(remote, meta.baseRefName)
+    is_current(repo, tracking, meta.base_tip, function(base_current)
+      resolve_head(repo, meta, number, function(head, head_stale)
+        fetch_stale(repo, meta, number, remote, {
+          base = not base_current,
+          head = head_stale,
+        }, function()
+          cb(head, ('%s/%s'):format(remote, meta.baseRefName))
+        end)
+      end)
+    end)
   end)
 end
 
@@ -138,42 +209,15 @@ function M.start(target)
       return
     end
     local repo = tres.data
-    gh.pr_view({ target = target, cwd = repo }, function(vres)
+    local url = type(target) == 'string' and not target:match '^%d+$' and target or nil
+    gh.pr_view({ number = number, url = url, cwd = repo }, function(vres)
       if not vres.ok then
         notify_warn(usermsg.gh_error(vres.error))
         return
       end
       local meta = vres.data
-      -- head ref: 同一リポジトリに headRefName があればそのまま、無ければ
-      -- (fork) refs/pull/<n>/head から自前一時 ref を作る (pr-worktree.md 手順 2、
-      -- DESIGN.md「既知の制約」fork PR 行)。
-      git_ref.rev_parse({ ref = meta.headRefName, cwd = repo }, function(hr)
-        if hr.ok then
-          resolve_base(repo, meta, nil, function(base)
-            begin_pr(repo, meta, number, meta.headRefName, base)
-          end)
-          return
-        end
-        git_ref.remotes({ cwd = repo }, function(rr)
-          if not rr.ok or #rr.data == 0 then
-            notify_warn(NO_REMOTE_MSG)
-            return
-          end
-          local remote = pick_remote(rr.data)
-          git_ref.fetch_pull({
-            remote = remote,
-            number = number,
-            cwd = repo,
-          }, function(fres)
-            if not fres.ok then
-              notify_warn(fres.error)
-              return
-            end
-            resolve_base(repo, meta, remote, function(base)
-              begin_pr(repo, meta, number, fres.data, base)
-            end)
-          end)
-        end)
+      resolve_refs(repo, meta, number, function(head, base)
+        begin_pr(repo, meta, number, head, base)
       end)
     end)
   end)

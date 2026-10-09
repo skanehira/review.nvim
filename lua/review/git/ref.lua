@@ -174,6 +174,30 @@ function M.fetch_branch(opts, cb)
   end)
 end
 
+--- cb(result) result.data = { head = 作った pull ref 名, base = `<remote>/<branch>` }。
+--- fork PR で head と base の両方が古いとき用 (pr-worktree.md「PR 解決」)。
+--- fetch_pull と fetch_branch を別々に走らせると remote への接続確立を 2 回払う
+--- ため、refspec を 2 つ並べて 1 回の fetch にまとめる。失敗は E_REF。
+function M.fetch_pull_and_branch(opts, cb)
+  local ref_name = M.pr_ref(opts.number)
+  run(
+    {
+      'fetch',
+      opts.remote,
+      ('refs/pull/%s/head:%s'):format(tostring(opts.number), ref_name),
+      ('+refs/heads/%s:refs/remotes/%s/%s'):format(opts.branch, opts.remote, opts.branch),
+    },
+    opts,
+    function(res)
+      if not res.ok then
+        cb(res)
+        return
+      end
+      cb(result.ok { head = ref_name, base = ('%s/%s'):format(opts.remote, opts.branch) })
+    end
+  )
+end
+
 -- fetch の右辺が短縮名 `review-nvim/pr-<n>` のとき git が実保存するフルネーム
 -- (refs/heads/ 底下。`git update-ref -d` は短縮名を "bad name" で拒否するため
 -- 掃除はこの形が要る — 2.x 実測、DESIGN.md「既知の制約」)。

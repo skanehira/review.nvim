@@ -1,4 +1,4 @@
--- git/gh: `gh pr view <n|url> --json ...` の PR 解決アダプタ
+-- git/gh: PR 解決 (`gh api graphql`) とレビューコメント API のアダプタ
 -- (pr-worktree.md「PR 解決」手順 1、DESIGN.md「アーキテクチャと技術選定」gh 注入行)。
 -- 実 GitHub には触れない (issue 非スコープ)。注入 system スタブで
 -- 引数組み立て・JSON 変換・E_GH / E_PR の結果型分岐を検証する。
@@ -8,15 +8,32 @@ local config = require 'review.config'
 
 local REAL_NOTIFY = vim.notify
 
-local PR_JSON = vim.json.encode {
-  number = 7,
-  title = 'Add widget',
-  baseRefName = 'main',
-  headRefName = 'topic',
-  headRepositoryOwner = { login = 'forkguy' },
-  url = 'https://github.com/acme/demo/pull/7',
-  state = 'OPEN',
-}
+-- GitHub と取り交わすクエリそのものが契約なので、実装の定数を参照せず全文を書く。
+local PR_QUERY = 'query($owner:String!,$name:String!,$number:Int!){'
+  .. 'repository(owner:$owner,name:$name){pullRequest(number:$number){'
+  .. 'number title url state baseRefName headRefName headRepositoryOwner{login} '
+  .. 'baseRef{target{oid}} headRefOid}}}'
+
+local BASE_TIP = string.rep('b', 40)
+local HEAD_TIP = string.rep('c', 40)
+
+local function pr_response(overrides)
+  local pr = {
+    number = 7,
+    title = 'Add widget',
+    baseRefName = 'main',
+    headRefName = 'topic',
+    headRepositoryOwner = { login = 'forkguy' },
+    url = 'https://github.com/acme/demo/pull/7',
+    state = 'OPEN',
+    baseRef = { target = { oid = BASE_TIP } },
+    headRefOid = HEAD_TIP,
+  }
+  for k, v in pairs(overrides or {}) do
+    pr[k] = v
+  end
+  return vim.json.encode { data = { repository = { pullRequest = pr } } }
+end
 
 local state = {}
 
@@ -51,43 +68,94 @@ describe('git/gh pr_view 引数組み立て', function()
   use_env()
 
   it(
-    'pr view <target> --json number,...,url,state を gh cwd=repo で実行し JSON を data に返す',
+    '番号指定は owner/repo を gh の placeholder に任せて graphql を cwd=repo で実行し、PR メタと remote tip を返す',
     function()
-      stub_exit { code = 0, stdout = PR_JSON, stderr = '' }
+      stub_exit { code = 0, stdout = pr_response(), stderr = '' }
 
       local received
-      gh.pr_view({ target = '7', cwd = '/repo' }, function(res)
+      gh.pr_view({ number = '7', cwd = '/repo' }, function(res)
         received = res
       end)
 
       assert.same({
         'gh',
-        'pr',
-        'view',
-        '7',
-        '--json',
-        'number,title,baseRefName,headRefName,headRepositoryOwner,url,state',
+        'api',
+        'graphql',
+        '-F',
+        'owner={owner}',
+        '-F',
+        'name={repo}',
+        '-F',
+        'number=7',
+        '-f',
+        'query=' .. PR_QUERY,
       }, state.calls[1].cmd)
       assert.equals('/repo', state.calls[1].opts.cwd)
-      assert.equals(true, received.ok)
-      assert.equals('Add widget', received.data.title)
-      assert.equals(7, received.data.number)
-      assert.equals('main', received.data.baseRefName)
-      assert.equals('topic', received.data.headRefName)
-      assert.equals('OPEN', received.data.state)
+      assert.same({
+        __class = 'review.Result',
+        ok = true,
+        data = {
+          number = 7,
+          title = 'Add widget',
+          url = 'https://github.com/acme/demo/pull/7',
+          state = 'OPEN',
+          baseRefName = 'main',
+          headRefName = 'topic',
+          headRepositoryOwner = { login = 'forkguy' },
+          base_tip = BASE_TIP,
+          head_tip = HEAD_TIP,
+        },
+      }, received)
     end
   )
 
-  it('URL ターゲットは gh へそのまま渡す (gh が URL も解ける)', function()
-    stub_exit { code = 0, stdout = PR_JSON, stderr = '' }
-    gh.pr_view({ target = 'https://github.com/acme/demo/pull/7' }, function() end)
-    assert.equals('https://github.com/acme/demo/pull/7', state.calls[1].cmd[4])
+  it('URL 指定は URL の host / owner / repo を明示して渡す', function()
+    stub_exit { code = 0, stdout = pr_response(), stderr = '' }
+    gh.pr_view({ number = '12', url = 'https://ghe.example.com/acme/demo/pull/12' }, function() end)
+    assert.same({
+      'gh',
+      'api',
+      '--hostname',
+      'ghe.example.com',
+      'graphql',
+      '-f',
+      'owner=acme',
+      '-f',
+      'name=demo',
+      '-F',
+      'number=12',
+      '-f',
+      'query=' .. PR_QUERY,
+    }, state.calls[1].cmd)
   end)
+
+  it(
+    'base ブランチが remote から消えている (baseRef null) なら base_tip を持たない',
+    function()
+      stub_exit { code = 0, stdout = pr_response { baseRef = vim.NIL }, stderr = '' }
+
+      local received
+      gh.pr_view({ number = '7' }, function(res)
+        received = res
+      end)
+
+      assert.same({
+        number = 7,
+        title = 'Add widget',
+        url = 'https://github.com/acme/demo/pull/7',
+        state = 'OPEN',
+        baseRefName = 'main',
+        headRefName = 'topic',
+        headRepositoryOwner = { login = 'forkguy' },
+        head_tip = HEAD_TIP,
+      }, received.data)
+    end
+  )
 
   it('config.gh_bin の注入が実行バイナリ名に効く', function()
     config.setup { gh_bin = '/stub/gh' }
-    stub_exit { code = 0, stdout = PR_JSON, stderr = '' }
-    gh.pr_view({ target = '7' }, function() end)
+    stub_exit { code = 0, stdout = pr_response(), stderr = '' }
+    gh.pr_view({ number = '7' }, function() end)
     assert.equals('/stub/gh', state.calls[1].cmd[1])
   end)
 end)
@@ -107,7 +175,7 @@ describe('git/gh pr_view 結果型分岐 (E_GH / E_PR)', function()
       end)
 
       local received
-      gh.pr_view({ target = '7', cwd = '/repo' }, function(res)
+      gh.pr_view({ number = '7', cwd = '/repo' }, function(res)
         received = res
       end)
 
@@ -131,7 +199,7 @@ describe('git/gh pr_view 結果型分岐 (E_GH / E_PR)', function()
       }
 
       local received
-      gh.pr_view({ target = '7' }, function(res)
+      gh.pr_view({ number = '7' }, function(res)
         received = res
       end)
 
@@ -146,43 +214,53 @@ describe('git/gh pr_view 結果型分岐 (E_GH / E_PR)', function()
   )
 
   it(
-    'PR 非存在 (auth を含まない失敗) は E_PR + gh stderr 末尾 1 行をそのまま返す',
+    'PR 非存在 (auth を含まない失敗) は E_PR + gh stderr の主行をそのまま返す',
     function()
-      stub_exit { code = 1, stdout = '', stderr = 'could not resolve PR # 999\n' }
+      local stdout = '{"data":{"repository":{"pullRequest":null}},"errors":[]}'
+      stub_exit {
+        code = 1,
+        stdout = stdout,
+        stderr = 'gh: Could not resolve to a PullRequest with the number of 999.\n',
+      }
 
       local received
-      gh.pr_view({ target = '999' }, function(res)
+      gh.pr_view({ number = '999' }, function(res)
         received = res
       end)
 
       assert.same({
         __class = 'review.Result',
         ok = false,
-        data = { stdout = '', code = 1 },
-        error = 'could not resolve PR # 999',
+        data = { stdout = stdout, code = 1 },
+        error = 'gh: Could not resolve to a PullRequest with the number of 999.',
         code = 'E_PR',
       }, received)
     end
   )
 
-  it(
-    'JSON デコード不能 (stdout が不正) は E_GH で例外化せず cb に返す',
-    function()
-      stub_exit { code = 0, stdout = 'not json', stderr = '' }
+  for _, case in ipairs {
+    { name = 'stdout が JSON でない', stdout = 'not json' },
+    { name = 'PR を含まない応答', stdout = '{"data":{"repository":null}}' },
+  } do
+    it(
+      ('成功終了でも %s なら E_GH で例外化せず cb に返す'):format(case.name),
+      function()
+        stub_exit { code = 0, stdout = case.stdout, stderr = '' }
 
-      local received
-      gh.pr_view({ target = '7' }, function(res)
-        received = res
-      end)
+        local received
+        gh.pr_view({ number = '7' }, function(res)
+          received = res
+        end)
 
-      assert.same({
-        __class = 'review.Result',
-        ok = false,
-        error = 'failed to parse the output of gh pr view',
-        code = 'E_GH',
-      }, received)
-    end
-  )
+        assert.same({
+          __class = 'review.Result',
+          ok = false,
+          error = 'failed to parse the output of gh api graphql',
+          code = 'E_GH',
+        }, received)
+      end
+    )
+  end
 end)
 
 local REPO = { owner = 'acme', repo = 'demo' }

@@ -374,6 +374,38 @@ describe('git/ref fetch_pull / delete_ref / remotes (pr-worktree fork 経路)', 
   )
 
   it(
+    'fetch_pull_and_branch は pull ref と base branch を 1 回の fetch で取り、両方の ref 名を返す',
+    function()
+      local captured = {}
+      cli._set_system(stub_system(captured))
+      stub_ok_executable()
+
+      local received
+      ref.fetch_pull_and_branch(
+        { remote = 'origin', number = 7, branch = 'main', cwd = '/repo' },
+        function(res)
+          received = res
+        end
+      )
+      assert.same({
+        'git',
+        'fetch',
+        'origin',
+        'refs/pull/7/head:review-nvim/pr-7',
+        '+refs/heads/main:refs/remotes/origin/main',
+      }, captured.cmd)
+      assert.equals('/repo', captured.opts.cwd)
+      captured.on_exit { code = 0, stdout = '', stderr = '' }
+
+      assert.same({
+        __class = 'review.Result',
+        ok = true,
+        data = { head = 'review-nvim/pr-7', base = 'origin/main' },
+      }, received)
+    end
+  )
+
+  it(
     'delete_ref は `git update-ref -d <full-ref>` を実行する (:Review delete の自前 ref 掃除)',
     function()
       local captured = {}
@@ -520,6 +552,65 @@ describe('git/ref fetch_pull / delete_ref / remotes (pr-worktree fork 経路)', 
       end)
       local topic_sha = git({ 'rev-parse', '--verify', 'topic' }):gsub('%s+$', '')
       assert.same({ __class = 'review.Result', ok = true, data = topic_sha }, head_content)
+    end
+  )
+  it(
+    'fetch_pull_and_branch は実 git で pull ref と古い remote-tracking ref を同時に更新する',
+    function()
+      local dir = vim.fn.tempname()
+      vim.fn.mkdir(vim.fs.joinpath(dir, 'origin'), 'p')
+      table.insert(created_dirs, dir)
+      vim
+        .system({ 'git', 'init', '-q', '--bare', '-b', 'main', 'origin' }, { cwd = dir })
+        :wait(10000)
+      vim.system({ 'git', 'clone', '-q', 'origin', 'work' }, { cwd = dir }):wait(10000)
+      local work = vim.fs.joinpath(dir, 'work')
+      local git = function(args)
+        local out =
+          vim.system(vim.list_extend({ 'git' }, args), { cwd = work, text = true }):wait(10000)
+        assert.equals(0, out.code, out.stderr)
+        return (out.stdout:gsub('%s+$', ''))
+      end
+      local write = function(text)
+        local f = io.open(vim.fs.joinpath(work, 'a.txt'), 'w')
+        f:write(text)
+        f:close()
+      end
+      git { 'config', 'user.email', 'spec@example.com' }
+      git { 'config', 'user.name', 'spec' }
+      write 'a\n'
+      git { 'add', '-A' }
+      git { 'commit', '-qm', 'base' }
+      git { 'push', '-q', 'origin', 'main' }
+      local stale_base = git { 'rev-parse', 'refs/remotes/origin/main' }
+      -- remote の main だけを進め、手元の remote-tracking ref を古いまま残す
+      write 'b\n'
+      git { 'commit', '-qam', 'base2' }
+      git { 'push', '-q', 'origin', 'HEAD:refs/heads/main' }
+      local remote_base = git { 'rev-parse', 'HEAD' }
+      git { 'update-ref', 'refs/remotes/origin/main', stale_base }
+      git { 'checkout', '-qb', 'topic' }
+      write 'topic\n'
+      git { 'commit', '-qam', 'topic' }
+      git { 'push', '-q', 'origin', 'topic:refs/pull/7/head' }
+      local topic_sha = git { 'rev-parse', 'topic' }
+
+      local received = await_result(function(cb)
+        ref.fetch_pull_and_branch(
+          { remote = 'origin', number = 7, branch = 'main', cwd = work },
+          cb
+        )
+      end)
+
+      assert.same({
+        __class = 'review.Result',
+        ok = true,
+        data = { head = 'review-nvim/pr-7', base = 'origin/main' },
+      }, received)
+      assert.same(
+        { topic_sha, remote_base },
+        { git { 'rev-parse', 'review-nvim/pr-7' }, git { 'rev-parse', 'origin/main' } }
+      )
     end
   )
 end)

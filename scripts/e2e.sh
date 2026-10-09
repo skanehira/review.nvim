@@ -471,12 +471,12 @@ mkdir -p "$PRDIR" "$BIN"
 
 cat >"$BIN/gh" <<'GHEOF'
 #!/usr/bin/env bash
-# gh スタブ: pr view --json のみ fixture JSON を返す (DESIGN.md「gh / git 実行」)。
-if [ "${1:-}" = "pr" ] && [ "${2:-}" = "view" ]; then
+# gh スタブ: PR 解決の api graphql のみ fixture JSON を返す (DESIGN.md「gh / git 実行」)。
+if [ "${1:-}" = "api" ] && [ "${2:-}" = "graphql" ]; then
   cat "${GH_STUB_PRVIEW:?}"
   exit 0
 fi
-echo "gh-e2e-stub: pr view 以外未対応: $*" >&2
+echo "gh-e2e-stub: api graphql 以外未対応: $*" >&2
 exit 1
 GHEOF
 chmod +x "$BIN/gh"
@@ -508,8 +508,12 @@ WT_OF() {
 JSON_OF() {
   echo "$1/nvim/review.nvim/sessions/$(SHA16 "$REPO_PR")/pr-7.json"
 }
+# remote tip は origin の実 sha。clone 直後の origin/main は一致 (base の fetch を省略)、
+# pull ref は未取得 (初回だけ head を fetch) という実 git の状態を作る。
+BASE_TIP=$(git -C "$ORIGIN" rev-parse refs/heads/main)
+HEAD_TIP=$(git -C "$ORIGIN" rev-parse refs/pull/7/head)
 cat >"$PRDIR/pr.json" <<JSONEOF
-{"number":7,"title":"E2E widget pr","baseRefName":"main","headRefName":"topic","headRepositoryOwner":{"login":"forkguy"},"url":"https://github.com/e2e/demo/pull/7","state":"OPEN"}
+{"data":{"repository":{"pullRequest":{"number":7,"title":"E2E widget pr","baseRefName":"main","headRefName":"topic","headRepositoryOwner":{"login":"forkguy"},"url":"https://github.com/e2e/demo/pull/7","state":"OPEN","baseRef":{"target":{"oid":"$BASE_TIP"}},"headRefOid":"$HEAD_TIP"}}}}
 JSONEOF
 
 run_pr() { # $1=scenario lua, $2=data dir; 各自の notify.log を置く

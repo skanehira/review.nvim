@@ -10,8 +10,6 @@ local result = require 'review.core.result'
 
 local M = {}
 
-local JSON_FIELDS = 'number,title,baseRefName,headRefName,headRepositoryOwner,url,state'
-
 --- `gh api` の共通実行。失敗の分類は pr_view と同じ規則 (未 auth = E_GH、
 --- それ以外の HTTP/実行失敗 = E_PR)。opts.cwd は repo 作業ツリー (gh api は
 --- owner/repo をパスに持つため cwd に依存しないが、認証環境に合わせて渡す)。
@@ -82,44 +80,73 @@ function M.repo_from_url(url)
   return { owner = owner, repo = repo }
 end
 
---- opts = { target = PR 番号 or URL, cwd? }。
---- cb(result) result.data = gh pr view の JSON (number, title, baseRefName,
---- headRefName, headRepositoryOwner, url, state)。
+-- `gh pr view` ではなく GraphQL を使うのは、base ブランチの**現在の** tip
+-- (`baseRef.target.oid`) を PR メタと同じ 1 回の呼び出しで得るため。
+-- `gh pr view --json baseRefOid` は PR 更新時点の値で、ローカルの
+-- remote-tracking ref と比べても fetch の要否を判定できない (pr-worktree.md
+-- 「PR 解決」手順 3)。
+local PR_QUERY = 'query($owner:String!,$name:String!,$number:Int!){'
+  .. 'repository(owner:$owner,name:$name){pullRequest(number:$number){'
+  .. 'number title url state baseRefName headRefName headRepositoryOwner{login} '
+  .. 'baseRef{target{oid}} headRefOid}}}'
+
+-- 番号指定は owner/repo を gh の placeholder (`-F` のみ展開される) に任せ、
+-- `gh pr view <n>` と同じ規則で cwd の repo を解決させる。URL 指定は URL の
+-- host / owner / repo を明示する。明示値を `-f` で渡すのは、`-F` の型変換で
+-- 数字だけの owner 名が Int になりクエリが型エラーになるため。
+local function pr_view_args(opts)
+  local args = { 'api' }
+  local host, owner, name
+  if opts.url ~= nil then
+    host, owner, name = opts.url:match '^https?://([^/]+)/([^/]+)/([^/]+)'
+  end
+  if host ~= nil then
+    vim.list_extend(args, { '--hostname', host, 'graphql', '-f', 'owner=' .. owner })
+    vim.list_extend(args, { '-f', 'name=' .. name })
+  else
+    vim.list_extend(args, { 'graphql', '-F', 'owner={owner}', '-F', 'name={repo}' })
+  end
+  vim.list_extend(args, { '-F', 'number=' .. tostring(opts.number), '-f', 'query=' .. PR_QUERY })
+  return args
+end
+
+--- opts = { number, url?, cwd? } (url は `:Review pr <URL>` の入力そのもの)。
+--- cb(result) result.data = { number, title, url, state, baseRefName,
+--- headRefName, headRepositoryOwner, base_tip, head_tip }。base_tip は remote の
+--- base ブランチの現在 tip (ブランチが消えていれば nil)、head_tip は PR head の sha。
 function M.pr_view(opts, cb)
-  local cfg = config.get()
-  cli.run(
-    cfg.gh_bin,
-    { 'pr', 'view', opts.target, '--json', JSON_FIELDS },
-    { cwd = opts.cwd, err_code = result.codes.E_GH },
-    function(res)
-      if not res.ok then
-        -- 不在・起動失敗 (data なし) は gh の実行に到達していない → E_GH のまま
-        if res.data == nil then
-          cb(res)
-          return
-        end
-        local err = res.error or ''
-        if err:lower():find('gh auth login', 1, true) ~= nil then
-          -- 理由文字列のみ返す (通知プレフィックスは caller 側 — 横断規約の通知形式)
-          res.error = 'gh is not logged in; run `gh auth login`'
-          res.code = result.codes.E_GH
-          cb(res)
-          return
-        end
-        -- gh は走ったが PR を解決できない (非存在・repo 不一致等) = E_PR。
-        -- stderr 末尾 1 行 (cli 整形済み) を理由としてそのまま返す。
-        res.code = result.codes.E_PR
-        cb(res)
-        return
-      end
-      local ok_decode, meta = pcall(vim.json.decode, res.data.stdout)
-      if not ok_decode or type(meta) ~= 'table' then
-        cb(result.err('failed to parse the output of gh pr view', result.codes.E_GH))
-        return
-      end
-      cb(result.ok(meta))
+  run_api(pr_view_args(opts), opts, function(res)
+    if not res.ok then
+      cb(res)
+      return
     end
-  )
+    local ok_decode, decoded =
+      pcall(vim.json.decode, res.data.stdout, { luanil = { object = true } })
+    local pr = ok_decode
+      and type(decoded) == 'table'
+      and type(decoded.data) == 'table'
+      and type(decoded.data.repository) == 'table'
+      and decoded.data.repository.pullRequest
+    if type(pr) ~= 'table' then
+      cb(result.err('failed to parse the output of gh api graphql', result.codes.E_GH))
+      return
+    end
+    local base_tip
+    if type(pr.baseRef) == 'table' and type(pr.baseRef.target) == 'table' then
+      base_tip = pr.baseRef.target.oid
+    end
+    cb(result.ok {
+      number = pr.number,
+      title = pr.title,
+      url = pr.url,
+      state = pr.state,
+      baseRefName = pr.baseRefName,
+      headRefName = pr.headRefName,
+      headRepositoryOwner = pr.headRepositoryOwner,
+      base_tip = base_tip,
+      head_tip = pr.headRefOid,
+    })
+  end)
 end
 
 --- opts = { repo = {owner, repo}, number, cwd? }。
