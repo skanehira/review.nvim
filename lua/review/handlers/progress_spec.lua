@@ -1,5 +1,5 @@
 -- handlers/progress: 開始フローの段階別過渡メッセージ (pr-worktree.md
--- 「段階別の過渡 notify」)。並行する段階は開始順に併記し、全段階が終わったら
+-- 「段階別の過渡メッセージ」)。並行する段階は開始順に併記し、全段階が終わったら
 -- メッセージエリアをクリアする。
 local progress = require 'review.handlers.progress'
 
@@ -20,6 +20,7 @@ describe('progress', function()
 
   after_each(function()
     progress._set_sink(nil)
+    progress._set_width(nil)
     progress._reset()
     vim.notify = REAL_NOTIFY
     vim.api.nvim_echo = REAL_ECHO
@@ -69,4 +70,44 @@ describe('progress', function()
       assert.same({ { {}, false, {} } }, echoed)
     end
   )
+
+  -- メッセージ欄の幅を超える 1 行は折り返されて Press ENTER の確認待ちになり、
+  -- 開始フローの後続コールバックが止まる (実 PTY 80 列で再現)
+  it(
+    '既定の出力先はメッセージ欄の幅を超える文言を末尾で切り詰めて 1 行に収める',
+    function()
+      progress._set_sink(nil)
+      progress._set_width(function()
+        return 40
+      end)
+      local notified = {}
+      vim.notify = function(msg)
+        table.insert(notified, msg)
+      end
+      vim.api.nvim_echo = function() end
+
+      progress.start 'fetching the head of PR #1234 and origin/feature/long-name'
+      progress.start 'resolving PR #1'
+
+      assert.same({
+        'review.nvim: fetching the head of PR...',
+        'review.nvim: fetching the head of PR...',
+      }, notified)
+    end
+  )
+
+  it('幅に収まる文言は切り詰めない', function()
+    progress._set_sink(nil)
+    progress._set_width(function()
+      return 40
+    end)
+    local notified = {}
+    vim.notify = function(msg)
+      table.insert(notified, msg)
+    end
+
+    progress.start 'loading the diff'
+
+    assert.same({ 'review.nvim: loading the diff...' }, notified)
+  end)
 end)
