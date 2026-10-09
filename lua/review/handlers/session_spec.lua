@@ -608,6 +608,36 @@ describe('session.start 開始フロー (専有 tab 3 窓)', function()
   )
 
   it(
+    'branch の差分取得失敗では過渡メッセージを消してから WARN を出す',
+    function()
+      install_git {
+        top_ok,
+        RP_HEAD_MATCH[1],
+        RP_HEAD_MATCH[2],
+        function()
+          return { code = 128, stdout = '', stderr = "fatal: bad revision 'main'\n" }
+        end,
+      }
+      local timeline = {}
+      progress._set_sink(function(text)
+        table.insert(timeline, text == nil and '<clear>' or text)
+      end)
+      vim.notify = function(msg)
+        table.insert(timeline, msg)
+      end
+
+      session_handler.start { base = 'main', head = 'feature' }
+
+      assert.same({
+        'review.nvim: loading the diff...',
+        '<clear>',
+        'review.nvim: cannot resolve the reviewed ref: "main". specify an existing '
+          .. 'branch/commit (base/head args of start are <Tab>-completable)',
+      }, timeline)
+    end
+  )
+
+  it(
     'branch の開始でも diff 取得中は過渡メッセージを出し、取得後にクリアする',
     function()
       start_done('main', 'feature')

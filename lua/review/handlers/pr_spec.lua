@@ -566,6 +566,103 @@ describe('pr-handler fetch は remote tip と違う ref だけ', function()
       warn = 'review.nvim: cannot fetch the PR base branch "main" from origin: '
         .. 'fatal: unable to access',
     },
+    {
+      name = 'fork の pull ref だけの fetch 失敗',
+      seq = {
+        top_ok,
+        json_ok(pr_json()),
+        origin_ok,
+        base_fresh,
+        not_a_branch,
+        ref_missing,
+        function()
+          return { code = 128, stdout = '', stderr = 'fatal: unable to access\n' }
+        end,
+      },
+      shown = {
+        'review.nvim: resolving PR #7...',
+        '<clear>',
+        'review.nvim: fetching the head of PR #7 from origin...',
+        '<clear>',
+      },
+      warn = 'review.nvim: fatal: unable to access',
+    },
+    {
+      name = 'pull ref と base をまとめた fetch 失敗',
+      seq = {
+        top_ok,
+        json_ok(pr_json()),
+        origin_ok,
+        base_stale,
+        not_a_branch,
+        ref_missing,
+        function()
+          return { code = 128, stdout = '', stderr = 'fatal: unable to access\n' }
+        end,
+      },
+      shown = {
+        'review.nvim: resolving PR #7...',
+        '<clear>',
+        'review.nvim: fetching the head of PR #7 and origin/main...',
+        '<clear>',
+      },
+      warn = 'review.nvim: cannot fetch the head and base branch "main" of PR #7 from origin: '
+        .. 'fatal: unable to access',
+    },
+    {
+      name = 'worktree 作成失敗',
+      seq = {
+        top_ok,
+        json_ok(pr_json()),
+        origin_ok,
+        base_fresh,
+        sha_ok,
+        function()
+          return { code = 255, stdout = '', stderr = 'fatal: collision\n' }
+        end, -- add
+        git_ok, -- prune
+        function()
+          return { code = 255, stdout = '', stderr = 'fatal: collision\n' }
+        end, -- add の再試行
+      },
+      shown = {
+        'review.nvim: resolving PR #7...',
+        '<clear>',
+        'review.nvim: creating the review worktree...',
+        '<clear>',
+      },
+      warn = function()
+        return (
+          'review.nvim: cannot create the worktree: %s. if a worktree with the same name '
+          .. 'is left over, clean it up with `git worktree remove` and retry (fatal: collision)'
+        ):format(paths.worktree_path(REPO_TOP, 'pr-7'))
+      end,
+    },
+    {
+      name = 'worktree での差分取得失敗',
+      seq = {
+        top_ok,
+        json_ok(pr_json()),
+        origin_ok,
+        base_fresh,
+        sha_ok,
+        git_ok, -- worktree add
+        function()
+          return { code = 128, stdout = '', stderr = "fatal: bad revision 'origin/main'\n" }
+        end, -- diff
+        git_ok, -- 作りたての worktree の掃除 (remove --force)
+      },
+      shown = {
+        'review.nvim: resolving PR #7...',
+        '<clear>',
+        'review.nvim: creating the review worktree...',
+        '<clear>',
+        'review.nvim: loading the diff...',
+        '<clear>',
+      },
+      warn = 'review.nvim: cannot resolve the reviewed ref: "origin/main". specify an existing '
+        .. 'branch/commit (base/head args of start are <Tab>-completable)',
+    },
   } do
     it(
       ('%sでは過渡メッセージを消してから WARN を出す'):format(case.name),
@@ -582,7 +679,9 @@ describe('pr-handler fetch は remote tip と違う ref だけ', function()
         pr_handler.start '7'
 
         local expected = vim.deepcopy(case.shown)
-        table.insert(expected, case.warn)
+        -- worktree のパスは before_each で決まるデータディレクトリに依存するため、
+        -- 文言を組み立てる関数でも受ける
+        table.insert(expected, type(case.warn) == 'function' and case.warn() or case.warn)
         assert.same(expected, timeline)
       end
     )
