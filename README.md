@@ -38,7 +38,7 @@ Four steps from zero to reviewing the current branch against `main`:
 :Review start main
 ```
 
-The `main..current branch` diff opens in three windows (added files close the base window and show only the head). The review target is the working tree of the current checkout, so uncommitted changes are included. To state the head explicitly use `:Review start main feature` (review `feature` against `main`). For a PR: `:Review pr 42` (the PR's base branch is fetched from the remote and compared as the remote-tracking ref, e.g. `origin/main`, so it need not exist locally).
+The `main..current branch` diff opens in three windows (added files close the base window and show only the head). The review target is the working tree of the current checkout, so uncommitted changes are included. To state the head explicitly use `:Review start main feature` (review `feature` against `main`). For a PR: `:Review pr 42` (the PR's base branch is compared as the remote-tracking ref, e.g. `origin/main`, so it need not exist locally; the base and the PR head are fetched only when they are behind GitHub). While a review is starting, the message area shows the current step (resolving the PR, fetching, creating the worktree, loading the diff).
 
 **2. Write comments**
 

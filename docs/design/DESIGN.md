@@ -94,7 +94,7 @@ DB は持たない。状態はすべてセッション JSON ファイル (正本
 | `id` | string | slug。`main..feature` → `main--feature`、PR は `pr-<number>`。`[A-Za-z0-9._-]` 以外の文字は `_` に置換。稀な refs 名由来で別 refs 組と衝突した場合は新規作成を拒否して既存を案内する (`:Review delete` で削除可) |
 | `repo` | string | repo top-level の絶対パス。branch モードはレビュー実施中のチェックアウト位置 (ファイルは sha1(repo) 先頭 16 桁のディレクトリに収める) |
 | `mode` | `"branch" \| "pr"` | worktree は pr のみ (決定表) |
-| `base` / `head` | string | git ref 名。PR の base は remote から fetch した remote-tracking ref `<remote>/<baseRefName>` (例 `origin/main`。ローカル branch には依存しない — pr-worktree「PR 解決」)、head は同一 repo ブランチなら headRefName をそのまま、fork のみ fetch した一時 ref (`review-nvim/pr-<n>`)。branch モードの head 省略開始時は `rev-parse --abbrev-ref HEAD` の結果 (detached のとき literal `HEAD`) を保存 — 復元時にブランチ名として再評価でき、裏でブランチが変わっていれば head 解決フロー (switch 提案) が走る |
+| `base` / `head` | string | git ref 名。PR の base は remote-tracking ref `<remote>/<baseRefName>` (例 `origin/main`。開始時に GitHub 上の tip と照合し、古ければ fetch して更新する。ローカル branch には依存しない — pr-worktree「PR 解決」)、head は同一 repo ブランチなら headRefName をそのまま、fork のみ自前一時 ref (`review-nvim/pr-<n>`。PR head の sha と違うときだけ fetch して更新する)。branch モードの head 省略開始時は `rev-parse --abbrev-ref HEAD` の結果 (detached のとき literal `HEAD`) を保存 — 復元時にブランチ名として再評価でき、裏でブランチが変わっていれば head 解決フロー (switch 提案) が走る |
 | `pr` | object\|null | `{number, url}` (mode="pr" のときのみ) |
 | `worktree` | object\|null | `{path, created_by_us}` (boolean)。branch モードは常に null。削除してよいのは `created_by_us=true` のものだけ |
 | `status` | `"open" \| "closed"` | close はファイル削除ではなく closed にする (再オープンのため) |

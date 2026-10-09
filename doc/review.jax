@@ -45,8 +45,11 @@ USAGE						*review-usage_ja*
 	  実行)。head を git worktree に展開し、レビュー窓 (tcd 済み) の head
 	  側が worktree 内の実ファイルになる (worktree 作成は pr モードのみ。
 	  削除はセッション削除時のみ |review-sessions_ja|)。base は PR の base
-	  ブランチを開始のたびに remote から fetch し、remote-tracking ref
-	  (例 `origin/main`) として比較する。ローカル branch は無くてよい
+	  ブランチを remote-tracking ref (例 `origin/main`) として比較する。
+	  ローカル branch は無くてよい。開始時に base と PR の head を GitHub
+	  上の現在の tip と照合し、古い ref だけを fetch する。開始中はメッセ
+	  ージ欄にいまの段階 (PR の解決 / fetch / worktree 作成 / 差分の取得)
+	  を表示する
 
 	:Review list			保存済みセッション一覧 |review-list_ja|
 
