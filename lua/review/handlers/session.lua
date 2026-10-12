@@ -336,37 +336,80 @@ end
 
 -- 再利用する worktree を head の commit へ移す (pr-worktree.md「worktree 作成判断」
 -- 再利用行)。ref だけ新しくしても worktree が前回の commit のままだと古い内容を
--- レビューする。未コミット変更・未保存バッファがあるときは移さない: checkout は
--- 変更を新しい head に持ち越すか衝突で失敗し、どちらも利用者の編集を黙って
--- 書き換える。sha を読めないときも worktree をそのまま使う (開始は止めない)。
+-- レビューする。移さないのは利用者の作業を黙って書き換えうるときで、理由を
+-- cb の第 2 引数 (notice) で返す。
+-- - 未コミット変更・未保存バッファ: checkout は変更を新しい head に持ち越すか
+--   衝突で失敗する
+-- - head にも直前の head (ref の reflog の 1 つ前) にも含まれない commit: checkout
+--   で worktree の commit がどのブランチからも辿れなくなる。直前の head も見るのは、
+--   PR の force push 後 (旧 head は新 head の祖先でない) でも移せるようにするため
+-- notice は呼び出し側が UI を開いた後に WARN する。段階表示の途中で出すと、直後の
+-- 段階表示で消えるか、折り返して Press ENTER の確認待ちで開始が止まるため。
+-- head が PR の ref でない旧形式 (ブランチ名) の復元は追従しない (手元の
+-- ブランチへ移すことになるため)。sha を読めないときもそのまま使う。
 local function follow_head(args, record, cb)
-  local function keep()
-    cb(result.ok(record))
+  local function keep(notice)
+    cb(result.ok(record), notice)
+  end
+  if not git_ref.is_pr_ref(args.head) then
+    keep()
+    return
   end
   git_worktree.heads({ path = record.path, ref = args.head }, function(hres)
     if not hres.ok or hres.data.current == hres.data.target then
       keep()
       return
     end
-    local current, target = hres.data.current, hres.data.target
-    git_worktree.status({ repo = args.repo, path = record.path }, function(sres)
-      if not sres.ok or sres.data.dirty or wt_buffers.count_modified(record.path) > 0 then
-        notify_warn(
-          (
-            'the review worktree has local changes, so it stays at %s instead of moving to '
-            .. '%s (%s). discard them or :Review delete %s to review the latest head'
-          ):format(current:sub(1, 7), args.head, target:sub(1, 7), args.id)
-        )
-        keep()
-        return
-      end
+    local current, target = hres.data.current:sub(1, 7), hres.data.target:sub(1, 7)
+    local function stays(reason)
+      return ('the review worktree %s, so it shows %s instead of the PR head %s'):format(
+        reason,
+        current,
+        target
+      )
+    end
+    local function checkout()
       local stage = progress.start 'updating the review worktree'
       git_worktree.checkout_detach({ path = record.path, ref = args.head }, function(cres)
         progress.stop(stage)
         if not cres.ok then
-          notify_warn(('cannot move the review worktree to %s: %s'):format(args.head, cres.error))
+          keep(('cannot move the review worktree to the PR head %s: %s'):format(target, cres.error))
+          return
         end
         keep()
+      end)
+    end
+    local function contains(ref, on_result)
+      git_worktree.contains({ path = record.path, ancestor = 'HEAD', ref = ref }, function(res)
+        on_result(res.ok and res.data == true)
+      end)
+    end
+    git_worktree.status({ repo = args.repo, path = record.path }, function(sres)
+      if not sres.ok then
+        keep(
+          (
+            'cannot check the review worktree for local changes, '
+            .. 'so it shows %s instead of the PR head %s'
+          ):format(current, target)
+        )
+        return
+      end
+      if sres.data.dirty or wt_buffers.count_modified(record.path) > 0 then
+        keep(stays 'has local changes')
+        return
+      end
+      contains(args.head, function(in_head)
+        if in_head then
+          checkout()
+          return
+        end
+        contains(args.head .. '@{1}', function(in_prev_head)
+          if in_prev_head then
+            checkout()
+            return
+          end
+          keep(stays 'has commits that are not in the PR head')
+        end)
       end)
     end)
   end)
@@ -415,8 +458,9 @@ local function resolve_locked(args, cb)
   add_with_recovery(args, path, record, cb)
 end
 
---- args = { repo, id, mode, head, record? } -> cb(result)。
---- result.data = worktree 記録テーブル | vim.NIL (作らない)。
+--- args = { repo, id, mode, head, record? } -> cb(result, notice?)。
+--- result.data = worktree 記録テーブル | vim.NIL (作らない)。notice は再利用した
+--- worktree を head へ移さなかった理由 (UI を開いた後に WARN する文言)。
 --- 失敗 (E_WORKTREE / E_CANCELLED) は呼び出し側が通知して開始を中断する。
 --- 同一 dir path の remove/add 競合を避けるため worktree lock を取得する
 --- (作成〜cb 完了まで lock 下。branch の名残掃除も同じ lock 内で走る)。
@@ -424,12 +468,12 @@ function M.resolve_worktree(args, cb)
   local lock_path = paths.worktree_path(args.repo, args.id)
   wt_with_lock(lock_path, function()
     local released = false
-    local function done(res)
+    local function done(res, notice)
       if not released then
         released = true
         wt_unlock(lock_path)
       end
-      cb(res)
+      cb(res, notice)
     end
     resolve_locked(args, done)
   end)
@@ -1293,7 +1337,7 @@ function M.fetch_prepared(args, cb)
       mode = 'pr',
       head = args.head,
       record = args.record,
-    }, function(wres)
+    }, function(wres, notice)
       if not wres.ok then
         cb(wres)
         return
@@ -1319,7 +1363,12 @@ function M.fetch_prepared(args, cb)
           cb(res)
           return
         end
-        cb(result.ok { files = res.data.files, worktree = wres.data, degraded = false })
+        cb(result.ok {
+          files = res.data.files,
+          worktree = wres.data,
+          degraded = false,
+          notice = notice,
+        })
       end)
     end)
     return
@@ -1400,7 +1449,14 @@ local function fetch_and_begin(args, existing)
       end
       return
     end
-    begin_session(args, res.data.files, existing, res.data.worktree, res.data.degraded)
+    begin_session(
+      args,
+      res.data.files,
+      existing,
+      res.data.worktree,
+      res.data.degraded,
+      res.data.notice
+    )
   end)
 end
 
@@ -1706,7 +1762,7 @@ end
 -- degraded は head 解決フローの解 (scratch 縮退時 true。リフレッシュの再取得
 -- 引数形を開始時解決と一致させるため active に保持する。session JSON には
 -- 載せない — 復元時に head 解決フローを毎回再評価する)。
-begin_session = function(args, files, existing, worktree, degraded)
+begin_session = function(args, files, existing, worktree, degraded, notice)
   local session = existing
   if session == nil then
     session = {
@@ -1756,6 +1812,9 @@ begin_session = function(args, files, existing, worktree, degraded)
   if args.info ~= nil then
     -- PR タイトルは開始時 INFO のみ (セッションに永続化しない — pr-worktree.md)。
     vim.notify('review.nvim: ' .. args.info, vim.log.levels.INFO)
+  end
+  if notice ~= nil then
+    notify_warn(notice)
   end
   -- PR セッションは GitHub のレビューコメント / 一般コメントを非同期で取り込む
   -- (diff と並行。完了時に突合 -> UI 再適用 -> 永続化 — pr-comments)。
@@ -1808,7 +1867,7 @@ end
 --- fetch_prepared 側で済んでいるため、解 (記録 | vim.NIL) を受ける。
 --- 復元時の head 解決 (switch 提案 / scratch 縮退) も fetch_prepared が走る
 --- (DESIGN.md 決定表「起動時復元」)。
-function M.resume_into(session, files, worktree, degraded)
+function M.resume_into(session, files, worktree, degraded, notice)
   begin_session({
     repo = session.repo,
     id = session.id,
@@ -1816,7 +1875,7 @@ function M.resume_into(session, files, worktree, degraded)
     base = session.base,
     head = session.head,
     pr = session.pr,
-  }, files, session, worktree, degraded)
+  }, files, session, worktree, degraded, notice)
 end
 
 -- ============================================================================

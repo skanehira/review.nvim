@@ -78,6 +78,27 @@ function M.heads(opts, cb)
   end)
 end
 
+--- cb(result) data = ancestor が ref の祖先 (同一を含む) なら true、違えば false。
+--- `git -C <path> merge-base --is-ancestor <ancestor> <ref>` (exit 0 / 1)。それ以外の
+--- 終了 (ref が解決できない等) は E_WORKTREE の err。
+function M.contains(opts, cb)
+  run(
+    { '-C', opts.path, 'merge-base', '--is-ancestor', opts.ancestor, opts.ref },
+    nil,
+    function(res)
+      if res.ok then
+        cb(result.ok(true))
+        return
+      end
+      if type(res.data) == 'table' and res.data.code == 1 then
+        cb(result.ok(false))
+        return
+      end
+      cb(res)
+    end
+  )
+end
+
 --- cb(result)。`git -C <path> checkout --detach <ref>` (再利用する worktree を
 --- PR head へ移す)。
 function M.checkout_detach(opts, cb)

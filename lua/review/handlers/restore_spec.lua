@@ -789,6 +789,51 @@ describe('restore の worktree 解决 (mode=pr は resume でも常時作成/再
   )
 
   it(
+    '復元でも worktree を head へ移せなかった理由は、UI が開いた後に WARN する',
+    function()
+      local wt = paths.worktree_path(REPO_TOP, 'pr-7')
+      vim.fn.mkdir(wt, 'p')
+      pr_session { status = 'open', worktree = { path = wt, created_by_us = true } }
+      cli._set_system(function(cmd, _opts, on_exit)
+        if cmd[1] == 'gh' then
+          on_exit { code = 0, stdout = '[]', stderr = '' } -- PR コメント取り込み (対象外)
+        elseif cmd[2] == 'worktree' and cmd[3] == 'list' then
+          on_exit { code = 0, stdout = 'worktree ' .. wt .. '\n', stderr = '' }
+        elseif cmd[2] == '-C' and cmd[4] == 'rev-parse' then
+          on_exit {
+            code = 0,
+            stdout = string.rep('1', 40) .. '\n' .. string.rep('2', 40) .. '\n',
+            stderr = '',
+          }
+        elseif cmd[2] == '-C' and cmd[4] == 'status' then
+          on_exit { code = 0, stdout = ' M a.lua\n', stderr = '' }
+        elseif cmd[2] == 'diff' then
+          on_exit { code = 0, stdout = RAW_1HUNK, stderr = '' }
+        else
+          on_exit { code = 0, stdout = '', stderr = '' }
+        end
+      end)
+      local timeline = {}
+      progress._set_sink(function(text)
+        table.insert(timeline, text == nil and '<clear>' or text)
+      end)
+      vim.notify = function(msg)
+        table.insert(timeline, msg)
+      end
+
+      restore.resume_session(store.load(REPO_TOP, 'pr-7').data)
+
+      assert.same({
+        'review.nvim: loading the diff...',
+        '<clear>',
+        'review.nvim: the review worktree has local changes, '
+          .. 'so it shows 1111111 instead of the PR head 2222222',
+      }, timeline)
+      assert.equals('pr-7', session_handler.active().id)
+    end
+  )
+
+  it(
     '記録再利用 + 復元時の差分取得失敗: worktree 掃除が走り保存 JSON の記録を nil 化する (pr-worktree「0 差分・差分取得失敗時の掃除」復元経路)',
     function()
       local wt = paths.worktree_path(REPO_TOP, 'pr-7')

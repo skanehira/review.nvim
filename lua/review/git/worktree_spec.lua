@@ -260,6 +260,51 @@ describe('git/worktree heads / checkout_detach (再利用時の head 追従)', f
     assert.equals('E_WORKTREE', received.code)
   end)
 
+  for _, case in ipairs {
+    { name = 'exit 0 は祖先 (true)', code = 0, expected = true },
+    { name = 'exit 1 は祖先でない (false)', code = 1, expected = false },
+  } do
+    it('contains は `merge-base --is-ancestor <ancestor> <ref>` の ' .. case.name, function()
+      stub_system()
+      local received
+      worktree.contains(
+        { path = '/wt/x', ancestor = 'HEAD', ref = 'review-nvim/pr-7' },
+        function(res)
+          received = res
+        end
+      )
+      assert.same(
+        { 'git', '-C', '/wt/x', 'merge-base', '--is-ancestor', 'HEAD', 'review-nvim/pr-7' },
+        last().cmd
+      )
+      last().on_exit { code = case.code, stdout = '', stderr = '' }
+
+      assert.same({ __class = 'review.Result', ok = true, data = case.expected }, received)
+    end)
+  end
+
+  it(
+    'contains は ref が解決できない (exit 128) と E_WORKTREE の err を返す',
+    function()
+      stub_system()
+      local received
+      worktree.contains(
+        { path = '/wt/x', ancestor = 'HEAD', ref = 'review-nvim/pr-7@{1}' },
+        function(res)
+          received = res
+        end
+      )
+      last().on_exit {
+        code = 128,
+        stdout = '',
+        stderr = "fatal: log for 'review-nvim/pr-7' only has 1 entries\n",
+      }
+
+      assert.equals(false, received.ok)
+      assert.equals('E_WORKTREE', received.code)
+    end
+  )
+
   it('checkout_detach は `git -C <path> checkout --detach <ref>` を実行する', function()
     stub_system()
     local received

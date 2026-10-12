@@ -2714,7 +2714,6 @@ describe(
               stderr = '',
             }
           end, -- list: 登録あり
-          heads_same, -- worktree の HEAD が head と同じ = 移さない
           function()
             return diff_ok(RAW_DIFF_A_B)
           end,
@@ -2722,8 +2721,8 @@ describe(
 
         assert.is_false(has_call 'git worktree add')
         assert.same(list_cmd(), state.git_calls[1])
-        assert.same({ 'git', 'diff', 'main' }, state.git_calls[3])
-        assert.equals(wt, state.git_opts[3].cwd)
+        assert.same({ 'git', 'diff', 'main' }, state.git_calls[2])
+        assert.equals(wt, state.git_opts[2].cwd)
         assert.same({ path = wt, created_by_us = true }, load_saved().worktree)
         -- dir 実在 -> head 実ファイルも show 充填も worktree 基準
         -- (bufadd は symlink を解決して buf 名を持つので buffer 名側だけ realpath で
@@ -2848,7 +2847,6 @@ describe(
               stderr = '',
             }
           end, -- list 登録あり -> 記録を再利用 (add なし)
-          heads_same,
           function()
             return diff_ok ''
           end,
@@ -2864,7 +2862,7 @@ describe(
           head = 'feature',
         }
 
-        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[4])
+        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[3])
         assert.is_nil(session_handler.active())
         -- 開始は開かない = 新規 save はしないが、既存 JSON の整合は保つ
         assert.same(
@@ -2919,7 +2917,6 @@ describe(
               stderr = '',
             }
           end, -- list 登録あり -> 記録を再利用 (add なし)
-          heads_same,
           function()
             return { code = 128, stdout = '', stderr = "fatal: bad revision 'main'\n" }
           end, -- diff 失敗
@@ -2935,7 +2932,7 @@ describe(
           head = 'feature',
         }
 
-        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[4])
+        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[3])
         assert.is_nil(session_handler.active())
         assert.same(
           existing_stub { mode = 'pr', worktree = vim.NIL, updated_at = 4321 },
@@ -3022,7 +3019,6 @@ describe(
                 stderr = '',
               }
             end, -- list 登録あり -> 記録を再利用 (add なし)
-            heads_same,
             mode == 'zero' and function()
               return diff_ok ''
             end or git_fail "fatal: bad revision 'main'\nusage: git diff [<options>]\n",
@@ -3192,7 +3188,6 @@ describe('close の worktree 保持 (セッション終了 / 削除は delete �
         function()
           return { code = 0, stdout = 'worktree ' .. wt_path() .. '\n', stderr = '' }
         end, -- worktree list (再利用判定)
-        heads_same, -- worktree の HEAD が head と同じ = 移さない
         function()
           return diff_ok(RAW_DIFF_A_B)
         end, -- diff
@@ -3214,8 +3209,7 @@ describe('close の worktree 保持 (セッション終了 / 削除は delete �
         end
       end
       assert.same({ 'git', 'worktree', 'list', '--porcelain' }, state.git_calls[1])
-      assert.same({ 'git', '-C', wt_path(), 'rev-parse', 'HEAD', 'feature' }, state.git_calls[2])
-      assert.same({ 'git', 'diff', 'main' }, state.git_calls[3])
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[2])
       assert.equals('open', load_saved().status)
       assert.equals(SLUG, session_handler.active().id)
     end
@@ -5042,13 +5036,26 @@ describe('file panel ツリー / view state (issue-17)', function()
 end)
 
 -- 再利用する worktree は PR head に追従させる (pr-worktree.md「worktree 作成判断」
--- 再利用行)。ref だけ新しくしても worktree が前回の commit のままだと、
--- 古い内容をレビューすることになる。
+-- 再利用行)。ref だけ新しくしても worktree が前回の commit のままだと、古い内容を
+-- レビューすることになる。移さないときの WARN は UI が開いた後に出す (段階表示の
+-- 途中で出すと直後の段階表示で消えるか、折り返して Press ENTER で開始が止まる)。
 describe('worktree 再利用時の head 追従', function()
   use_env()
 
-  local function reuse(responses)
-    started_with_worktree()
+  local PR_HEAD = 'review-nvim/pr-7'
+  local not_ancestor = function()
+    return { code = 1, stdout = '', stderr = '' }
+  end
+
+  -- 段階表示と通知を 1 つの時系列に記録して、再利用経路の開始を走らせる
+  local function reuse(responses, head)
+    -- 前準備の開始も同じ head で行う (refs 組が違うと slug 衝突で再開始が止まる)
+    begin_pr({
+      git_ok, -- worktree add
+      function()
+        return diff_ok(RAW_DIFF_A_B)
+      end,
+    }, { head = head or PR_HEAD })
     vim.fn.mkdir(wt_path(), 'p')
     local seq = {
       function()
@@ -5062,60 +5069,101 @@ describe('worktree 再利用時の head 追従', function()
     install_git(seq)
     state.input_answer = 'y'
     session_handler.close_by_key()
-    state.progress = {}
-    state.notifications = {}
+    state.timeline = {}
+    progress._set_sink(function(text)
+      table.insert(state.timeline, text == nil and '<clear>' or text)
+    end)
+    vim.notify = function(msg)
+      table.insert(state.timeline, msg)
+    end
     session_handler.begin {
       repo = state.repo,
       id = SLUG,
       mode = 'pr',
       base = 'main',
-      head = 'feature',
+      head = head or PR_HEAD,
     }
   end
 
-  it(
-    'head が進んでいて worktree が clean なら head の commit へ移してから差分を取る',
-    function()
-      reuse { heads_moved, status_clean, git_ok }
+  local function wt_cmd(...)
+    return vim.list_extend({ 'git', '-C', wt_path() }, { ... })
+  end
 
-      assert.same({
-        list_cmd(),
-        { 'git', '-C', wt_path(), 'rev-parse', 'HEAD', 'feature' },
-        { 'git', '-C', wt_path(), 'status', '--porcelain' },
-        { 'git', '-C', wt_path(), 'checkout', '--detach', 'feature' },
-        { 'git', 'diff', 'main' },
-      }, vim.list_slice(state.git_calls, 1, 5))
+  local function HEADS()
+    return wt_cmd('rev-parse', 'HEAD', PR_HEAD)
+  end
+  local function STATUS()
+    return wt_cmd('status', '--porcelain')
+  end
+  local function IN_HEAD()
+    return wt_cmd('merge-base', '--is-ancestor', 'HEAD', PR_HEAD)
+  end
+  local function IN_PREV_HEAD()
+    return wt_cmd('merge-base', '--is-ancestor', 'HEAD', PR_HEAD .. '@{1}')
+  end
+  local function CHECKOUT()
+    return wt_cmd('checkout', '--detach', PR_HEAD)
+  end
+  local DIFF = { 'git', 'diff', 'main' }
+  local LOADING = { 'review.nvim: loading the diff...', '<clear>' }
+
+  local function calls(n)
+    return vim.list_slice(state.git_calls, 1, n)
+  end
+
+  it(
+    'HEAD が head の祖先なら (head に commit が積まれた) head へ移してから差分を取る',
+    function()
+      reuse { heads_moved, status_clean, git_ok, git_ok }
+
+      assert.same({ list_cmd(), HEADS(), STATUS(), IN_HEAD(), CHECKOUT(), DIFF }, calls(6))
       assert.same({
         'review.nvim: updating the review worktree...',
         '<clear>',
-        'review.nvim: loading the diff...',
-        '<clear>',
-      }, state.progress)
+        LOADING[1],
+        LOADING[2],
+      }, state.timeline)
       assert.equals(SLUG, session_handler.active().id)
     end
   )
+
+  it('HEAD が直前の head (force push 前) の祖先なら head へ移す', function()
+    reuse { heads_moved, status_clean, not_ancestor, git_ok, git_ok }
+
+    assert.same(
+      { list_cmd(), HEADS(), STATUS(), IN_HEAD(), IN_PREV_HEAD(), CHECKOUT(), DIFF },
+      calls(7)
+    )
+    assert.equals(SLUG, session_handler.active().id)
+  end)
 
   it(
-    'head が進んでいても worktree に未コミット変更があれば移さず、前の head のまま開いて WARN する',
+    'worktree に head にも直前の head にも無い commit があれば移さず、UI が開いた後に WARN する',
     function()
-      reuse { heads_moved, status_dirty }
+      reuse { heads_moved, status_clean, not_ancestor, not_ancestor }
 
+      assert.same({ list_cmd(), HEADS(), STATUS(), IN_HEAD(), IN_PREV_HEAD(), DIFF }, calls(6))
       assert.same({
-        list_cmd(),
-        { 'git', '-C', wt_path(), 'rev-parse', 'HEAD', 'feature' },
-        { 'git', '-C', wt_path(), 'status', '--porcelain' },
-        { 'git', 'diff', 'main' },
-      }, vim.list_slice(state.git_calls, 1, 4))
-      assert.same({
-        msg = 'review.nvim: the review worktree has local changes, so it stays at 1111111 '
-          .. 'instead of moving to feature (2222222). discard them or :Review delete '
-          .. SLUG
-          .. ' to review the latest head',
-        level = vim.log.levels.WARN,
-      }, state.notifications[1])
+        LOADING[1],
+        LOADING[2],
+        'review.nvim: the review worktree has commits that are not in the PR head, '
+          .. 'so it shows 1111111 instead of the PR head 2222222',
+      }, state.timeline)
       assert.equals(SLUG, session_handler.active().id)
     end
   )
+
+  it('未コミット変更があれば移さず、UI が開いた後に WARN する', function()
+    reuse { heads_moved, status_dirty }
+
+    assert.same({ list_cmd(), HEADS(), STATUS(), DIFF }, calls(4))
+    assert.same({
+      LOADING[1],
+      LOADING[2],
+      'review.nvim: the review worktree has local changes, '
+        .. 'so it shows 1111111 instead of the PR head 2222222',
+    }, state.timeline)
+  end)
 
   it(
     'git status が clean でも worktree 配下に未保存の編集があれば移さない',
@@ -5131,36 +5179,69 @@ describe('worktree 再利用時の head 追従', function()
 
       reuse { heads_moved, status_clean }
 
+      assert.same({ list_cmd(), HEADS(), STATUS(), DIFF }, calls(4))
       assert.same({
-        list_cmd(),
-        { 'git', '-C', wt_path(), 'rev-parse', 'HEAD', 'feature' },
-        { 'git', '-C', wt_path(), 'status', '--porcelain' },
-        { 'git', 'diff', 'main' },
-      }, vim.list_slice(state.git_calls, 1, 4))
-      assert.same({
-        msg = 'review.nvim: the review worktree has local changes, so it stays at 1111111 '
-          .. 'instead of moving to feature (2222222). discard them or :Review delete '
-          .. SLUG
-          .. ' to review the latest head',
-        level = vim.log.levels.WARN,
-      }, state.notifications[1])
+        LOADING[1],
+        LOADING[2],
+        'review.nvim: the review worktree has local changes, '
+          .. 'so it shows 1111111 instead of the PR head 2222222',
+      }, state.timeline)
       assert.same({ 'edited' }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
       pcall(vim.api.nvim_buf_delete, buf, { force = true })
     end
   )
 
-  it('head の sha を読めなければ worktree をそのまま使う', function()
-    reuse {
-      function()
-        return { code = 128, stdout = '', stderr = 'fatal: bad revision\n' }
-      end,
-    }
+  it(
+    'git status を取れなければ移さず、変更を確かめられなかったと WARN する',
+    function()
+      reuse { heads_moved, git_fail 'fatal: not a git repository\n' }
 
-    assert.same({
-      list_cmd(),
-      { 'git', '-C', wt_path(), 'rev-parse', 'HEAD', 'feature' },
-      { 'git', 'diff', 'main' },
-    }, vim.list_slice(state.git_calls, 1, 3))
-    assert.equals(SLUG, session_handler.active().id)
+      assert.same({ list_cmd(), HEADS(), STATUS(), DIFF }, calls(4))
+      assert.same({
+        LOADING[1],
+        LOADING[2],
+        'review.nvim: cannot check the review worktree for local changes, '
+          .. 'so it shows 1111111 instead of the PR head 2222222',
+      }, state.timeline)
+    end
+  )
+
+  it(
+    'checkout に失敗したら段階表示を消し、UI が開いた後に git の理由を WARN する',
+    function()
+      reuse { heads_moved, status_clean, git_ok, git_fail 'error: cannot checkout\n' }
+
+      assert.same({ list_cmd(), HEADS(), STATUS(), IN_HEAD(), CHECKOUT(), DIFF }, calls(6))
+      assert.same({
+        'review.nvim: updating the review worktree...',
+        '<clear>',
+        LOADING[1],
+        LOADING[2],
+        'review.nvim: cannot move the review worktree to the PR head 2222222: '
+          .. 'error: cannot checkout',
+      }, state.timeline)
+      assert.equals(SLUG, session_handler.active().id)
+    end
+  )
+
+  it('HEAD と head が同じなら何もしない', function()
+    reuse { heads_same }
+
+    assert.same({ list_cmd(), HEADS(), DIFF }, calls(3))
+    assert.same(LOADING, state.timeline)
+  end)
+
+  it('head の sha を読めなければ worktree をそのまま使う', function()
+    reuse { git_fail 'fatal: bad revision\n' }
+
+    assert.same({ list_cmd(), HEADS(), DIFF }, calls(3))
+    assert.same(LOADING, state.timeline)
+  end)
+
+  it('head が PR の ref でない (旧形式のブランチ名) なら追従しない', function()
+    reuse({}, 'feature')
+
+    assert.same({ list_cmd(), DIFF }, calls(2))
+    assert.same(LOADING, state.timeline)
   end)
 end)

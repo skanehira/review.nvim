@@ -61,7 +61,13 @@ local function fetch_and_resume(session)
       notify_warn(res.error)
       return
     end
-    session_handler.resume_into(session, res.data.files, res.data.worktree, res.data.degraded)
+    session_handler.resume_into(
+      session,
+      res.data.files,
+      res.data.worktree,
+      res.data.degraded,
+      res.data.notice
+    )
   end)
 end
 

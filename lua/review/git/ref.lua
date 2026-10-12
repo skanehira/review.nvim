@@ -140,6 +140,12 @@ function M.pr_ref(number)
   return ('review-nvim/pr-%s'):format(tostring(number))
 end
 
+--- name が pr_ref の形 (review-nvim/pr-<n>) か。PR セッションの head が旧形式の
+--- ブランチ名か、PR の ref かを見分ける。
+function M.is_pr_ref(name)
+  return type(name) == 'string' and name:match '^review%-nvim/pr%-%d+$' ~= nil
+end
+
 --- cb(result) result.data = 作った ref 名。
 --- `git fetch <remote> +refs/pull/<n>/head:review-nvim/pr-<n>`。`+` は PR head の
 --- force push (rebase) でも上書きするため。無いと non-fast-forward で拒否され、
