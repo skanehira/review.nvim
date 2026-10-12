@@ -49,9 +49,10 @@ USAGE						*review-usage_ja*
 	  ローカル branch は無くてよい。head は常に GitHub 上の PR の head で、
 	  同名のローカル branch があっても使わない。開始時に base と head を
 	  GitHub 上の現在の tip と照合し、古い ref だけを fetch する。再利用
-	  する worktree は最新の head へ移す (未コミット変更か未保存の編集が
-	  あれば移さず、WARN を出す)。開始中はメッセージ欄にいまの段階 (PR
-	  の解決 / fetch / worktree の作成・更新 / 差分の取得) を表示する
+	  する worktree は最新の head へ移す (未コミット変更・未保存の編集・
+	  PR の head に無い commit のどれかがあれば移さず、レビューを開いた
+	  後に WARN を出す)。開始中はメッセージ欄にいまの段階 (PR の解決 /
+	  fetch / worktree の作成・更新 / 差分の取得) を表示する
 
 	:Review list			保存済みセッション一覧 |review-list_ja|
 

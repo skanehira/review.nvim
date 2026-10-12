@@ -184,7 +184,7 @@ function M.fetch_branch(opts, cb)
 end
 
 --- cb(result) result.data = { head = 作った pull ref 名, base = `<remote>/<branch>` }。
---- fork PR で head と base の両方が古いとき用 (pr-worktree.md「PR 解決」)。
+--- head と base の両方が古いとき用 (pr-worktree.md「PR 解決」)。
 --- fetch_pull と fetch_branch を別々に走らせると remote への接続確立を 2 回払う
 --- ため、refspec を 2 つ並べて 1 回の fetch にまとめる。失敗は E_REF。
 function M.fetch_pull_and_branch(opts, cb)
@@ -220,8 +220,8 @@ function M.delete_ref(opts, cb)
   run({ 'update-ref', '-d', opts.ref }, opts, cb)
 end
 
---- cb(result) result.data = remote 名の配列 (fork fetch の remote 選択入力。
---- 同一 repo に headRefName の branch が無いときの fetch 先候補)。
+--- cb(result) result.data = remote 名の配列 (PR の pull ref と base を fetch する
+--- remote の選択入力)。
 function M.remotes(opts, cb)
   run({ 'remote' }, opts, function(res)
     if not res.ok then

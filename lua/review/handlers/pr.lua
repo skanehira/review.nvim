@@ -109,7 +109,7 @@ local function is_current(repo, ref, tip, cb)
 end
 
 -- 手元が古い ref だけを fetch する (pr-worktree.md「PR 解決」手順 2・3)。
--- fork PR で head と base の両方が古いときは 1 回の fetch にまとめる
+-- head と base の両方が古いときは 1 回の fetch にまとめる
 -- (fetch の所要時間の大半は remote への接続確立なので、2 回に分けない)。
 local function fetch_stale(repo, meta, number, remote, stale, cb)
   local base_label = ('"%s"'):format(meta.baseRefName)

@@ -54,9 +54,10 @@ Everything runs through one command and its subcommands:
 	  when a local branch of the same name exists. On start the base and the
 	  head are checked against their current tips on GitHub, and only refs
 	  that are behind are fetched. A reused worktree is moved to the latest
-	  head unless it has uncommitted changes or unsaved edits (then it stays
-	  and a warning is shown). While the review is starting, the message
-	  area shows the current step (resolving the PR, fetching, creating or
+	  head unless it has uncommitted changes, unsaved edits or commits that
+	  are not in the PR head (then it stays, and a warning is shown after
+	  the review opens). While the review is starting, the message area
+	  shows the current step (resolving the PR, fetching, creating or
 	  updating the worktree, loading the diff)
 
 	:Review list			saved-session list |review-list|
