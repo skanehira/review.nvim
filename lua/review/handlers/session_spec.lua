@@ -207,6 +207,16 @@ local function add_cmd(ref, slug)
   return { 'git', 'worktree', 'add', '--detach', wt_path(slug), ref or 'feature' }
 end
 
+local SHA_OLD = string.rep('1', 40)
+local SHA_NEW = string.rep('2', 40)
+-- worktree の HEAD と head の sha (`git -C <wt> rev-parse HEAD <head>` の応答)
+local heads_same = function()
+  return { code = 0, stdout = SHA_OLD .. '\n' .. SHA_OLD .. '\n', stderr = '' }
+end
+local heads_moved = function()
+  return { code = 0, stdout = SHA_OLD .. '\n' .. SHA_NEW .. '\n', stderr = '' }
+end
+
 local function list_cmd()
   return { 'git', 'worktree', 'list', '--porcelain' }
 end
@@ -2704,6 +2714,7 @@ describe(
               stderr = '',
             }
           end, -- list: 登録あり
+          heads_same, -- worktree の HEAD が head と同じ = 移さない
           function()
             return diff_ok(RAW_DIFF_A_B)
           end,
@@ -2711,8 +2722,8 @@ describe(
 
         assert.is_false(has_call 'git worktree add')
         assert.same(list_cmd(), state.git_calls[1])
-        assert.same({ 'git', 'diff', 'main' }, state.git_calls[2])
-        assert.equals(wt, state.git_opts[2].cwd)
+        assert.same({ 'git', 'diff', 'main' }, state.git_calls[3])
+        assert.equals(wt, state.git_opts[3].cwd)
         assert.same({ path = wt, created_by_us = true }, load_saved().worktree)
         -- dir 実在 -> head 実ファイルも show 充填も worktree 基準
         -- (bufadd は symlink を解決して buf 名を持つので buffer 名側だけ realpath で
@@ -2837,6 +2848,7 @@ describe(
               stderr = '',
             }
           end, -- list 登録あり -> 記録を再利用 (add なし)
+          heads_same,
           function()
             return diff_ok ''
           end,
@@ -2852,7 +2864,7 @@ describe(
           head = 'feature',
         }
 
-        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[3])
+        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[4])
         assert.is_nil(session_handler.active())
         -- 開始は開かない = 新規 save はしないが、既存 JSON の整合は保つ
         assert.same(
@@ -2907,6 +2919,7 @@ describe(
               stderr = '',
             }
           end, -- list 登録あり -> 記録を再利用 (add なし)
+          heads_same,
           function()
             return { code = 128, stdout = '', stderr = "fatal: bad revision 'main'\n" }
           end, -- diff 失敗
@@ -2922,7 +2935,7 @@ describe(
           head = 'feature',
         }
 
-        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[3])
+        assert.same({ 'git', 'worktree', 'remove', '--force', wt }, state.git_calls[4])
         assert.is_nil(session_handler.active())
         assert.same(
           existing_stub { mode = 'pr', worktree = vim.NIL, updated_at = 4321 },
@@ -3009,6 +3022,7 @@ describe(
                 stderr = '',
               }
             end, -- list 登録あり -> 記録を再利用 (add なし)
+            heads_same,
             mode == 'zero' and function()
               return diff_ok ''
             end or git_fail "fatal: bad revision 'main'\nusage: git diff [<options>]\n",
@@ -3178,6 +3192,7 @@ describe('close の worktree 保持 (セッション終了 / 削除は delete �
         function()
           return { code = 0, stdout = 'worktree ' .. wt_path() .. '\n', stderr = '' }
         end, -- worktree list (再利用判定)
+        heads_same, -- worktree の HEAD が head と同じ = 移さない
         function()
           return diff_ok(RAW_DIFF_A_B)
         end, -- diff
@@ -3199,7 +3214,8 @@ describe('close の worktree 保持 (セッション終了 / 削除は delete �
         end
       end
       assert.same({ 'git', 'worktree', 'list', '--porcelain' }, state.git_calls[1])
-      assert.same({ 'git', 'diff', 'main' }, state.git_calls[2])
+      assert.same({ 'git', '-C', wt_path(), 'rev-parse', 'HEAD', 'feature' }, state.git_calls[2])
+      assert.same({ 'git', 'diff', 'main' }, state.git_calls[3])
       assert.equals('open', load_saved().status)
       assert.equals(SLUG, session_handler.active().id)
     end
@@ -5022,5 +5038,129 @@ describe('file panel ツリー / view state (issue-17)', function()
     session_handler.page_down() -- 末尾より下 = no-op
     assert.equals(60, vim.api.nvim_win_get_cursor(hw)[1])
     assert.equals('panel', ui_windows.role_of(vim.api.nvim_get_current_win()))
+  end)
+end)
+
+-- 再利用する worktree は PR head に追従させる (pr-worktree.md「worktree 作成判断」
+-- 再利用行)。ref だけ新しくしても worktree が前回の commit のままだと、
+-- 古い内容をレビューすることになる。
+describe('worktree 再利用時の head 追従', function()
+  use_env()
+
+  local function reuse(responses)
+    started_with_worktree()
+    vim.fn.mkdir(wt_path(), 'p')
+    local seq = {
+      function()
+        return { code = 0, stdout = 'worktree ' .. wt_path() .. '\n', stderr = '' }
+      end, -- worktree list
+    }
+    vim.list_extend(seq, responses)
+    table.insert(seq, function()
+      return diff_ok(RAW_DIFF_A_B)
+    end) -- diff
+    install_git(seq)
+    state.input_answer = 'y'
+    session_handler.close_by_key()
+    state.progress = {}
+    state.notifications = {}
+    session_handler.begin {
+      repo = state.repo,
+      id = SLUG,
+      mode = 'pr',
+      base = 'main',
+      head = 'feature',
+    }
+  end
+
+  it(
+    'head が進んでいて worktree が clean なら head の commit へ移してから差分を取る',
+    function()
+      reuse { heads_moved, status_clean, git_ok }
+
+      assert.same({
+        list_cmd(),
+        { 'git', '-C', wt_path(), 'rev-parse', 'HEAD', 'feature' },
+        { 'git', '-C', wt_path(), 'status', '--porcelain' },
+        { 'git', '-C', wt_path(), 'checkout', '--detach', 'feature' },
+        { 'git', 'diff', 'main' },
+      }, vim.list_slice(state.git_calls, 1, 5))
+      assert.same({
+        'review.nvim: updating the review worktree...',
+        '<clear>',
+        'review.nvim: loading the diff...',
+        '<clear>',
+      }, state.progress)
+      assert.equals(SLUG, session_handler.active().id)
+    end
+  )
+
+  it(
+    'head が進んでいても worktree に未コミット変更があれば移さず、前の head のまま開いて WARN する',
+    function()
+      reuse { heads_moved, status_dirty }
+
+      assert.same({
+        list_cmd(),
+        { 'git', '-C', wt_path(), 'rev-parse', 'HEAD', 'feature' },
+        { 'git', '-C', wt_path(), 'status', '--porcelain' },
+        { 'git', 'diff', 'main' },
+      }, vim.list_slice(state.git_calls, 1, 4))
+      assert.same({
+        msg = 'review.nvim: the review worktree has local changes, so it stays at 1111111 '
+          .. 'instead of moving to feature (2222222). discard them or :Review delete '
+          .. SLUG
+          .. ' to review the latest head',
+        level = vim.log.levels.WARN,
+      }, state.notifications[1])
+      assert.equals(SLUG, session_handler.active().id)
+    end
+  )
+
+  it(
+    'git status が clean でも worktree 配下に未保存の編集があれば移さない',
+    function()
+      vim.fn.mkdir(wt_path(), 'p')
+      local file = vim.fs.joinpath(wt_path(), 'a.lua')
+      local f = io.open(file, 'w')
+      f:write 'line1\n'
+      f:close()
+      local buf = vim.fn.bufadd(file)
+      vim.fn.bufload(buf)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'edited' })
+
+      reuse { heads_moved, status_clean }
+
+      assert.same({
+        list_cmd(),
+        { 'git', '-C', wt_path(), 'rev-parse', 'HEAD', 'feature' },
+        { 'git', '-C', wt_path(), 'status', '--porcelain' },
+        { 'git', 'diff', 'main' },
+      }, vim.list_slice(state.git_calls, 1, 4))
+      assert.same({
+        msg = 'review.nvim: the review worktree has local changes, so it stays at 1111111 '
+          .. 'instead of moving to feature (2222222). discard them or :Review delete '
+          .. SLUG
+          .. ' to review the latest head',
+        level = vim.log.levels.WARN,
+      }, state.notifications[1])
+      assert.same({ 'edited' }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+      pcall(vim.api.nvim_buf_delete, buf, { force = true })
+    end
+  )
+
+  it('head の sha を読めなければ worktree をそのまま使う', function()
+    reuse {
+      function()
+        return { code = 128, stdout = '', stderr = 'fatal: bad revision\n' }
+      end,
+    }
+
+    assert.same({
+      list_cmd(),
+      { 'git', '-C', wt_path(), 'rev-parse', 'HEAD', 'feature' },
+      { 'git', 'diff', 'main' },
+    }, vim.list_slice(state.git_calls, 1, 3))
+    assert.equals(SLUG, session_handler.active().id)
   end)
 end)

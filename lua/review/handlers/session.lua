@@ -334,6 +334,44 @@ local function cleanup_skipped_record(record, cb)
   end)
 end
 
+-- 再利用する worktree を head の commit へ移す (pr-worktree.md「worktree 作成判断」
+-- 再利用行)。ref だけ新しくしても worktree が前回の commit のままだと古い内容を
+-- レビューする。未コミット変更・未保存バッファがあるときは移さない: checkout は
+-- 変更を新しい head に持ち越すか衝突で失敗し、どちらも利用者の編集を黙って
+-- 書き換える。sha を読めないときも worktree をそのまま使う (開始は止めない)。
+local function follow_head(args, record, cb)
+  local function keep()
+    cb(result.ok(record))
+  end
+  git_worktree.heads({ path = record.path, ref = args.head }, function(hres)
+    if not hres.ok or hres.data.current == hres.data.target then
+      keep()
+      return
+    end
+    local current, target = hres.data.current, hres.data.target
+    git_worktree.status({ repo = args.repo, path = record.path }, function(sres)
+      if not sres.ok or sres.data.dirty or wt_buffers.count_modified(record.path) > 0 then
+        notify_warn(
+          (
+            'the review worktree has local changes, so it stays at %s instead of moving to '
+            .. '%s (%s). discard them or :Review delete %s to review the latest head'
+          ):format(current:sub(1, 7), args.head, target:sub(1, 7), args.id)
+        )
+        keep()
+        return
+      end
+      local stage = progress.start 'updating the review worktree'
+      git_worktree.checkout_detach({ path = record.path, ref = args.head }, function(cres)
+        progress.stop(stage)
+        if not cres.ok then
+          notify_warn(('cannot move the review worktree to %s: %s'):format(args.head, cres.error))
+        end
+        keep()
+      end)
+    end)
+  end)
+end
+
 --- 作成判断〜add〜cb まで (M.resolve_worktree が lock を持つ)。
 local function resolve_locked(args, cb)
   -- record は nil | vim.NIL | JSON round-trip 済み table のどれでも飛んでくる
@@ -365,7 +403,7 @@ local function resolve_locked(args, cb)
       if res.ok and real ~= nil then
         for _, p in ipairs(res.data) do
           if (vim.uv.fs_realpath(p) or p) == real then
-            cb(result.ok(record))
+            follow_head(args, record, cb)
             return
           end
         end

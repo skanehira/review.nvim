@@ -64,6 +64,26 @@ function M.status(opts, cb)
   end)
 end
 
+--- cb(result) data = { current = worktree の HEAD の sha, target = ref の sha }。
+--- `git -C <path> rev-parse HEAD <ref>`。再利用する worktree が PR head に
+--- 追従しているかの判定に使う。ref が解決できなければ E_WORKTREE。
+function M.heads(opts, cb)
+  run({ '-C', opts.path, 'rev-parse', 'HEAD', opts.ref }, nil, function(res)
+    if not res.ok then
+      cb(res)
+      return
+    end
+    local shas = split_lines(res.data.stdout)
+    cb(result.ok { current = shas[1], target = shas[2] })
+  end)
+end
+
+--- cb(result)。`git -C <path> checkout --detach <ref>` (再利用する worktree を
+--- PR head へ移す)。
+function M.checkout_detach(opts, cb)
+  run({ '-C', opts.path, 'checkout', '--detach', opts.ref }, nil, cb)
+end
+
 -- git の管理外にある自前の worktree **dir そのもの**の再帰削除。
 -- 呼び出し側は created_by_us=true の記録があるものだけに限る (INV-3)。
 -- vim.fs.delete は Neovim に存在せず (0.13 nightly 実測)、vim.fs.rm は runtime

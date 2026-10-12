@@ -218,6 +218,60 @@ describe('git/worktree status / list', function()
   end)
 end)
 
+describe('git/worktree heads / checkout_detach (再利用時の head 追従)', function()
+  restore_after_each()
+
+  it(
+    'heads は `git -C <path> rev-parse HEAD <ref>` で worktree の HEAD と ref の sha を返す',
+    function()
+      stub_system()
+      local received
+      worktree.heads({ path = '/wt/x', ref = 'review-nvim/pr-7' }, function(res)
+        received = res
+      end)
+      assert.same({ 'git', '-C', '/wt/x', 'rev-parse', 'HEAD', 'review-nvim/pr-7' }, last().cmd)
+      last().on_exit {
+        code = 0,
+        stdout = string.rep('a', 40) .. '\n' .. string.rep('b', 40) .. '\n',
+        stderr = '',
+      }
+
+      assert.same({
+        __class = 'review.Result',
+        ok = true,
+        data = { current = string.rep('a', 40), target = string.rep('b', 40) },
+      }, received)
+    end
+  )
+
+  it('heads は ref が解決できなければ E_WORKTREE の err を返す', function()
+    stub_system()
+    local received
+    worktree.heads({ path = '/wt/x', ref = 'gone' }, function(res)
+      received = res
+    end)
+    last().on_exit {
+      code = 128,
+      stdout = string.rep('a', 40) .. '\ngone\n',
+      stderr = "fatal: ambiguous argument 'gone': unknown revision\n",
+    }
+
+    assert.equals(false, received.ok)
+    assert.equals('E_WORKTREE', received.code)
+  end)
+
+  it('checkout_detach は `git -C <path> checkout --detach <ref>` を実行する', function()
+    stub_system()
+    local received
+    worktree.checkout_detach({ path = '/wt/x', ref = 'review-nvim/pr-7' }, function(res)
+      received = res
+    end)
+    assert.same({ 'git', '-C', '/wt/x', 'checkout', '--detach', 'review-nvim/pr-7' }, last().cmd)
+    last().on_exit { code = 0, stdout = '', stderr = '' }
+    assert.equals(true, received.ok)
+  end)
+end)
+
 describe('git/worktree remove_dir (掃除用の自前作 dir 再帰削除)', function()
   restore_after_each()
 
@@ -399,6 +453,44 @@ describe('git/worktree 実 git round-trip', function()
         worktree.add({ repo = dir, path = wt, ref = 'HEAD' }, cb)
       end)
       assert.equals(true, readded.ok)
+    end
+  )
+  it(
+    'heads で HEAD と ref のずれを読み、checkout_detach で ref の commit へ移す',
+    function()
+      local dir, git = build_repo()
+      local first = git({ 'rev-parse', 'HEAD' }):gsub('%s+$', '')
+      local wt = vim.fs.joinpath(vim.fn.tempname(), 'wt')
+      table.insert(state.dirs, vim.fs.dirname(wt))
+      assert.equals(
+        true,
+        await_result(function(cb)
+          worktree.add({ repo = dir, path = wt, ref = 'HEAD' }, cb)
+        end).ok
+      )
+      -- repo 側で ref だけを進める (PR head への push を fetch した状態)
+      local f = io.open(vim.fs.joinpath(dir, 'a.txt'), 'w')
+      f:write 'b\n'
+      f:close()
+      git { 'commit', '-qam', 'next' }
+      local second = git({ 'rev-parse', 'HEAD' }):gsub('%s+$', '')
+      git { 'update-ref', 'refs/heads/review-nvim/pr-7', second }
+
+      local before = await_result(function(cb)
+        worktree.heads({ path = wt, ref = 'review-nvim/pr-7' }, cb)
+      end)
+      assert.same({ current = first, target = second }, before.data)
+
+      local moved = await_result(function(cb)
+        worktree.checkout_detach({ path = wt, ref = 'review-nvim/pr-7' }, cb)
+      end)
+      assert.equals(true, moved.ok)
+      local after = await_result(function(cb)
+        worktree.heads({ path = wt, ref = 'review-nvim/pr-7' }, cb)
+      end)
+      assert.same({ current = second, target = second }, after.data)
+      local content = io.open(vim.fs.joinpath(wt, 'a.txt')):read '*a'
+      assert.equals('b\n', content)
     end
   )
 end)
