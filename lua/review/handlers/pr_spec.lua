@@ -993,6 +993,16 @@ describe('pr-handler 旧形式 refs の書き換え', function()
       base = 'develop',
       head = 'topic',
     },
+    {
+      name = 'head が新形式でも base が別ブランチなら書き換えず slug 衝突',
+      base = 'develop',
+      head = 'review-nvim/pr-7',
+    },
+    {
+      name = 'base が新形式でも head が別ブランチなら書き換えず slug 衝突',
+      base = 'origin/main',
+      head = 'other',
+    },
   } do
     it(case.name, function()
       local before = saved_pr7(case.base, case.head)
