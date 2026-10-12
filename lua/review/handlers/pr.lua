@@ -52,20 +52,22 @@ end
 local NO_REMOTE_MSG = 'cannot resolve the git remote; run inside the PR target repository, '
   .. 'or identify the repository with :Review pr <URL>'
 
--- 旧形式 (base = 素の baseRefName) で保存された同じ PR のセッションを、
--- 解決後の base (<remote>/<baseRefName>) へ移す。refs 組の一意性 (slug_conflict)
--- は文字列比較なので、移さないと同じ PR の再開始が slug 衝突で拒否される。
--- head が違う既存は別の refs 組なので触らない (従来どおり衝突として扱う)。
-local function migrate_legacy_base(repo, slug, meta, head, base)
+-- 旧形式で保存された同じ PR のセッションを、解決後の refs へ移す。旧形式は
+-- base が素の baseRefName、head が headRefName (ブランチ名) の保存。refs 組の
+-- 一意性 (slug_conflict) は文字列比較なので、移さないと同じ PR の再開始が slug
+-- 衝突で拒否される。head・base のどちらかが同じ PR の refs でない既存は別の
+-- refs 組なので触らない (衝突として扱う)。
+local function migrate_legacy_refs(repo, slug, meta, head, base)
   local existing = store.load(repo, slug).data
-  if
-    existing == nil
-    or existing.mode ~= 'pr'
-    or existing.base ~= meta.baseRefName
-    or existing.head ~= head
-  then
+  if existing == nil or existing.mode ~= 'pr' then
     return
   end
+  local same_head = existing.head == head or existing.head == meta.headRefName
+  local same_base = existing.base == base or existing.base == meta.baseRefName
+  if not same_head or not same_base or (existing.head == head and existing.base == base) then
+    return
+  end
+  existing.head = head
   existing.base = base
   local sres = store.save(existing)
   if not sres.ok then
@@ -76,7 +78,7 @@ end
 -- 解決した refs で開始フロー (継承確認 -> diff -> worktree 判断 -> UI)。
 local function begin_pr(repo, meta, number, head, base)
   local slug = paths.pr_slug(number)
-  migrate_legacy_base(repo, slug, meta, head, base)
+  migrate_legacy_refs(repo, slug, meta, head, base)
   local state_note = ''
   if meta.state ~= nil and meta.state ~= 'OPEN' then
     -- closed/merged PR もレビュー可能。状態は開始時 INFO に添えるだけ (エッジケース)
@@ -165,18 +167,14 @@ local function fetch_stale(repo, meta, number, remote, stale, cb)
   cb()
 end
 
--- head ref: 同一リポジトリに headRefName があればそのまま、無ければ (fork)
--- refs/pull/<n>/head から作る自前一時 ref (pr-worktree.md 手順 2、DESIGN.md
--- 「既知の制約」fork PR 行)。cb(head, head_stale)。
+-- head ref: 同一 repo の PR も fork と同じく refs/pull/<n>/head から作る自前一時 ref
+-- (pr-worktree.md 手順 2、DESIGN.md「既知の制約」fork PR 行)。手元に headRefName の
+-- ブランチがあってもそれは使わない: 手元のブランチは GitHub の head より古いことが
+-- あり、更新するとそのブランチで作業中の利用者の状態を書き換えるため。
+-- cb(head, head_stale)。
 local function resolve_head(repo, meta, number, cb)
-  git_ref.rev_parse({ ref = meta.headRefName, cwd = repo }, function(hr)
-    if hr.ok then
-      cb(meta.headRefName, false)
-      return
-    end
-    is_current(repo, git_ref.pr_ref_storage(number), meta.head_tip, function(current)
-      cb(git_ref.pr_ref(number), not current)
-    end)
+  is_current(repo, git_ref.pr_ref_storage(number), meta.head_tip, function(current)
+    cb(git_ref.pr_ref(number), not current)
   end)
 end
 
