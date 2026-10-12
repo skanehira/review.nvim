@@ -50,12 +50,14 @@ Everything runs through one command and its subcommands:
 	  the worktree (worktree creation is pr mode only; removal only on session
 	  delete: |review-sessions|). The base is the PR's base branch compared
 	  as the remote-tracking ref (e.g. `origin/main`), so it need not exist
-	  as a local branch. On start the base, and for a fork PR the PR head,
-	  are checked against their current tips on GitHub, and only refs that
-	  are behind are fetched. When the PR's head branch exists in this
-	  repository, that local branch is used as is. While the review is
-	  starting, the message area shows the current step (resolving the PR,
-	  fetching, creating the worktree, loading the diff)
+	  as a local branch. The head is always the PR's head on GitHub, even
+	  when a local branch of the same name exists. On start the base and the
+	  head are checked against their current tips on GitHub, and only refs
+	  that are behind are fetched. A reused worktree is moved to the latest
+	  head unless it has uncommitted changes or unsaved edits (then it stays
+	  and a warning is shown). While the review is starting, the message
+	  area shows the current step (resolving the PR, fetching, creating or
+	  updating the worktree, loading the diff)
 
 	:Review list			saved-session list |review-list|
 

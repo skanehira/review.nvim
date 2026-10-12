@@ -132,8 +132,9 @@ function M.is_local_branch(opts, cb)
   end)
 end
 
--- PR 用の自前一時 ref 名。fork PR の head は通常の branch ref として fetch
--- されないため refs/pull/<n>/head から採る (DESIGN.md「既知の制約」fork PR 行)。
+-- PR 用の自前一時 ref 名。PR の head は refs/pull/<n>/head から採る (fork の PR は
+-- 通常の branch ref として fetch できず、同一 repo の PR も手元のブランチは使わない
+-- — DESIGN.md「既知の制約」PR 用の一時 ref 行)。
 -- 名前に PR 番号を含め衝突を防ぎ、決定的なので次回 fetch で上更新できる。
 function M.pr_ref(number)
   return ('review-nvim/pr-%s'):format(tostring(number))

@@ -168,7 +168,7 @@ local function fetch_stale(repo, meta, number, remote, stale, cb)
 end
 
 -- head ref: 同一 repo の PR も fork と同じく refs/pull/<n>/head から作る自前一時 ref
--- (pr-worktree.md 手順 2、DESIGN.md「既知の制約」fork PR 行)。手元に headRefName の
+-- (pr-worktree.md 手順 2、DESIGN.md「既知の制約」PR 用の一時 ref 行)。手元に headRefName の
 -- ブランチがあってもそれは使わない: 手元のブランチは GitHub の head より古いことが
 -- あり、更新するとそのブランチで作業中の利用者の状態を書き換えるため。
 -- cb(head, head_stale)。

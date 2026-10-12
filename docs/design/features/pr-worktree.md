@@ -12,11 +12,11 @@
 **PR 解決** `:Review pr <number|url>`:
 
 1. url からは PR 番号を抽出 (`/pull/<n>` 末尾)。PR の解決は `gh api graphql` 1 回で行い、number・title・url・state・baseRefName・headRefName・headRepositoryOwner に加えて、GitHub 上の tip 2 つを得る。base ブランチの**現在の** tip (`baseRef.target.oid`) と、PR head の sha (`headRefOid`) である。番号指定は owner/repo を gh の placeholder (`-F owner={owner} -F name={repo}`) に任せ、cwd の repo から解決させる。問い合わせ先の host は `gh api` の既定 (`GH_HOST`、未設定なら github.com) で、`gh pr view <n>` と違って cwd の repo からは推定されない (エッジケース「GitHub Enterprise」)。URL 指定は URL の host / owner / repo を `--hostname <host>` と `-f owner=<owner> -f name=<repo>` で明示する (`-F` は型変換するため、数字だけの owner 名がクエリの型エラーになる)。`gh pr view --json baseRefOid` を使わないのは、その値が PR 更新時点の base で、base ブランチの現在の tip ではないため (2026-10-09 実測: PR #53 で merge-base を返し、main の現在の tip と違った)。gh 不在・未 auth・PR 非存在は `E_GH` / `E_PR` を通知する (`state` は closed/merged PR の開始時 INFO 注記に使う)
-2. remote の選択と head ref の用意: remote は `git remote` に origin があれば origin、無ければ最初の 1 件を使う。0 件なら «cannot resolve the git remote; run inside the PR target repository, or identify the repository with :Review pr <URL>» を WARN 通知して開始を中断する。head は、同一リポジトリの branch (`<headRefName>` が `rev-parse --verify` で解決できる) ならそのまま使う。それ以外 (fork) は自前一時 ref `review-nvim/pr-<n>` を使い、その sha が `headRefOid` と違う (または ref が無い) ときだけ `git fetch <remote> refs/pull/<n>/head:review-nvim/pr-<n>` で更新する (ref 名は決定的なので次回以降も同じ ref を更新する)
+2. remote の選択と head ref の用意: remote は `git remote` に origin があれば origin、無ければ最初の 1 件を使う。0 件なら «cannot resolve the git remote; run inside the PR target repository, or identify the repository with :Review pr <URL>» を WARN 通知して開始を中断する。head は同一 repo の PR も fork の PR も自前一時 ref `review-nvim/pr-<n>` とし、その sha が `headRefOid` と違う (または ref が無い) ときだけ `git fetch <remote> refs/pull/<n>/head:review-nvim/pr-<n>` で更新する (ref 名は決定的なので次回以降も同じ ref を更新する)。手元に `<headRefName>` のブランチがあっても head には使わない。手元のブランチは GitHub の head より古いことがあり、それを更新するとそのブランチで作業中の利用者の状態を書き換えるため。したがって手元にだけある未 push の commit はレビュー対象に入らない
 3. base ref の用意: base は**常に** remote-tracking ref `<remote>/<baseRefName>` (例 `origin/main`) とし、ローカル branch の有無・鮮度には依存しない。stacked PR の base はローカル branch に無いことが多く、素の `<baseRefName>` は `git diff` で解決できないため。`refs/remotes/<remote>/<baseRefName>` の sha が base の現在の tip と違う (または ref が無い) ときだけ `git fetch <remote> +refs/heads/<baseRefName>:refs/remotes/<remote>/<baseRefName>` で更新する。base ブランチが GitHub から消えていて tip が得られない (`baseRef` が null) ときは照合せずに fetch し、失敗をそのまま通知する。refspec を明示するのは remote の fetch 設定 (`--single-branch` clone 等) に依存せず更新するためで、`+` は base の force push でも上書きする
    - **fetch は古い ref だけ**: 最新の ref を fetch しても転送が 0 になるだけで、所要時間の大半を占める remote への接続確立は省けない (2026-10-09 実測、ssh remote: `git fetch` 1 回 2.2 s・`--dry-run` でも同じ・`ssh -T git@github.com` 単体 1.6 s)。照合を `git ls-remote` で行わないのも同じ理由である (1 回 2.2 s)。fork PR で head と base の両方が古いときは、2 つの refspec を並べた 1 回の fetch にまとめる
    - **fetch 失敗**: base だけの fetch は «cannot fetch the PR base branch "<baseRefName>" from <remote>: <stderr 主行>»、head だけの fetch は git の stderr 主行、まとめた fetch は «cannot fetch the head and base branch "<baseRefName>" of PR #<n> from <remote>: <stderr 主行>» を WARN 通知する。いずれも開始を中断する (worktree は作らない)
-   - **旧形式 base の書き換え**: 同じ slug (`pr-<n>`) の保存済みセッションが base を素の `<baseRefName>` で持ち head が一致する場合は、base を `<remote>/<baseRefName>` に書き換えて save してから開始する (refs 組の一意性は文字列比較なので、書き換えないと同じ PR の再開始が slug 衝突で拒否される)。書き換えは継承確認より前に行うので、確認を拒否しても残る (書き換え後の base は直前に照合・更新した解決可能な ref で、素の `<baseRefName>` はローカル branch が無いと復元時に解決できない)。base が別ブランチ (PR の付け替え) や head 不一致の既存は書き換えず、slug 衝突を案内する
+   - **旧形式 refs の書き換え**: 同じ slug (`pr-<n>`) の保存済みセッションが旧形式の refs を持つ場合は、新形式に書き換えて save してから開始する。旧形式とは、base が素の `<baseRefName>`、または head が `<headRefName>` (ブランチ名) の保存である。refs 組の一意性は文字列比較なので、書き換えないと同じ PR の再開始が slug 衝突で拒否される。書き換えは継承確認より前に行うので、確認を拒否しても残る (書き換え後の refs は直前に照合・更新した解決可能な ref で、旧形式の素の名前はローカル branch が無いと復元時に解決できない)。base・head のどちらかが同じ PR の refs でない既存 (base が別ブランチ = PR の付け替え、head が別ブランチ) は書き換えず、slug 衝突を案内する
 4. base/head (base は手順 3 の remote-tracking ref、head はブランチ名 / fork なら fetch した一時 ref) で **worktree を作成 (add) してから**、`git diff <base>` (cwd=worktree、**作業ツリー基準**) を取得 → 以降 diff-review と同じ UI を開く (tab は作成済み worktree に `:tcd`。PR タイトルは開始時に INFO 通知するだけ。セッションには永続化しない)
 
 **worktree 作成判断** — 作成するのはモード pr のみ。「レビュー対象の状態」を worktree の実ファイルとして成立させるための規則 (DESIGN.md 決定表と同一):
@@ -25,7 +25,8 @@
 | --- | --- |
 | mode=branch | **作らない**。現在のチェックアウトを直接レビューする。head が現在の HEAD と違う場合のみ switch 提案 or scratch 縮退で対応し、worktree で回避しない (diff-review「head 解決フロー」。head が作業ツリー基準になった今、別ツリーで commit 内容を見せる意味がない) |
 | mode=pr | `git worktree add --detach <path> <head>` (path = `stdpath("data")/review.nvim/worktrees/<repo-hash>/<slug>`)。**`--detach` を使うので branch checkout と競合しない**。slug は repo 単位にしか一意でないため `<repo-hash>` 下で分離する (別 repo の同一 slug が同 path で衝突するのを防ぐ) |
-| PR かつ head が fork 由来 (同一 repo に headRefName の branch が無い) | 上記に先立ち `git fetch <remote> refs/pull/<n>/head` で `review-nvim/pr-<n>` ref を作り、それを `<head>` として worktree を作成 |
+| mode=pr の `<head>` | 「PR 解決」手順 2 で用意した `review-nvim/pr-<n>` ref (同一 repo の PR も fork の PR も同じ) |
+| mode=pr で再利用 (自前記録あり + dir 実在 + `git worktree list` に登録済み) | add せずに使う。worktree の HEAD が `<head>` と違えば (`git -C <wt> rev-parse HEAD <head>` で比べる)、clean (git status が空で、配下に未保存バッファなし) なら `git -C <wt> checkout --detach <head>` で移す。未コミット変更か未保存バッファがあれば移さず前の head のまま開き、«the review worktree has local changes, so it stays at <sha> instead of moving to <head> (<sha>). discard them or :Review delete <id> to review the latest head» を WARN 通知する。checkout は変更を新しい head へ持ち越すか衝突で失敗し、どちらも利用者の編集を黙って書き換えるため。sha を読めないときはそのまま使い、checkout の失敗は «cannot move the review worktree to <head>: <stderr 主行>» を WARN 通知して開始は続ける |
 
 作成失敗 (パス衝突) は既存同名ディレクトリを `git worktree prune` で回収試行 → 改善しなければ `E_WORKTREE` 通知で開始を中断。**衝突した残骸が自分の作成分 (`created_by_us=true` の記録あり) でない限り自動削除しない** (INV-3)。
 
@@ -35,9 +36,10 @@
 | --- | --- | --- |
 | PR 解決 (`gh api graphql`) | «resolving PR #<n>...» | `:Review pr` |
 | base の fetch | «fetching <remote>/<baseRefName>...» | base だけが古い |
-| fork head の fetch | «fetching the head of PR #<n> from <remote>...» | pull ref だけが古い |
+| head の fetch | «fetching the head of PR #<n> from <remote>...» | pull ref だけが古い |
 | まとめた fetch | «fetching the head of PR #<n> and <remote>/<baseRefName>...» | 両方が古い |
 | worktree 作成 | «creating the review worktree...» | mode=pr で `git worktree add` するとき |
+| worktree の更新 | «updating the review worktree...» | 再利用する worktree を `<head>` へ移すとき |
 | 差分取得 | «loading the diff...» | 開始・復元の全モード |
 
 - 同時に走る段階が複数あれば、開始順に `, ` で 1 行に併記する (例 «review.nvim: A, B...»)
@@ -67,7 +69,7 @@
 
 **異常終了からの回復 (起動 scan、persistence-restore の scan を利用)**:
 
-- 記録上 open のセッションについて worktree path の実在を確認。実在して repo の `git worktree list` に載っていればそのまま復元で再利用する (crash 後でも worktree は使える)。記録にあるのにディレクトリが消えていれば worktree=null にして save し、復元時の作成判断 (persistence-restore「復元手順」) で作り直す
+- 記録上 open のセッションについて worktree path の実在を確認。実在して repo の `git worktree list` に載っていれば復元で再利用する (crash 後でも worktree は使える。head への追従は「worktree 作成判断」の再利用行)。記録にあるのにディレクトリが消えていれば worktree=null にして save し、復元時の作成判断 (persistence-restore「復元手順」) で作り直す
 - `created_by_us=true` の worktree のうち、**open で dir 実在 + git 未登録 (孤児の作成分)** を通知付きで掃除する (`git worktree prune` + ディレクトリ削除。記録は nil 化して save = 復元時の再生成へ渡す)。dir を消す全経路の契約どおり、dir 削除より先に worktree 配下を指す loaded バッファを `nvim_buf_delete(force)` で破棄する (ユーザーが `:edit` 等で見ている分も含む — E211 対策)
 - **closed + dir 実在の worktree は scan が触らない** — close は worktree を残す設計なので closed の dir は正常状態。削除は `:Review delete` / セッション一覧 `d` のみ (close 時の削除競合による JSON 復活事故も、closed を掃除しなくなったことで経路ごと消える)
 
@@ -101,5 +103,6 @@
 
 - 単体 (worktree アダプタ): `gh` と `git` を注入スタブに差し替えて、add/remove/fetch 引数の組み立てと結果型分岐 (成功・失敗・stderr 整形)
 - 単体 (handlers/pr): PR メタ (remote tip 込み)→remote 選択→base / head の ref と remote tip の照合→古い ref だけの fetch→worktree add→diff(cwd=worktree) の呼び出し順と、照合結果ごとの fetch の有無 (なし / base のみ / head のみ / まとめて 1 回)、fetch・worktree 作成失敗時の中断分岐、段階別の過渡メッセージの並び。判断表の branch 行が「常に作らない」に変わったことの回帰 (従来「dirty なら作る」を期待する test は新契約の test に置換 — 検出能力ゼロの常時 PASS test にしない)
+- 単体 (worktree 再利用の head 追従): HEAD と `<head>` が同じなら何もしない / 違って clean なら checkout --detach / 未コミット変更か未保存バッファがあれば移さず WARN / sha を読めなければそのまま使う
 - 単体 (close フロー): tab 消滅・extmark 残骸 0・modified ユーザーバッファ保持・**close は worktree を残す (remove / status / force 確認を一切呼ばない)**。delete フロー: status → (dirty なら) --force 確認 → remove → 失敗時 prune + dir 削除の順序
 - E2E (golden path、gh スタブ + 実 git): gh スタブは `api graphql` に fixture JSON を返し、その tip には fixture repo の実 sha を埋める (clone 直後の base は最新で fetch を省き、未取得の pull ref だけを fetch する状態)。fixture repo で `feature` に対する `:Review pr` → worktree 作成・専有 tab・**tab cwd==worktree・head 窓 buf file==worktree 内パス** → head 窓 `c` でコメント → worktree 実ファイルへ編集 `:w` → ±カウント・窓 diff 反映 (diffupdate) → `o` で前行儀 tab に worktree 基準パスの実ファイル → close → **status=closed で worktree dir は残る (keep。ref も残る)**・tab 消滅 → 別プロセス scan 無通知 (closed は keep)。もう 1 本、異常終了模擬 (close せずプロセス終了 → 次起動 scan 回収 → 復元で worktree 再生成)。worktree を編集して dirty のまま delete → --force 確認の cancel / approve を実 git で pin
