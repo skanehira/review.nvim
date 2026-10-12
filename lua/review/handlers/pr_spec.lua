@@ -84,12 +84,12 @@ end
 
 -- PR の base は常に remote-tracking ref (pr-worktree.md「PR 解決」手順 3)
 local BASE_FETCH = { 'git', 'fetch', 'origin', '+refs/heads/main:refs/remotes/origin/main' }
-local HEAD_FETCH = { 'git', 'fetch', 'origin', 'refs/pull/7/head:review-nvim/pr-7' }
+local HEAD_FETCH = { 'git', 'fetch', 'origin', '+refs/pull/7/head:review-nvim/pr-7' }
 local BOTH_FETCH = {
   'git',
   'fetch',
   'origin',
-  'refs/pull/7/head:review-nvim/pr-7',
+  '+refs/pull/7/head:review-nvim/pr-7',
   '+refs/heads/main:refs/remotes/origin/main',
 }
 local REV_PARSE_BASE = { 'git', 'rev-parse', '--verify', 'refs/remotes/origin/main' }
@@ -335,7 +335,7 @@ describe('pr-handler fork PR 開始 (refs/pull 解決 + worktree 常時作成)',
         'git',
         'fetch',
         'gitlab',
-        'refs/pull/7/head:review-nvim/pr-7',
+        '+refs/pull/7/head:review-nvim/pr-7',
         '+refs/heads/main:refs/remotes/gitlab/main',
       }, state.git_calls[6])
       assert.same({ 'git', 'diff', 'gitlab/main' }, state.git_calls[8])

@@ -141,12 +141,14 @@ function M.pr_ref(number)
 end
 
 --- cb(result) result.data = 作った ref 名。
---- `git fetch <remote> refs/pull/<n>/head:review-nvim/pr-<n>`
+--- `git fetch <remote> +refs/pull/<n>/head:review-nvim/pr-<n>`。`+` は PR head の
+--- force push (rebase) でも上書きするため。無いと non-fast-forward で拒否され、
+--- 古い ref が残ったまま以後の開始が毎回中断する
 --- (pr-worktree.md「PR 解決」手順 2。remote 選択は handler、失敗は E_REF)。
 function M.fetch_pull(opts, cb)
   local ref_name = M.pr_ref(opts.number)
   run(
-    { 'fetch', opts.remote, ('refs/pull/%s/head:%s'):format(tostring(opts.number), ref_name) },
+    { 'fetch', opts.remote, ('+refs/pull/%s/head:%s'):format(tostring(opts.number), ref_name) },
     opts,
     function(res)
       if not res.ok then
@@ -185,7 +187,7 @@ function M.fetch_pull_and_branch(opts, cb)
     {
       'fetch',
       opts.remote,
-      ('refs/pull/%s/head:%s'):format(tostring(opts.number), ref_name),
+      ('+refs/pull/%s/head:%s'):format(tostring(opts.number), ref_name),
       ('+refs/heads/%s:refs/remotes/%s/%s'):format(opts.branch, opts.remote, opts.branch),
     },
     opts,

@@ -264,7 +264,7 @@ describe('git/ref fetch_pull / delete_ref / remotes (pr-worktree fork 経路)', 
   restore_after_each()
 
   it(
-    'fetch_pull は `git fetch <remote> refs/pull/<n>/head:review-nvim/pr-<n>` を実行し data に ref 名を返す',
+    'fetch_pull は `git fetch <remote> +refs/pull/<n>/head:review-nvim/pr-<n>` を実行し data に ref 名を返す',
     function()
       local captured = {}
       cli._set_system(stub_system(captured))
@@ -278,7 +278,7 @@ describe('git/ref fetch_pull / delete_ref / remotes (pr-worktree fork 経路)', 
         'git',
         'fetch',
         'origin',
-        'refs/pull/7/head:review-nvim/pr-7',
+        '+refs/pull/7/head:review-nvim/pr-7',
       }, captured.cmd)
       assert.equals('/repo', captured.opts.cwd)
       captured.on_exit { code = 0, stdout = '', stderr = '' }
@@ -391,7 +391,7 @@ describe('git/ref fetch_pull / delete_ref / remotes (pr-worktree fork 経路)', 
         'git',
         'fetch',
         'origin',
-        'refs/pull/7/head:review-nvim/pr-7',
+        '+refs/pull/7/head:review-nvim/pr-7',
         '+refs/heads/main:refs/remotes/origin/main',
       }, captured.cmd)
       assert.equals('/repo', captured.opts.cwd)
@@ -611,6 +611,58 @@ describe('git/ref fetch_pull / delete_ref / remotes (pr-worktree fork 経路)', 
         { topic_sha, remote_base },
         { git { 'rev-parse', 'review-nvim/pr-7' }, git { 'rev-parse', 'origin/main' } }
       )
+    end
+  )
+  it(
+    'fetch_pull は PR head が force push されても pull ref を新しい head に更新する',
+    function()
+      local dir = vim.fn.tempname()
+      vim.fn.mkdir(dir, 'p')
+      table.insert(created_dirs, dir)
+      vim
+        .system({ 'git', 'init', '-q', '--bare', '-b', 'main', 'origin' }, { cwd = dir })
+        :wait(10000)
+      vim.system({ 'git', 'clone', '-q', 'origin', 'work' }, { cwd = dir }):wait(10000)
+      local work = vim.fs.joinpath(dir, 'work')
+      local git = function(args)
+        local out =
+          vim.system(vim.list_extend({ 'git' }, args), { cwd = work, text = true }):wait(10000)
+        assert.equals(0, out.code, out.stderr)
+        return (out.stdout:gsub('%s+$', ''))
+      end
+      local write = function(text)
+        local f = io.open(vim.fs.joinpath(work, 'a.txt'), 'w')
+        f:write(text)
+        f:close()
+      end
+      git { 'config', 'user.email', 'spec@example.com' }
+      git { 'config', 'user.name', 'spec' }
+      write 'a\n'
+      git { 'add', '-A' }
+      git { 'commit', '-qm', 'base' }
+      git { 'push', '-q', 'origin', 'main' }
+      git { 'checkout', '-qb', 'topic' }
+      write 'topic\n'
+      git { 'commit', '-qam', 'topic' }
+      git { 'push', '-q', 'origin', 'topic:refs/pull/7/head' }
+      assert.equals(
+        true,
+        await_result(function(cb)
+          ref.fetch_pull({ remote = 'origin', number = 7, cwd = work }, cb)
+        end).ok
+      )
+      -- PR の作者が rebase して force push した状態 (新しい head は旧 head の子孫でない)
+      write 'rewritten\n'
+      git { 'commit', '-q', '--amend', '-am', 'topic rewritten' }
+      git { 'push', '-q', '-f', 'origin', 'topic:refs/pull/7/head' }
+      local rewritten = git { 'rev-parse', 'HEAD' }
+
+      local received = await_result(function(cb)
+        ref.fetch_pull({ remote = 'origin', number = 7, cwd = work }, cb)
+      end)
+
+      assert.same({ __class = 'review.Result', ok = true, data = 'review-nvim/pr-7' }, received)
+      assert.equals(rewritten, git { 'rev-parse', 'review-nvim/pr-7' })
     end
   )
 end)
